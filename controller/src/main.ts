@@ -1,0 +1,23 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { serveApi } from "./api.ts";
+import { openLog } from "./log.ts";
+import { startRuntime } from "./runtime.ts";
+
+const home = process.env.FLEET_HOME ?? join(homedir(), ".agent-fleet");
+const port = Number(process.env.FLEET_PORT ?? 7700);
+
+const loadToken = (path: string): string => {
+  if (existsSync(path)) return readFileSync(path, "utf8").trim();
+  const token = crypto.randomUUID();
+  writeFileSync(path, token, { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return token;
+};
+
+mkdirSync(home, { recursive: true });
+const token = loadToken(join(home, "token"));
+const runtime = startRuntime(openLog(join(home, "controller.db")));
+serveApi(runtime, { port, token });
+console.log(`controller listening on http://127.0.0.1:${port} (home ${home})`);
