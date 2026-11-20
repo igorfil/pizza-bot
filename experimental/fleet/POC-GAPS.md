@@ -9,7 +9,7 @@ What the POC skips or does the simplest way. Each item needs a real decision bef
 - One SQLite task store per runner shared by all its agents; `ListTasks` on any agent returns every agent's tasks.
 - No input-required / approval events in the agent contract yet.
 - Bedrock calls are one-shot `Converse`, not streamed; the UI shows no partial output while the model writes.
-- Model output may contain markdown; the TUI strips `**` and nothing else.
+- Model output may contain markdown; the Fleet page renders it with pizza-bot's Streamdown, the raw `metrics` artifact is shown as plain text.
 
 ## Definitions not written down yet
 - Domain types (Runner, Task, Artifact) exist only in `controller/src/types.ts`. No schema / OpenAPI.
@@ -17,7 +17,7 @@ What the POC skips or does the simplest way. Each item needs a real decision bef
 - State transition table per Msg is only in `update.ts`.
 - Backoff and timing constants are hardcoded (tick 2s, health 15s, backoff 2^n capped at 30s, resync 30s, wake gap 10s).
 - Controller API: no error schema, no OpenAPI, no generated clients.
-- CLI not built; TUI talks to the API directly.
+- No CLI; the Fleet page is the only UI and talks to the API directly.
 
 ## Behaviour simplified
 - Msg log: every Msg including `Tick` is logged, no snapshots, no compaction. Replay reads the full log.
@@ -35,9 +35,8 @@ What the POC skips or does the simplest way. Each item needs a real decision bef
 - `dev.sh` hardcodes the Controller token `fleet-dev-token` and the local runner token `localtoken`; the pizza-bot screen defaults to the same dev token. Fine for a laptop POC, not for anything shared.
 
 ## UI simplified
-- The pizza-bot screen and the TUI each keep their own copy of the Model types; no shared package or generated client.
+- The Fleet page keeps its own copy of the Model types (`fleet-types.ts`); no shared package or generated client, by design of the import boundary.
 - The pizza-bot screen gets the full Model on every change and re-renders; no patches.
-- The TUI has no Inbox or Chats views; only the pizza-bot screen does.
 - Inbox cards have generic actions only (Ok got it, Continue in chat, Run again). Agent-specific actions from the mockups ("ok, merge", "Open in browser") need a way for agents to declare actions (e.g. artifact metadata); not designed.
 - `[evals]` on agent cards is a disabled stub. "Disabled" agents from the mockup map to unreachable runners; there is no enable/disable intent.
 

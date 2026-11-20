@@ -89,6 +89,26 @@ frontend consumes them through the `@langchain/langgraph-sdk`
   `resolveSkillSubagents` and seeded into run state by `buildSkillSeed` /
   `withSkillSeed` (`runtime-langgraph/src/index.ts`).
 
+## Experimental fleet backend
+
+This checkout (pizza-bot-experimental) has a second, independent backend in
+`experimental/fleet/` ([its README](experimental/fleet/README.md)): a Controller
+(`@pizza-bot/fleet-controller`, Node, TEA-style pure `update` + SQLite Msg log)
+that drives agents on local and remote runners over A2A, a Rust runner that hosts
+agent folders as subprocesses, and Python agents. Its UI is the Fleet page,
+`apps/web/src/components/fleet/`.
+
+- **Boundary**: `apps/*`, `packages/*` and `plugins/*` never import
+  `experimental/` or `@pizza-bot/fleet-controller`; the Controller imports no
+  `@pizza-bot/*` package. The Fleet page reaches the Controller over HTTP/SSE only
+  (`fleet-client.ts`). Both directions are ESLint `no-restricted-imports` errors.
+- **Running**: `npm run dev:both` starts the api-server, the fleet (Controller
+  :7700, laptop runner :9301, EC2 tunnel :9471) and Vite :5173. The fleet
+  Controller is in the workspace, so the root build/typecheck/lint/test cover it;
+  the runner (`cargo test` in `experimental/fleet/runner`) and agents are outside npm.
+- **Docs** for the fleet stay under `experimental/fleet/` (README, SPEC,
+  POC-GAPS, docs/); don't fold them into `docs/`.
+
 ## Testing
 
 - **`npm test` is the supported entrypoint** — it runs the license-generator

@@ -134,11 +134,29 @@ packages/    core | runtime-langgraph | inference-providers | plugin-api | plugi
 plugins/     bundled Plugin packages and their packaging workspace
 skills/      optional Built-in Agent Skills
 tests/       LangGraph compatibility and protocol conformance
+experimental/fleet/   second backend (experimental): Controller | runner (Rust) | agents | deploy
 ```
 
 The production graph engine is isolated to `packages/runtime-langgraph`;
 frontends consume protocol projections rather than importing runtime or model
 bindings.
+
+## Experimental: the Fleet backend
+
+This repo (pizza-bot-experimental) runs a second backend next to the api-server.
+The **fleet** dispatches work to agents on this machine and on remote runners
+(EC2 over an SSH-over-SSM tunnel) through A2A, keeps going while the laptop
+sleeps, and shows results on the **Fleet** page of the web app: an Inbox of
+agent results, Chats with the Controller's LLM, and an Agents monitor with
+daily schedules.
+
+```bash
+npm run dev:both   # api-server, fleet Controller + laptop runner + EC2 tunnel, web on :5173
+```
+
+The two backends share no code: the fleet is reached only over HTTP, and ESLint
+blocks imports across the boundary. See
+[experimental/fleet/README.md](experimental/fleet/README.md).
 
 ## Documentation
 

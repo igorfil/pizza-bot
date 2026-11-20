@@ -259,10 +259,10 @@ Goal: prove the core loop works, not build the product. Gaps deliberately skippe
 Scope:
 - 1 Controller on the laptop.
 - 2 Runners: one local (laptop), one remote (EC2).
-- 2 UIs: a TUI, and an Agent Fleet screen in pizza-bot (`docs/PIZZA-BOT.md`).
+- 1 UI: the Fleet page in pizza-bot's web app (`docs/UI.md`). (A TUI was built first and dropped when the fleet moved into pizza-bot-experimental.)
 
 Stack:
-- Controller + TUI: Bun + TypeScript, `@a2a-js/sdk` client (A2A v1.0, JSON-RPC binding), `bun:sqlite` Msg log.
+- Controller: Node 24 + TypeScript in the pizza-bot npm workspace (Hono, better-sqlite3 Msg log), `@a2a-js/sdk` client (A2A v1.0, JSON-RPC binding). Built on Bun first, ported to Node to join the monorepo.
 - Runner: Rust, official `a2a-rs` SDK (`a2a-lf`, `a2a-server-lf`), SQLite task store (`rusqlite`), single static binary.
 - Remote: EC2 instance, Runner on 127.0.0.1, reached over SSH-over-SSM tunnel (no inbound ports), bearer token. See `docs/DEPLOY.md`.
 
@@ -272,7 +272,7 @@ Agents (runner picks one with `RUNNER_AGENT`):
 - `fake`: prompt `steps=N every=S <text>`, no LLM. Kept for disconnect tests.
 
 Pass criteria:
-1. Dispatch a task to each Runner from the TUI. Both show live progress.
+1. Dispatch a task to each Runner from a UI. Both show live progress.
 2. Kill the Controller (or sleep the laptop) mid-task. Runners keep going.
 3. Restart the Controller (or wake). Both tasks catch up to the correct state and artifact without user action.
 4. Stop a Runner mid-task. Controller marks it `unreachable`, retries with backoff, recovers when the Runner returns.

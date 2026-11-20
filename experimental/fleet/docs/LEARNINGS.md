@@ -54,7 +54,6 @@ was verified.
   (`eventsource-parser`) instead.
 - Browsers always send `Origin`; the Controller allowlists origins via `FLEET_ALLOWED_ORIGINS` and
   answers preflight. Electron packaged apps load from `file://` (origin `null`).
-- TUI: in raw mode `\n` doesn't return the carriage; render each row with an absolute cursor move.
 - Keep `view` pure: screens can then be rendered from the live Model in a script, which made layout
   checks possible without a terminal.
 - Don't edit `dev.sh` while it runs: bash reads scripts incrementally, so an edit shifts offsets and
@@ -117,3 +116,23 @@ was verified.
   `().serve(TokioChildProcess::new(Command::new(cmd))?)`, then
   `call_tool(CallToolRequestParams::new(name).with_arguments(map))`. Result content is
   `Vec<ContentBlock>` (`ContentBlock::Text(t)`), errors flagged by `is_error`.
+
+## Port from Bun to Node (joining pizza-bot's workspace)
+- `bun:sqlite` → `better-sqlite3` (what `packages/storage` uses). `stmt.get()` returns `undefined`
+  for no row, not `null`; an `exists !== null` check silently became always-true. The Msg log Bun
+  wrote opened and replayed unchanged under Node (verified: same runners, agents, tasks, schedule).
+- `Bun.serve` → Hono + `@hono/node-server` (what `apps/api-server` uses). Exporting the Hono app
+  separately from `serve()` lets tests call `app.request()` with no port. `streamSSE` writes
+  `data:` before `id:` (valid SSE; don't assert field order).
+- `bun test` → Vitest; `bun:test`'s `describe/test/expect` were drop-in.
+- The repo's `tsconfig.base.json` has `exactOptionalPropertyTypes`: an optional field assigned
+  `undefined` fails to compile (`Task.trigger` became required).
+- Imports use `.js` specifiers under NodeNext, as in the rest of the repo.
+- Root `npm test` can fail once under load on `@pizza-bot/runtime-langgraph` (passes alone); seen on
+  the stock upstream checkout before any fleet change, so not caused by the fleet.
+- The 07:30 brief failed overnight with `KeyError: 'content'`: after Midway expired, the Outlook MCP
+  returned `{"success": true}` with no `content` instead of a tool error. The agent now reports it as
+  a Midway problem.
+- With `npm run dev:both` running, root `npm test` can time out the existing
+  `apps/web/.../streamdown-plugins.test.tsx` (5s timeout under CPU load). Passes with the dev stack
+  stopped (23/23 tasks green) and in isolation.

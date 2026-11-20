@@ -1,37 +1,13 @@
-# pizza-bot: Agent Fleet screen
+# The Fleet page
 
-A UI client for this fleet, added as a new screen in pizza-bot's web app (also loaded by its
-Electron shell). It is a view of the Controller, like the TUI: same Model, same intents.
+The Fleet backend's UI: a page in pizza-bot's web app, `apps/web/src/components/fleet/` (the
+Electron shell loads the same app). It is a view of the Controller: it renders the Controller's
+Model and sends it intents; nothing else.
 
-## Where it lives
-
-| | |
-|---|---|
-| Repo | `~/dev/pizza-bot` |
-| Branch | `feat/agent-fleet-screen`, from `main` at `bb9ce39` (local `main` was behind `origin/main`) |
-| Worktree | `~/dev/pizza-bot/.worktrees/agent-fleet-screen` (the repo's rule: one worktree per branch) |
-| Status | uncommitted, not pushed |
-| Full change | [`integrations/pizza-bot/agent-fleet-screen.patch`](../integrations/pizza-bot/agent-fleet-screen.patch) (14 files; applies cleanly to `bb9ce39` with `git apply`) |
-
-## How to run it
-
-```bash
-# terminal 1, this repo
-./dev.sh
-
-# terminal 2, the pizza-bot worktree
-./scripts/dev-fleet.sh       # pizza-bot api-server :8080 + Vite :5173
-```
-
-Open http://localhost:5173 and click **Agent Fleet** in the left rail. It connects with no setup:
-the screen defaults to `http://127.0.0.1:7700` with token `fleet-dev-token`, which `dev.sh` writes,
-and `dev.sh` allows the origins `http://localhost:5173` and `http://localhost:5273` (the Electron dev
-app from pizza-bot's `npm run dev`).
-
-`dev-fleet.sh` runs pizza-bot's api-server too, because the rest of the app (settings, status,
-threads) needs it; without it Vite logs `http proxy error … ECONNREFUSED` for `/settings`, `/status`
-and others. Its data goes to `/tmp/pizza-bot-fleet-dev` (override with `PIZZA_DATA_ROOT`), so tests
-don't touch real pizza-bot data.
+Run it with `npm run dev:both` from the repo root and open **Fleet** in the left rail. It connects
+with no setup: it defaults to `http://127.0.0.1:7700` with token `fleet-dev-token` (written by
+`dev:both` and `dev.sh`), and the Controller allows the origins `http://localhost:5173` (Vite) and
+`http://localhost:5273` (the Electron dev app from `npm run dev`).
 
 ## What the screen does
 
@@ -115,14 +91,14 @@ New, all in `apps/web/src/components/fleet/`:
 | `FleetScreen.tsx` | container: hook + chooses connect form or hub |
 | `fleet-view-model.test.ts`, `FleetModule.test.tsx` | 50 tests (`renderToStaticMarkup`, the repo's no-DOM pattern) |
 
-Plus `scripts/dev-fleet.sh` (test launcher).
+Plus `scripts/dev-both.mjs` (`npm run dev:both`), which starts both backends and the web app.
 
 Changed:
 
 | File | Change |
 |---|---|
 | `admin-visibility.ts` | `"fleet"` added to `AppView` |
-| `lexicon.ts` | `fleetSection: "Agent Fleet"` |
+| `lexicon.ts` | `fleetSection: "Fleet"` |
 | `components/AppNavigation.tsx` | `fleetDestination` (lucide `Network` icon) after MCP / Memories / Automations on desktop; under "More" on mobile |
 | `App.tsx` | `view === "fleet"` branch rendering `<FleetScreen />` in a `module-hub` |
 | `styles.css` | `fleet-*` classes (~150 lines) before the mobile breakpoint block; reuses `.dot-*`, `.field*`, `.btn-*`, `.module-tabs` |
@@ -132,31 +108,14 @@ Changed:
 - `apps/web` must not import a runtime or model binding; the fleet code only uses `fetch`.
 - Strings go in `lexicon.ts`; icons from `lucide-react`; toasts via `useAppToast`.
 - Tests: Vitest, `renderToStaticMarkup`, no testing-library/jsdom.
-- Branch `<type>/<kebab>` in `.worktrees/<kebab>`; `npm install` + `npm run build` in a new worktree
-  (imports of `@pizza-bot/*` resolve to `dist/`). Don't push or merge unless asked.
-- Don't add files under pizza-bot's `docs/`.
+- Don't add files under pizza-bot's `docs/`; fleet docs live in `experimental/fleet/`.
+- `apps/web` never imports `experimental/` (ESLint `no-restricted-imports`).
 - No CSP in the web app or Electron, so fetches to `127.0.0.1:7700` aren't blocked; CORS is the only
   gate, handled by the Controller's origin allowlist.
 
 ## Verified
-- `npx tsc --noEmit -p apps/web/tsconfig.json` clean; `npx eslint` clean on changed files.
-- `npx vitest run --dir apps/web`: 379 tests pass (47 fleet).
-- Playwright against the running stack (zero console errors):
-  1. Agents → ec2 card shows "On EC2 us-west-2" → Run → topic "tacos".
-  2. Inbox → card "Topic: tacos" on top with the 5 jokes.
-  3. Follow-up "Which of these is the best one?" → switches to Chats → Haiku answers with the run as
-     context.
-  4. New chat → "Say hello in exactly five words." → "Hello there, how are you?".
-  5. Inbox → Ok, got it → count 15 → 14, card gone.
-
-## Re-applying elsewhere
-
-```bash
-cd ~/dev/pizza-bot
-git worktree add .worktrees/agent-fleet-screen -b feat/agent-fleet-screen main
-cd .worktrees/agent-fleet-screen
-git apply ~/dev/tmp-projects/agent-fleet/integrations/pizza-bot/agent-fleet-screen.patch
-npm install && npm run build
-```
-
-If `main` has moved, use `git apply -3` and resolve conflicts in `App.tsx` / `AppNavigation.tsx`.
+- Repo-wide `npm run build && npm run typecheck && npm run lint && npm test` with the fleet in the
+  workspace; `apps/web` 386 tests (54 fleet).
+- Playwright against `npm run dev:both` (zero console errors): Fleet → Agents shows both runners
+  healthy with their agents and the 07:30 schedule → Dad jokes "monorepos" → Inbox card with the
+  jokes → follow-up in chat answered with the run as context → Ok, got it clears the card.

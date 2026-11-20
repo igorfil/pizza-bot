@@ -49,6 +49,40 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
   },
   {
+    // Two backends side by side: the fleet talks to pizza-bot only over HTTP, never through imports.
+    files: ["apps/{api-server,cli,agent-daemon,desktop-shell}/**/*.{ts,mjs,js}", "packages/**/*.{ts,mjs}", "plugins/**/*.{js,mjs,ts}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@pizza-bot/fleet-controller", "@pizza-bot/fleet-controller/*", "**/experimental/**"],
+              message: "experimental/fleet is a separate backend reached over HTTP. Don't import it. See AGENTS.md 'Experimental fleet backend'.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["experimental/fleet/controller/**/*.ts"],
+    languageOptions: { globals: { ...globals.node } },
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@pizza-bot/*", "../../../*", "../../../../*"],
+              message: "The fleet Controller stays independent of pizza-bot packages; share over HTTP, not imports. See AGENTS.md 'Experimental fleet backend'.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The frontend may use transport SDKs but not runtime engines or model bindings.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     ignores: ["**/*.test.ts", "**/*.test.tsx"],
@@ -66,6 +100,10 @@ export default tseslint.config(
               ],
               message:
                 "The frontend speaks the wire only. It MAY import @langchain/langgraph-sdk (the transport), but NOT the runtime graph engine (deepagents / @langchain/langgraph core) or a model binding — those stay behind the api-server. See AGENTS.md 'Layering discipline'.",
+            },
+            {
+              group: ["@pizza-bot/fleet-controller", "@pizza-bot/fleet-controller/*", "**/experimental/**"],
+              message: "The Fleet page reaches the fleet Controller over HTTP/SSE (fleet-client.ts), never by import.",
             },
           ],
         },

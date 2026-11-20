@@ -35,6 +35,7 @@
     "browser:install": "node plugins/playwright-mcp/install-browser.mjs",
     "predev": "npm run browser:install",
     "dev": "node scripts/dev.mjs",
+    "dev:both": "node scripts/dev-both.mjs",
     "shell": "npm start -w @pizza-bot/cli --",
     "desktop:package": "npm run package -w @pizza-bot/desktop-shell --",
     "desktop:make": "npm run make -w @pizza-bot/desktop-shell --",

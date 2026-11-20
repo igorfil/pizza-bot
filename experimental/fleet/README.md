@@ -1,31 +1,38 @@
-# agent-fleet
+# Fleet (experimental backend)
 
-A proof of concept for orchestrating, observing and controlling AI agents that run on other machines.
-A headless **Controller** on the laptop talks to **Runners** over A2A. UIs (a TUI, and an *Agent Fleet*
-screen in pizza-bot) are thin views of the Controller.
+The second backend inside pizza-bot-experimental. A headless **Controller** on the laptop talks to
+**Runners** over A2A; runners host **agents** (folders in `agents/`) on the laptop and on EC2. The
+**Fleet** page in pizza-bot's web app (`apps/web/src/components/fleet/`) is a view of the Controller.
+It runs next to pizza-bot's own api-server; the two share nothing but the web app.
 
 Agents keep working while the laptop sleeps or the Controller is down; the Controller catches up when
 it comes back.
 
 - Design and decisions: [SPEC.md](SPEC.md) (section 14a is the POC scope)
 - What the POC skips: [POC-GAPS.md](POC-GAPS.md)
+- Agent contract: [agents/README.md](agents/README.md)
 - EC2 and AWS details: [docs/DEPLOY.md](docs/DEPLOY.md)
+- The Fleet page: [docs/UI.md](docs/UI.md)
 - Verified facts and gotchas: [docs/LEARNINGS.md](docs/LEARNINGS.md)
-- The pizza-bot UI client: [docs/PIZZA-BOT.md](docs/PIZZA-BOT.md)
 
 ## Quick start
 
+From the repo root:
+
 ```bash
-./dev.sh                       # Controller :7700, laptop runner :9301 (agents/), tunnel to EC2 :9471
-cd tui && bun src/main.ts      # terminal UI
+npm install && npm run build      # once
+npm run dev:both                  # api-server :8080, fleet Controller :7700, laptop runner :9301,
+                                  # EC2 tunnel :9471, web :5173 — open the Fleet page in the rail
 ```
 
-`dev.sh` writes the fixed dev token `fleet-dev-token` to `~/.agent-fleet/token`, so every UI connects
-with no setup. Ctrl-C stops everything it started. The pizza-bot screen is covered in
-[docs/PIZZA-BOT.md](docs/PIZZA-BOT.md).
+`dev:both` (`scripts/dev-both.mjs`) writes the fixed dev token `fleet-dev-token` to
+`~/.agent-fleet/token`, which the Fleet page uses by default, and builds the runner with cargo the
+first time. `FLEET_EC2_INSTANCE=""` skips the tunnel. Ctrl-C stops everything.
 
-First run only: register the runners (the Controller remembers them in its Msg log). In the TUI press
-`a`, or:
+Fleet only, without pizza-bot: `experimental/fleet/dev.sh`.
+
+First run only: register the runners (the Controller remembers them in its Msg log). On the Fleet
+page use **Agents → Add runner**, or:
 
 ```bash
 H="authorization: Bearer fleet-dev-token"
@@ -33,12 +40,20 @@ curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r1","type":"AddRunner","p
 curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r2","type":"AddRunner","payload":{"name":"ec2","url":"http://127.0.0.1:9471","token":"<EC2 runner token>"}}'
 ```
 
+## Boundary with pizza-bot
+
+- Nothing under `apps/` or `packages/` imports `experimental/`, and the Controller imports no
+  `@pizza-bot/*` package. ESLint enforces both (`no-restricted-imports` in `eslint.config.js`).
+- The Fleet page talks to the Controller over HTTP/SSE only (`fleet-client.ts`).
+- The Controller is an npm workspace (`@pizza-bot/fleet-controller`), so `npm run build`,
+  `typecheck`, `lint` and `test` cover it. The runner (Rust) and agents (Python) are outside npm.
+
 ## The system
 
 ```
 ╔════════════════════════════════════ YOUR LAPTOP ════════════════════════════════════╗
 ║                                                                                     ║
-║  ┌─ TUI / pizza-bot screen ───────┐          ┌─ CONTROLLER ── process (daemon) ───┐ ║
+║  ┌─ Fleet page (apps/web) ────────┐          ┌─ CONTROLLER ── process (daemon) ───┐ ║
 ║  │  local UI state only:          │  intent  │  controller/  127.0.0.1:7700       │ ║
 ║  │   selection, input, mode       │  Msgs    │                                    │ ║
 ║  │                                │ ───────▶ │  TEA: Msg → update → Model+Effects │ ║
@@ -72,7 +87,7 @@ sleeps.
 
 | Process | Holds | Can die without losing work? |
 |---|---|---|
-| UI (TUI, pizza-bot) | Screen state only | Yes. Reopen and it reloads the Model. |
+| Fleet page | Screen state only | Yes. Reopen and it reloads the Model. |
 | Controller | Fleet view: runners, runs, results (Msg log) | Yes. Replays its log and catches up from runners. |
 | Runner | Real task state for all its agents (one SQLite) | Finished runs are safe; an in-flight run is marked `failed`. |
 | Agent | Nothing durable; a subprocess per run | Its run fails; the runner reports why. |
@@ -100,26 +115,24 @@ comes back it re-checks runners and re-fetches open runs.
 | Laptop sleeps | EC2 runner (local ones sleep too) | Tick gap > 10s = wake → runners set to `unknown` → re-check → re-fetch |
 | Runner restarts mid-run | Finished runs in its SQLite | The in-flight run is marked `failed` (POC gap) |
 
-## Repo layout
+## Layout
 
 ```
-agent-fleet/
+experimental/fleet/
 ├── SPEC.md · POC-GAPS.md · README.md
-├── dev.sh                 start Controller + laptop runner + tunnel with the dev token
+├── dev.sh                 fleet only: Controller + laptop runner + tunnel with the dev token
 ├── agents/                one folder per agent: agent.toml + code (README.md = the contract)
-├── docs/                  DEPLOY.md · LEARNINGS.md · PIZZA-BOT.md
-├── controller/            Bun + TypeScript
+├── docs/                  DEPLOY.md · LEARNINGS.md · UI.md
+├── controller/            Node 24 + TypeScript, npm workspace @pizza-bot/fleet-controller
 │   ├── src/types.ts       Model, Msg (intent + world), Effect, Sub
 │   ├── src/update.ts      pure update + subscriptions; all timing constants
 │   ├── src/runtime.ts     single update loop, effect executor, stream reconciler
 │   ├── src/a2a.ts         the only file that knows A2A (@a2a-js/sdk)
 │   ├── src/chat.ts        pure chat transitions + system prompt
 │   ├── src/llm.ts         Bedrock Converse for chat (@aws-sdk/client-bedrock-runtime)
-│   ├── src/api.ts         HTTP + SSE API, auth, browser-origin allowlist
-│   ├── src/log.ts         SQLite Msg log (bun:sqlite)
-│   └── test/update.test.ts
-├── tui/                   Bun + TypeScript, no dependencies
-│   └── src/               model · view (pure) · api · main (keys)
+│   ├── src/api.ts         HTTP + SSE API on Hono (@hono/node-server), auth, browser-origin allowlist
+│   ├── src/log.ts         SQLite Msg log (better-sqlite3)
+│   └── src/*.test.ts      update() table tests, API tests (Vitest)
 ├── runner/                Rust, official a2a-rs SDK
 │   ├── src/main.rs        config, routes per agent, agent cards, GET /agents, bearer auth
 │   ├── src/manifest.rs    agents/<id>/agent.toml loader
@@ -264,32 +277,18 @@ re-reporting its agents.
 
 `laptop/morningbrief` is scheduled for 07:30.
 
-## TUI
-
-`cd tui && bun src/main.ts`. Reads `~/.agent-fleet/token`; `FLEET_PORT` and `FLEET_HOME` override.
-
-| Key | Action |
-|---|---|
-| `↑` `↓` / `j` `k` | select agent |
-| `r` or Enter | run the selected agent (rows are `<runner>/<id>`); prompt bar pre-filled with the last input or the manifest example |
-| `c` | cancel the agent's active run (confirm with `y`) |
-| `a` | add runner: `name url token` (its agents appear once it answers) |
-| `q` / Ctrl-C | quit |
-
 ## Testing
 
 ```bash
-cd controller && bun test && bunx tsc --noEmit -p .   # update() table tests + typecheck
-cd tui && bunx tsc --noEmit -p .
-cd runner && cargo test
-cd agents/dadjokes && echo '{"input":"tacos"}' | uv run --quiet agent.py   # any agent, without a runner
+npm test -w @pizza-bot/fleet-controller                 # from the repo root: update() + API tests
+npm run typecheck -w @pizza-bot/fleet-controller
+cd experimental/fleet/runner && cargo test
+cd experimental/fleet/agents/dadjokes && echo '{"input":"tacos"}' | uv run --quiet agent.py   # any agent, without a runner
 ```
-
-`view.ts` in the TUI is pure, so a screen can be rendered from the live Model without a terminal.
 
 ### Reconnect scenarios
 
-The real agents finish in seconds. For mid-run tests use `laptop/slow` (served by `dev.sh`), e.g.
+The real agents finish in seconds. For mid-run tests use `laptop/slow` (served by `dev:both`), e.g.
 input `steps=20 every=3 x`.
 
 1. **Close the UI**: start a run, quit, reopen. The result is there.

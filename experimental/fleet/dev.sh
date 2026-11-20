@@ -1,5 +1,6 @@
 #!/bin/bash
-# Starts the local POC for testing: Controller, the laptop runner (hosting agents/), and the tunnel to the EC2 runner.
+# Fleet only, without pizza-bot: Controller, the laptop runner (hosting agents/), and the tunnel to the EC2 runner.
+# For both backends plus the web app, run `npm run dev:both` from the repo root.
 # Uses a fixed dev token so UIs (TUI, pizza-bot Agent Fleet screen) connect without setup.
 set -u
 cd "$(dirname "$0")"
@@ -27,7 +28,7 @@ PATH="$HOME/.toolbox/bin:$PATH" RUNNER_NAME=laptop RUNNER_TOKEN=localtoken RUNNE
 
 ./deploy/tunnel.sh "$EC2_INSTANCE" &
 
-(cd controller && bun src/main.ts) &
+(cd controller && npx tsx src/main.ts) &
 
 echo "agent-fleet dev: controller http://127.0.0.1:7700  token=$DEV_TOKEN  (Ctrl-C stops everything)"
 wait
