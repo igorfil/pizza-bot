@@ -1925,6 +1925,168 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   }
 }
 
+.fleet-module { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.fleet-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.fleet-link { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dim); }
+.fleet-link-error { font-size: 12px; color: var(--warn); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-running { font-size: 12.5px; color: var(--info); }
+.fleet-state { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.fleet-tone-ok { color: var(--ok); }
+.fleet-tone-bad { color: var(--bad); }
+.fleet-tone-warn { color: var(--warn); }
+.fleet-tone-info { color: var(--info); }
+.fleet-tone-muted, .fleet-muted { color: var(--dim); }
+.fleet-empty { padding: 20px; text-align: center; color: var(--dim); border: 1px dashed var(--border); border-radius: 10px; }
+.fleet-waiting { margin: 24px; }
+.fleet-small-btn { height: 28px; padding: 0 10px; gap: 6px; font-size: 12.5px; }
+.fleet-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: 0 0 auto;
+  padding: 0; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--dim); cursor: pointer;
+}
+.fleet-icon-btn:hover:not(:disabled) { color: var(--text); }
+.fleet-icon-btn:disabled { opacity: .5; cursor: default; }
+.fleet-link-btn {
+  display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: transparent;
+  color: var(--brand); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.fleet-link-btn:disabled { color: var(--dim); opacity: .6; cursor: default; }
+.fleet-artifact-text {
+  margin: 0; padding: 10px 12px; max-height: 300px; overflow: auto;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  border-radius: 8px; background: var(--panel-2); color: var(--dim);
+}
+.fleet-connect { max-width: 560px; padding: 24px; }
+
+/* Inbox: the newest unread result on top, the next ones peeking out behind it. */
+.fleet-inbox { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px 40px; }
+.fleet-inbox-bar { max-width: 760px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.fleet-stack { position: relative; max-width: 760px; margin: 0 auto; padding-bottom: calc(var(--fleet-stack-depth, 0) * 12px); }
+.fleet-stack-shadow {
+  position: absolute; inset: 0; bottom: calc(var(--fleet-stack-depth, 0) * 12px);
+  transform: translate(calc(var(--fleet-stack-i) * 12px), calc(var(--fleet-stack-i) * 12px));
+  border: 1px solid color-mix(in oklch, var(--brand) 35%, var(--border)); border-radius: 14px;
+  background: color-mix(in oklch, var(--brand) 6%, var(--panel)); opacity: calc(1 - var(--fleet-stack-i) * .3);
+}
+.fleet-inbox-card {
+  position: relative; display: flex; flex-direction: column; gap: 14px; padding: 22px 26px;
+  border: 1px solid color-mix(in oklch, var(--brand) 55%, var(--border)); border-radius: 14px;
+  background: color-mix(in oklch, var(--brand) 8%, var(--panel)); box-shadow: 0 10px 30px rgb(0 0 0 / .18);
+}
+.fleet-inbox-card.failed { border-color: color-mix(in oklch, var(--bad) 55%, var(--border)); }
+.fleet-inbox-card-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.fleet-inbox-agent {
+  padding: 2px 8px; border-radius: 999px; font-weight: 600;
+  background: color-mix(in oklch, var(--brand) 18%, transparent); color: var(--brand);
+}
+.fleet-inbox-title { margin: 0; font-size: 20px; font-weight: 650; text-align: center; color: var(--text); }
+.fleet-inbox-body { display: flex; flex-direction: column; gap: 10px; }
+.fleet-inbox-result {
+  padding: 14px 18px; border-radius: 10px; font-size: 14px; line-height: 1.6;
+  border: 1px solid color-mix(in oklch, var(--brand) 30%, var(--border)); background: var(--panel);
+}
+.fleet-inbox-error { margin: 0; padding: 10px 14px; border-radius: 8px; color: var(--bad); background: color-mix(in oklch, var(--bad) 10%, transparent); }
+.fleet-inbox-extra summary { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.fleet-inbox-extra[open] summary { margin-bottom: 6px; }
+.fleet-inbox-ask { display: flex; gap: 8px; }
+.fleet-inbox-ask .field-input { flex: 1; min-width: 0; }
+.fleet-inbox-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.fleet-inbox-actions button { gap: 6px; }
+.fleet-inbox-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--dim); }
+.fleet-inbox-empty-title { margin: 6px 0 0; font-size: 16px; font-weight: 600; color: var(--text); }
+.fleet-inbox-empty p { margin: 0; }
+
+/* Chats: list on the left, conversation on the right. */
+.fleet-chats { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px 1fr; }
+.fleet-chat-list { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; padding: 14px; border-right: 1px solid var(--border); }
+.fleet-chat-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.fleet-new-chat { gap: 6px; justify-content: center; }
+.fleet-chat-list-empty { margin: 8px 4px; font-size: 13px; }
+.fleet-chat-row {
+  width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 9px 10px; text-align: left; cursor: pointer;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); font: inherit;
+}
+.fleet-chat-row:hover { background: var(--panel-2); }
+.fleet-chat-row.active { border-color: var(--border); background: var(--panel-2); }
+.fleet-chat-row-title { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-chat-row-sub { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--dim); }
+.fleet-chat-badge { padding: 0 6px; border-radius: 999px; background: color-mix(in oklch, var(--brand) 18%, transparent); color: var(--brand); }
+.fleet-chat-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.fleet-chat-scroll { flex: 1; min-height: 0; }
+.fleet-chat-content { gap: 16px; padding: 20px 28px; max-width: 860px; margin: 0 auto; width: 100%; }
+.fleet-chat-context summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12.5px; color: var(--brand); }
+.fleet-chat-context[open] summary { margin-bottom: 8px; }
+.fleet-chat-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 60px 0; color: var(--dim); text-align: center; }
+.fleet-bubble-assistant {
+  padding: 12px 16px; border-radius: 12px;
+  border: 1px solid color-mix(in oklch, var(--brand) 40%, var(--border)); background: color-mix(in oklch, var(--brand) 9%, var(--panel));
+}
+.fleet-user-text { white-space: pre-wrap; }
+.fleet-typing { flex-direction: row; gap: 5px; align-items: center; min-height: 20px; }
+.fleet-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); animation: fleet-typing 1.2s infinite ease-in-out; }
+.fleet-typing span:nth-child(2) { animation-delay: .15s; }
+.fleet-typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes fleet-typing { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+.fleet-chat-error { margin: 0; font-size: 13px; color: var(--bad); }
+.fleet-composer { display: flex; gap: 8px; align-items: flex-end; padding: 12px 28px 18px; border-top: 1px solid var(--border); }
+.fleet-composer .field-input { flex: 1; min-width: 0; resize: none; }
+.fleet-composer .btn-primary { gap: 6px; }
+
+/* Agents: a monitor grid of cards. */
+.fleet-agents { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px 40px; }
+.fleet-agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+.fleet-agent-card {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 12px; font-size: 13px;
+  border: 1px solid color-mix(in oklch, var(--ok) 45%, var(--border)); background: color-mix(in oklch, var(--brand) 6%, var(--panel));
+}
+.fleet-agent-card.down { opacity: .55; border-color: var(--border); background: var(--panel); }
+.fleet-agent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fleet-agent-name { margin: 0; font-size: 14px; font-weight: 650; }
+.fleet-agent-where { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12.5px; }
+.fleet-agent-desc { margin: 0; line-height: 1.45; }
+.fleet-agent-down { margin: 0; font-weight: 650; letter-spacing: .02em; color: var(--bad); display: flex; flex-direction: column; gap: 2px; }
+.fleet-agent-down-why { font-weight: 400; letter-spacing: 0; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+.fleet-agent-live { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--info); }
+.fleet-agent-live .fleet-link-btn { margin-left: auto; }
+.fleet-agent-health { margin: 0; font-size: 12.5px; }
+.fleet-strip { display: flex; align-items: center; gap: 3px; min-height: 16px; font-size: 12px; }
+.fleet-strip-cell { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 14px; background: var(--dim); }
+.fleet-strip-ok { background: var(--ok); }
+.fleet-strip-bad { background: var(--bad); }
+.fleet-strip-warn { background: var(--warn); }
+.fleet-strip-muted { background: color-mix(in oklch, var(--dim) 60%, transparent); }
+.fleet-strip-running { background: var(--info); animation: fleet-pulse 1.4s infinite ease-in-out; }
+@keyframes fleet-pulse { 50% { opacity: .4; } }
+.fleet-agent-run { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+.fleet-agent-run-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.fleet-agent-links { display: flex; align-items: center; gap: 10px; padding-top: 4px; }
+.fleet-agent-links-spacer { flex: 1; }
+.fleet-agent-remove { width: 28px; height: 28px; }
+.fleet-inline-runs { list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.fleet-inline-runs li { display: grid; grid-template-columns: 14px 78px 64px 1fr; align-items: center; gap: 6px; }
+.fleet-inline-runs-input { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-agent-add {
+  align-items: center; justify-content: center; min-height: 150px; cursor: pointer; color: var(--dim);
+  border-style: dashed; border-color: var(--border); background: transparent; font: inherit;
+}
+.fleet-agent-add:hover { color: var(--text); border-color: var(--brand); }
+.fleet-agent-form { border-color: var(--border); }
+.fleet-runner { display: flex; flex-direction: column; gap: 10px; margin-bottom: 26px; }
+.fleet-runner-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); }
+.fleet-runner-name { margin: 0; font-size: 14px; font-weight: 650; color: var(--text); }
+.fleet-runner-where { display: inline-flex; align-items: center; gap: 4px; }
+.fleet-runner-error { flex-basis: 100%; color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.fleet-agent-id { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.fleet-agent-schedule { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dim); }
+.fleet-agent-schedule-form { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.fleet-agent-schedule-label { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+.fleet-time { width: auto; padding: 4px 8px; font-size: 12.5px; }
+.fleet-inbox-scheduled { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); }
+@media (max-width: 720px) {
+  .fleet-chats { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .fleet-chat-list { max-height: 180px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .fleet-inbox-card { padding: 16px; }
+}
+
 /* Keep this breakpoint synchronized with MOBILE_BREAKPOINT in use-is-mobile.ts. */
 @media (max-width: 768px) {
   /* iOS zooms focused text-entry controls whose computed font is below 16px. */

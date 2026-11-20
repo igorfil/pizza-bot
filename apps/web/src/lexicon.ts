@@ -3,6 +3,7 @@ export const L = {
   memoriesSection: "Memories",
   skillsSection: "Skills",
   mcpSection: "MCP Servers",
+  fleetSection: "Fleet",
   schedulesSection: "Schedules",
   webhooksSection: "Webhooks",
   automationsSection: "Automations",

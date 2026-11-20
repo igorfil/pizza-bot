@@ -40,6 +40,7 @@ import { composerDraftStore } from "./composer-draft-store.js";
 import { adminVisibility, type AppView } from "./admin-visibility.js";
 import { AppNavigation } from "./components/AppNavigation.js";
 import { LogsModule } from "./components/logs/LogsModule.js";
+import { FleetScreen } from "./components/fleet/FleetScreen.js";
 import { useDesktopConnection } from "./use-desktop-connection.js";
 import { useDesktopNotifications } from "./desktop-notifications.js";
 import { initialThreadId } from "./initial-thread-selection.js";
@@ -456,6 +457,10 @@ export function App() {
                 onDelete={pluginsAdmin.remove}
                 onRefresh={pluginsAdmin.refreshPlugin}
               />
+            </div>
+          ) : view === "fleet" ? (
+            <div className="module-hub">
+              <FleetScreen />
             </div>
           ) : view === "logs" ? (
             <div className="module-hub">

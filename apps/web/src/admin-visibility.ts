@@ -4,6 +4,7 @@ export type AppView =
   | "memories"
   | "skills"
   | "mcp"
+  | "fleet"
   | "plugins"
   | "logs"
   | "settings";

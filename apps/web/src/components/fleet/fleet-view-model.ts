@@ -1,0 +1,108 @@
+import type { FleetAgent, FleetChat, FleetModel, FleetRunner, FleetTask, FleetTaskState } from "./fleet-types.js";
+
+const TERMINAL: ReadonlySet<FleetTaskState> = new Set(["completed", "failed", "canceled", "rejected", "lost"]);
+
+export const isFinished = (task: FleetTask): boolean => TERMINAL.has(task.state);
+
+export const taskAgentKey = (task: FleetTask): string => `${task.runner}/${task.agent}`;
+
+export const agentsOf = (model: FleetModel): FleetAgent[] =>
+  Object.values(model.agents ?? {}).sort((a, b) => a.runner.localeCompare(b.runner) || a.name.localeCompare(b.name));
+
+export const agentOfTask = (model: FleetModel, task: FleetTask): FleetAgent | undefined => model.agents?.[taskAgentKey(task)];
+
+export const agentName = (model: FleetModel, task: FleetTask): string => agentOfTask(model, task)?.name ?? task.agent;
+
+export const runsOf = (model: FleetModel, agentKey: string): FleetTask[] =>
+  Object.values(model.tasks)
+    .filter((t) => taskAgentKey(t) === agentKey)
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+export const activeRun = (model: FleetModel, agentKey: string): FleetTask | undefined =>
+  runsOf(model, agentKey).find((t) => !isFinished(t));
+
+export const runningCount = (model: FleetModel): number =>
+  Object.values(model.tasks).filter((t) => !isFinished(t)).length;
+
+export type Tone = "ok" | "warn" | "bad" | "info" | "muted";
+
+export const runnerTone = (status: FleetRunner["status"]): Tone =>
+  status === "healthy" ? "ok" : status === "unreachable" ? "bad" : "warn";
+
+export const taskTone = (state: FleetTaskState): Tone => {
+  switch (state) {
+    case "completed":
+      return "ok";
+    case "failed":
+    case "rejected":
+    case "lost":
+      return "bad";
+    case "input-required":
+      return "warn";
+    case "canceled":
+      return "muted";
+    default:
+      return "info";
+  }
+};
+
+/** Last prompt wins over the manifest example: re-running with tweaks is the common case. */
+export const defaultInput = (model: FleetModel, agentKey: string): string =>
+  runsOf(model, agentKey)[0]?.prompt ?? model.agents?.[agentKey]?.input?.example ?? "";
+
+/** Newest artifact first, so a final summary shows above the raw data it was built from. */
+export const artifactsNewestFirst = (task: FleetTask) => [...task.artifacts].reverse();
+
+export const ago = (now: number, at: number): string => {
+  const sec = Math.max(0, Math.round((now - at) / 1000));
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 86_400) return `${Math.round(sec / 3600)}h ago`;
+  return `${Math.round(sec / 86_400)}d ago`;
+};
+
+export const duration = (ms: number): string => {
+  const sec = Math.max(0, Math.round(ms / 1000));
+  return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, "0")}s`;
+};
+
+export const runnerHealth = (model: FleetModel, r: FleetRunner): string => {
+  if (r.status === "unreachable") return `retry in ${Math.max(0, Math.round((r.nextCheckAt - model.now) / 1000))}s`;
+  if (r.lastSeenAt === null) return "checking…";
+  return `seen ${ago(model.now, r.lastSeenAt)}`;
+};
+
+/** Finished runs nobody has dealt with yet, newest first (same rule as the Controller). */
+export const inboxOf = (model: FleetModel): FleetTask[] =>
+  Object.values(model.tasks)
+    .filter((t) => isFinished(t) && !t.ackedAt)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+export const chatsOf = (model: FleetModel): FleetChat[] =>
+  Object.values(model.chats ?? {}).sort((a, b) => b.updatedAt - a.updatedAt);
+
+export const inputLabel = (agent: FleetAgent | undefined): string => agent?.input?.label || "Input";
+
+/** Card heading for an inbox item: what was asked, in the agent's own words. */
+export const runTitle = (model: FleetModel, task: FleetTask): string => {
+  const agent = agentOfTask(model, task);
+  if (!task.prompt) return `Your ${(agent?.name ?? task.agent).toLowerCase()}`;
+  return `${inputLabel(agent)}: ${task.prompt}`;
+};
+
+/** Where a runner is; falls back to its host when it doesn't say. */
+export const runnerLocation = (r: FleetRunner): string => {
+  if (r.location) return r.location;
+  try {
+    return new URL(r.url).host;
+  } catch {
+    return r.url;
+  }
+};
+
+export const RUN_STRIP_LENGTH = 10;
+
+/** Oldest-to-newest outcomes of the last runs, for the agent card's history strip. */
+export const runStrip = (model: FleetModel, agentKey: string): FleetTask[] =>
+  runsOf(model, agentKey).slice(0, RUN_STRIP_LENGTH).reverse();

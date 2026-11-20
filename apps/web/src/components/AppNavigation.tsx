@@ -6,6 +6,7 @@ import {
   Cable,
   Inbox,
   MoreHorizontal,
+  Network,
   Pizza,
   Puzzle,
   ScrollText,
@@ -70,6 +71,12 @@ const pluginsDestination: NavDestination = {
   view: "plugins",
   label: L.pluginsSection,
   icon: Puzzle,
+};
+
+const fleetDestination: NavDestination = {
+  view: "fleet",
+  label: L.fleetSection,
+  icon: Network,
 };
 
 const settingsDestination: NavDestination = {
@@ -146,6 +153,7 @@ export function AppNavigation({
     mcpDestination,
     ...(enableMemories ? [memoriesDestination] : []),
     ...(enableAutomations ? [automationsDestination] : []),
+    fleetDestination,
   ];
   const mobileDestinations = [
     inboxDestination,
@@ -155,6 +163,7 @@ export function AppNavigation({
   const mobileFeatureDestinations = [
     ...(enableMemories ? [memoriesDestination] : []),
     ...(enableAutomations ? [automationsDestination] : []),
+    fleetDestination,
   ];
   const utilityDestinations = [
     pluginsDestination,
