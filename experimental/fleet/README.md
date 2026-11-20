@@ -9,6 +9,7 @@ Agents keep working while the laptop sleeps or the Controller is down; the Contr
 it comes back.
 
 - Design and decisions: [SPEC.md](SPEC.md) (section 14a is the POC scope)
+- Components as built, with open questions: [DESIGN.md](DESIGN.md)
 - What the POC skips: [POC-GAPS.md](POC-GAPS.md)
 - Agent contract: [agents/README.md](agents/README.md)
 - EC2 and AWS details: [docs/DEPLOY.md](docs/DEPLOY.md)
