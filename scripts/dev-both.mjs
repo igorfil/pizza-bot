@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { resolveNpmCli } from "./npm-cli.mjs";
-import { FLEET_DEV_TOKEN, fleetProcesses } from "./fleet-dev.mjs";
+import { FLEET_DEV_TOKEN, fleetProcesses, registerLocalRunner } from "./fleet-dev.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -59,7 +59,10 @@ launch("api-server", process.execPath, [resolveNpmCli(), "run", "dev", "-w", "@p
 });
 
 if ("skip" in fleet) console.warn(`[dev-both] fleet skipped: ${fleet.skip}`);
-else for (const p of fleet.processes) launch(p.name, p.command, p.args, p.cwd, p.env);
+else {
+  for (const p of fleet.processes) launch(p.name, p.command, p.args, p.cwd, p.env);
+  void registerLocalRunner();
+}
 
 launch("web", process.execPath, [viteBin, "--port", String(WEB_PORT), "--strictPort"], path.join(root, "apps/web"), {
   PIZZA_API_TARGET: `http://localhost:${API_PORT}`,

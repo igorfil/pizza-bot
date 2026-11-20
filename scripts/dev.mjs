@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { resolveNpmCli } from "./npm-cli.mjs";
-import { FLEET_DEV_TOKEN, fleetProcesses } from "./fleet-dev.mjs";
+import { FLEET_DEV_TOKEN, fleetProcesses, registerLocalRunner } from "./fleet-dev.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -82,5 +82,6 @@ if ("skip" in fleet) {
   console.warn(`[dev] fleet          → skipped: ${fleet.skip}`);
 } else {
   for (const p of fleet.processes) launch(p.name, p.command, p.args, p.cwd, p.env);
+  void registerLocalRunner();
   console.log(`[dev] fleet          → http://127.0.0.1:7700 (token ${FLEET_DEV_TOKEN}); open Fleet in the rail`);
 }

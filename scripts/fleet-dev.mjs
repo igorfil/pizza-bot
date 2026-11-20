@@ -1,4 +1,4 @@
-// The experimental fleet's dev processes (Controller, laptop runner, EC2 tunnel), shared by
+// The experimental fleet's dev processes (Controller, laptop runner), shared by
 // `npm run dev` and `npm run dev:both`. Set PIZZA_FLEET=0 to start pizza-bot without the fleet.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -8,7 +8,8 @@ import { resolveNpmCli } from "./npm-cli.mjs";
 
 // Shared with the Fleet page's default connection (apps/web/src/components/fleet/fleet-client.ts).
 export const FLEET_DEV_TOKEN = "fleet-dev-token";
-const DEFAULT_EC2_INSTANCE = "<instance-id>";
+const CONTROLLER_URL = "http://127.0.0.1:7700";
+const LOCAL_RUNNER = { name: "laptop", url: "http://127.0.0.1:9301", token: "localtoken" };
 
 const cargoCommand = () => {
   const homeCargo = path.join(homedir(), ".cargo", "bin", "cargo");
@@ -55,8 +56,8 @@ export function fleetProcesses({ root, webOrigins }) {
       env: {
         // morningbrief reads Outlook through aws-outlook-mcp, which aim/toolbox installs into ~/.toolbox/bin.
         PATH: `${path.join(homedir(), ".toolbox", "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
-        RUNNER_NAME: "laptop",
-        RUNNER_TOKEN: "localtoken",
+        RUNNER_NAME: LOCAL_RUNNER.name,
+        RUNNER_TOKEN: LOCAL_RUNNER.token,
         RUNNER_LOCATION: "this laptop",
         RUNNER_AGENTS_DIR: "agents",
         RUNNER_AGENTS: "sysreport,morningbrief,slow",
@@ -66,11 +67,31 @@ export function fleetProcesses({ root, webOrigins }) {
       },
     },
   ];
-
-  // Empty string skips the tunnel (e.g. no AWS access); the ec2 runner then shows as unreachable.
-  const ec2 = process.env.FLEET_EC2_INSTANCE ?? DEFAULT_EC2_INSTANCE;
-  if (ec2 && process.platform !== "win32") {
-    processes.push({ name: "fleet-tunnel", command: "bash", args: [path.join(fleet, "deploy", "tunnel.sh"), ec2], cwd: fleet, env: {} });
-  }
   return { processes };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const controllerModel = async () => {
+  const res = await fetch(`${CONTROLLER_URL}/model`, { headers: { authorization: `Bearer ${FLEET_DEV_TOKEN}` } }).catch(() => null);
+  return res?.ok ? (await res.json()).model : null;
+};
+
+/** Registers the local runner on a fresh Controller so the Fleet page isn't empty on first run. */
+export async function registerLocalRunner() {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const model = await controllerModel();
+    if (model) {
+      if (model.runners[LOCAL_RUNNER.name]) return;
+      await fetch(`${CONTROLLER_URL}/msg`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${FLEET_DEV_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ msg_id: `dev:add-runner:${LOCAL_RUNNER.name}`, type: "AddRunner", payload: LOCAL_RUNNER }),
+      }).catch(() => null);
+      console.log(`[fleet] registered the local runner "${LOCAL_RUNNER.name}"`);
+      return;
+    }
+    await sleep(1_000);
+  }
+  console.warn("[fleet] the Controller didn't come up within 60s; local runner not registered");
 }

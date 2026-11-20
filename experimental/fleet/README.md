@@ -22,14 +22,15 @@ From the repo root:
 ```bash
 npm install && npm run build      # once
 npm run dev                       # pizza-bot (Vite :5273 + Electron) and the fleet: Controller :7700,
-                                  # laptop runner :9301, EC2 tunnel :9471. Open Fleet in the rail.
+                                  # laptop runner :9301. Open Fleet in the rail.
 npm run dev:both                  # browser-only: api-server :8080 + the fleet + web :5173
 ```
 
 Both start the fleet through `scripts/fleet-dev.mjs`: it writes the fixed dev token
 `fleet-dev-token` to `~/.agent-fleet/token` (the Fleet page's default), builds the runner with cargo
 the first time, and allows the web origins `:5273` and `:5173`. `PIZZA_FLEET=0` skips the fleet;
-without a Rust toolchain it is skipped with a warning. `FLEET_EC2_INSTANCE=""` skips the tunnel.
+without a Rust toolchain it is skipped with a warning. On a fresh Controller it registers the
+`laptop` runner. The EC2 runner isn't started; run `deploy/tunnel.sh <instance-id>` and add it by hand.
 Ctrl-C stops everything.
 
 Fleet only, without pizza-bot: `experimental/fleet/dev.sh`.
