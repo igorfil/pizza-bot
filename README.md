@@ -151,7 +151,7 @@ agent results, Chats with the Controller's LLM, and an Agents monitor with
 daily schedules.
 
 ```bash
-npm run dev        # Electron app + the fleet (Controller, laptop runner, EC2 tunnel); open Fleet in the rail
+npm run dev        # Electron app + the fleet (Controller, laptop runner); open Fleet in the rail
 npm run dev:both   # same without Electron: api-server :8080 + fleet + browser UI on :5173
 ```
 

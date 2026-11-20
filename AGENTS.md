@@ -102,13 +102,18 @@ agent folders as subprocesses, and Python agents. Its UI is the Fleet page,
   `experimental/` or `@pizza-bot/fleet-controller`; the Controller imports no
   `@pizza-bot/*` package. The Fleet page reaches the Controller over HTTP/SSE only
   (`fleet-client.ts`). Both directions are ESLint `no-restricted-imports` errors.
+- **Building**: `npm run build` builds both backends: turbo builds pizza-bot and
+  the fleet Controller (a workspace package), then `npm run fleet:build`
+  (`scripts/build-fleet.mjs`) runs `cargo build --locked` for the runner and
+  `uv sync --script` for each uv agent. It needs Rust and uv on PATH.
 - **Running**: `npm run dev` also starts the fleet (Controller :7700, laptop
-  runner :9301, EC2 tunnel :9471) next to Vite and Electron
-  (`scripts/fleet-dev.mjs`; `PIZZA_FLEET=0` skips it, and a missing Rust
-  toolchain skips it with a warning). `npm run dev:both` is the browser-only
-  variant (api-server :8080 + fleet + Vite :5173). The fleet
-  Controller is in the workspace, so the root build/typecheck/lint/test cover it;
-  the runner (`cargo test` in `experimental/fleet/runner`) and agents are outside npm.
+  runner :9301) next to Vite and Electron, and registers the laptop runner on a
+  fresh Controller (`scripts/fleet-dev.mjs`; `PIZZA_FLEET=0` skips it, and a
+  missing Rust toolchain skips it with a warning). The EC2 runner is not started;
+  see the fleet README. `npm run dev:both` is the browser-only variant
+  (api-server :8080 + fleet + Vite :5173).
+- **Testing**: the root typecheck/lint/test cover the Controller; the runner
+  (`cargo test` in `experimental/fleet/runner`) and agents are outside npm.
 - **Docs** for the fleet stay under `experimental/fleet/` (README, SPEC,
   POC-GAPS, docs/); don't fold them into `docs/`.
 

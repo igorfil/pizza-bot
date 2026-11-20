@@ -11,8 +11,8 @@ export const FLEET_DEV_TOKEN = "fleet-dev-token";
 const CONTROLLER_URL = "http://127.0.0.1:7700";
 const LOCAL_RUNNER = { name: "laptop", url: "http://127.0.0.1:9301", token: "localtoken" };
 
-const cargoCommand = () => {
-  const homeCargo = path.join(homedir(), ".cargo", "bin", "cargo");
+export const cargoCommand = () => {
+  const homeCargo = path.join(homedir(), ".cargo", "bin", process.platform === "win32" ? "cargo.exe" : "cargo");
   return process.env.CARGO ?? (existsSync(homeCargo) ? homeCargo : "cargo");
 };
 
@@ -26,14 +26,12 @@ export function fleetProcesses({ root, webOrigins }) {
 
   const fleet = path.join(root, "experimental", "fleet");
   const home = process.env.FLEET_HOME ?? path.join(homedir(), ".agent-fleet");
-  const runnerBin = path.join(fleet, "runner", "target", "debug", "fleet-runner");
+  const runnerBin = path.join(fleet, "runner", "target", "debug", process.platform === "win32" ? "fleet-runner.exe" : "fleet-runner");
 
-  if (!existsSync(runnerBin)) {
-    console.log("[fleet] building the runner (cargo build, first run only)…");
-    const built = spawnSync(cargoCommand(), ["build"], { cwd: path.join(fleet, "runner"), stdio: "inherit" });
-    if (built.error || built.status !== 0) {
-      return { skip: `the runner didn't build (${built.error?.message ?? `cargo exited ${built.status}`}); install Rust or set PIZZA_FLEET=0` };
-    }
+  // Incremental, so near-instant when the runner is unchanged; keeps dev off a stale binary.
+  const built = spawnSync(cargoCommand(), ["build"], { cwd: path.join(fleet, "runner"), stdio: "inherit" });
+  if (built.error || built.status !== 0) {
+    return { skip: `the runner didn't build (${built.error?.message ?? `cargo exited ${built.status}`}); install Rust or set PIZZA_FLEET=0` };
   }
 
   mkdirSync(home, { recursive: true });

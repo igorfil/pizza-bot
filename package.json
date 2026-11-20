@@ -28,7 +28,8 @@
     "experimental/fleet/controller"
   ],
   "scripts": {
-    "build": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run build",
+    "build": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run build && npm run fleet:build",
+    "fleet:build": "node scripts/build-fleet.mjs",
     "backend:bundle": "node scripts/build-backend.mjs",
     "backend:smoke": "node scripts/smoke-remote-backend.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
