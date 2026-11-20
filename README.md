@@ -151,8 +151,11 @@ agent results, Chats with the Controller's LLM, and an Agents monitor with
 daily schedules.
 
 ```bash
-npm run dev:both   # api-server, fleet Controller + laptop runner + EC2 tunnel, web on :5173
+npm run dev        # Electron app + the fleet (Controller, laptop runner, EC2 tunnel); open Fleet in the rail
+npm run dev:both   # same without Electron: api-server :8080 + fleet + browser UI on :5173
 ```
+
+`PIZZA_FLEET=0 npm run dev` starts pizza-bot without the fleet.
 
 The two backends share no code: the fleet is reached only over HTTP, and ESLint
 blocks imports across the boundary. See

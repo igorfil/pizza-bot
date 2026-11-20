@@ -1,11 +1,13 @@
 // Dev launcher: Vite web + the Electron shell on a non-default port so a dev
 // build runs beside another instance. The shell forks its own api-server (the
 // packaged app's path), so `npm run dev` exercises the production boot path.
+// The experimental fleet backend starts alongside (scripts/fleet-dev.mjs; PIZZA_FLEET=0 skips it).
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { resolveNpmCli } from "./npm-cli.mjs";
+import { FLEET_DEV_TOKEN, fleetProcesses } from "./fleet-dev.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -24,6 +26,10 @@ const webUrl = `http://localhost:${WEB_PORT}`;
 
 console.log(`[dev] web (Vite)     → ${webUrl}`);
 console.log(`[dev] desktop shell  → loads ${webUrl}, forks its own api-server`);
+
+// Before any child starts: the first run may build the fleet runner, and a failed build must not
+// leave a half-started group behind.
+const fleet = fleetProcesses({ root, webOrigins: [webUrl, "http://localhost:5173"] });
 
 const children = [];
 let shuttingDown = false;
@@ -71,3 +77,10 @@ launch("desktop", process.execPath, [resolveNpmCli(), "run", "dev", "-w", "@pizz
   // The shell loads the UI from this Vite origin and allowlists it for CORS.
   PIZZA_WEB_URL: webUrl,
 });
+
+if ("skip" in fleet) {
+  console.warn(`[dev] fleet          → skipped: ${fleet.skip}`);
+} else {
+  for (const p of fleet.processes) launch(p.name, p.command, p.args, p.cwd, p.env);
+  console.log(`[dev] fleet          → http://127.0.0.1:7700 (token ${FLEET_DEV_TOKEN}); open Fleet in the rail`);
+}

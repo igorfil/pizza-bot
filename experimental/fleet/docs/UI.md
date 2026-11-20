@@ -4,7 +4,8 @@ The Fleet backend's UI: a page in pizza-bot's web app, `apps/web/src/components/
 Electron shell loads the same app). It is a view of the Controller: it renders the Controller's
 Model and sends it intents; nothing else.
 
-Run it with `npm run dev:both` from the repo root and open **Fleet** in the left rail. It connects
+Run it with `npm run dev` (Electron) or `npm run dev:both` (browser) from the repo root and open
+**Fleet** in the left rail. It connects
 with no setup: it defaults to `http://127.0.0.1:7700` with token `fleet-dev-token` (written by
 `dev:both` and `dev.sh`), and the Controller allows the origins `http://localhost:5173` (Vite) and
 `http://localhost:5273` (the Electron dev app from `npm run dev`).
@@ -91,7 +92,8 @@ New, all in `apps/web/src/components/fleet/`:
 | `FleetScreen.tsx` | container: hook + chooses connect form or hub |
 | `fleet-view-model.test.ts`, `FleetModule.test.tsx` | 50 tests (`renderToStaticMarkup`, the repo's no-DOM pattern) |
 
-Plus `scripts/dev-both.mjs` (`npm run dev:both`), which starts both backends and the web app.
+Plus `scripts/fleet-dev.mjs`, which `npm run dev` and `npm run dev:both` (`scripts/dev-both.mjs`)
+use to start the fleet next to pizza-bot.
 
 Changed:
 

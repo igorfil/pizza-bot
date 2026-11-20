@@ -102,8 +102,11 @@ agent folders as subprocesses, and Python agents. Its UI is the Fleet page,
   `experimental/` or `@pizza-bot/fleet-controller`; the Controller imports no
   `@pizza-bot/*` package. The Fleet page reaches the Controller over HTTP/SSE only
   (`fleet-client.ts`). Both directions are ESLint `no-restricted-imports` errors.
-- **Running**: `npm run dev:both` starts the api-server, the fleet (Controller
-  :7700, laptop runner :9301, EC2 tunnel :9471) and Vite :5173. The fleet
+- **Running**: `npm run dev` also starts the fleet (Controller :7700, laptop
+  runner :9301, EC2 tunnel :9471) next to Vite and Electron
+  (`scripts/fleet-dev.mjs`; `PIZZA_FLEET=0` skips it, and a missing Rust
+  toolchain skips it with a warning). `npm run dev:both` is the browser-only
+  variant (api-server :8080 + fleet + Vite :5173). The fleet
   Controller is in the workspace, so the root build/typecheck/lint/test cover it;
   the runner (`cargo test` in `experimental/fleet/runner`) and agents are outside npm.
 - **Docs** for the fleet stay under `experimental/fleet/` (README, SPEC,

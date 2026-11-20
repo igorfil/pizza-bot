@@ -21,13 +21,16 @@ From the repo root:
 
 ```bash
 npm install && npm run build      # once
-npm run dev:both                  # api-server :8080, fleet Controller :7700, laptop runner :9301,
-                                  # EC2 tunnel :9471, web :5173 — open the Fleet page in the rail
+npm run dev                       # pizza-bot (Vite :5273 + Electron) and the fleet: Controller :7700,
+                                  # laptop runner :9301, EC2 tunnel :9471. Open Fleet in the rail.
+npm run dev:both                  # browser-only: api-server :8080 + the fleet + web :5173
 ```
 
-`dev:both` (`scripts/dev-both.mjs`) writes the fixed dev token `fleet-dev-token` to
-`~/.agent-fleet/token`, which the Fleet page uses by default, and builds the runner with cargo the
-first time. `FLEET_EC2_INSTANCE=""` skips the tunnel. Ctrl-C stops everything.
+Both start the fleet through `scripts/fleet-dev.mjs`: it writes the fixed dev token
+`fleet-dev-token` to `~/.agent-fleet/token` (the Fleet page's default), builds the runner with cargo
+the first time, and allows the web origins `:5273` and `:5173`. `PIZZA_FLEET=0` skips the fleet;
+without a Rust toolchain it is skipped with a warning. `FLEET_EC2_INSTANCE=""` skips the tunnel.
+Ctrl-C stops everything.
 
 Fleet only, without pizza-bot: `experimental/fleet/dev.sh`.
 
@@ -288,7 +291,7 @@ cd experimental/fleet/agents/dadjokes && echo '{"input":"tacos"}' | uv run --qui
 
 ### Reconnect scenarios
 
-The real agents finish in seconds. For mid-run tests use `laptop/slow` (served by `dev:both`), e.g.
+The real agents finish in seconds. For mid-run tests use `laptop/slow` (served by `npm run dev`), e.g.
 input `steps=20 every=3 x`.
 
 1. **Close the UI**: start a run, quit, reopen. The result is there.
