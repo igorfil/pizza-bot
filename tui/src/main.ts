@@ -40,7 +40,7 @@ const send = async (type: string, payload: Record<string, string>, success: stri
 const defaultPrompt = (runner: string): string => {
   const app = ui.app;
   if (!app) return "";
-  return tasksOf(app, runner)[0]?.prompt ?? app.runners[runner]?.agent?.examples[0] ?? "";
+  return tasksOf(app, runner)[0]?.prompt ?? app.agents[runner]?.input?.example ?? "";
 };
 
 const quit = () => {
@@ -86,7 +86,7 @@ const onRunKey = (key: string, runner: string, input: string) => {
   if (key === "\x1b") return set({ mode: { kind: "browse" } });
   if (key === "\r") {
     set({ mode: { kind: "browse" } });
-    return send("CreateTask", { runner, prompt: input.trim() }, `Started run on ${runner}.`);
+    return send("CreateTask", { agent: runner, prompt: input.trim() }, `Started ${runner}.`);
   }
   const next = editInput(input, key);
   if (next !== null) set({ mode: { kind: "run", runner, input: next } });
@@ -98,7 +98,7 @@ const onAddKey = (key: string, input: string) => {
     const [name, url, token] = input.trim().split(/\s+/);
     if (!name || !url || !token) return flash("error", "Enter all three: <name> <url> <token>");
     set({ mode: { kind: "browse" } });
-    return send("AddRunner", { name, url, token }, `Added agent ${name}.`);
+    return send("AddRunner", { name, url, token }, `Added runner ${name}.`);
   }
   const next = editInput(input, key);
   if (next !== null) set({ mode: { kind: "add", input: next } });

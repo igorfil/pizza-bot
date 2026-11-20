@@ -1,69 +1,24 @@
-mod bedrock;
-mod dadjokes;
 mod events;
-mod fake;
+mod exec;
+mod manifest;
 mod store;
-mod sysreport;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use a2a::*;
 use a2a_server::agent_card::agent_card_router;
 use a2a_server::jsonrpc::jsonrpc_router;
-use a2a_server::{DefaultRequestHandler, StaticAgentCard, TaskStore};
+use a2a_server::{DefaultRequestHandler, StaticAgentCard};
+use axum::Json;
 use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::Response;
+use axum::routing::get;
+use serde_json::{Value, json};
 
-#[derive(Clone, Copy, Debug)]
-enum AgentKind {
-    Fake,
-    DadJokes,
-    SysReport,
-}
-
-impl AgentKind {
-    fn parse(s: &str) -> Result<Self, String> {
-        match s {
-            "fake" => Ok(Self::Fake),
-            "dadjokes" => Ok(Self::DadJokes),
-            "sysreport" => Ok(Self::SysReport),
-            other => Err(format!("unknown RUNNER_AGENT {other:?} (fake | dadjokes | sysreport)")),
-        }
-    }
-
-    fn default_model(self) -> &'static str {
-        match self {
-            Self::DadJokes => "us.openai.gpt-6.1-terra",
-            _ => "us.anthropic.claude-haiku-5-5",
-        }
-    }
-
-    /// (card description, skill name, skill description = input hint, example input)
-    fn describe(self, model: &str) -> (String, &'static str, &'static str, &'static str) {
-        match self {
-            Self::Fake => (
-                "Fake agent for testing: reports progress N times, then returns a result.".into(),
-                "Fake work",
-                "steps=N every=S <text>",
-                "steps=5 every=2 hello",
-            ),
-            Self::DadJokes => (
-                format!("Writes 5 dad jokes about any topic ({model} on Bedrock)."),
-                "Topic",
-                "what the jokes should be about",
-                "kubernetes",
-            ),
-            Self::SysReport => (
-                format!("Collects CPU, memory and disk usage on this machine and summarizes it ({model} on Bedrock)."),
-                "Focus",
-                "optional question, e.g. is memory ok? (leave empty for a general report)",
-                "anything to worry about?",
-            ),
-        }
-    }
-}
+use manifest::AgentSpec;
 
 struct Config {
     name: String,
@@ -71,9 +26,9 @@ struct Config {
     public_url: String,
     token: String,
     db: String,
-    agent: AgentKind,
-    model: String,
-    script: Option<String>,
+    agents_dir: PathBuf,
+    only: Option<Vec<String>>,
+    location: Option<String>,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -82,48 +37,57 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn load_config() -> Result<Config, String> {
     let bind = env_or("RUNNER_BIND", "127.0.0.1:9000");
-    let agent = AgentKind::parse(&env_or("RUNNER_AGENT", "fake"))?;
     Ok(Config {
         name: env_or("RUNNER_NAME", "runner"),
         public_url: env_or("RUNNER_PUBLIC_URL", &format!("http://{bind}")),
         token: std::env::var("RUNNER_TOKEN").map_err(|_| "RUNNER_TOKEN is required".to_string())?,
         db: env_or("RUNNER_DB", "runner.db"),
-        model: env_or("RUNNER_MODEL", agent.default_model()),
-        script: std::env::var("RUNNER_SCRIPT").ok(),
-        agent,
+        agents_dir: PathBuf::from(env_or("RUNNER_AGENTS_DIR", "agents")),
+        only: std::env::var("RUNNER_AGENTS")
+            .ok()
+            .map(|s| s.split(',').map(|id| id.trim().to_string()).filter(|id| !id.is_empty()).collect()),
+        location: std::env::var("RUNNER_LOCATION").ok().filter(|l| !l.is_empty()),
         bind,
     })
 }
 
-fn agent_card(cfg: &Config) -> AgentCard {
-    let (description, skill_name, skill_description, example) = cfg.agent.describe(&cfg.model);
+fn capabilities() -> AgentCapabilities {
+    AgentCapabilities {
+        streaming: Some(true),
+        push_notifications: Some(false),
+        extensions: None,
+        extended_agent_card: None,
+    }
+}
+
+fn agent_url(cfg: &Config, spec: &AgentSpec) -> String {
+    format!("{}/agents/{}", cfg.public_url, spec.id)
+}
+
+fn agent_card(cfg: &Config, spec: &AgentSpec) -> AgentCard {
     AgentCard {
-        name: cfg.name.clone(),
-        description,
+        name: spec.name.clone(),
+        description: spec.description.clone(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        provider: None,
-        capabilities: AgentCapabilities {
-            streaming: Some(true),
-            push_notifications: Some(false),
-            extensions: None,
-            extended_agent_card: None,
-        },
+        // The Controller shows `organization` as where the agent runs.
+        provider: cfg.location.as_ref().map(|location| AgentProvider {
+            organization: location.clone(),
+            url: cfg.public_url.clone(),
+        }),
+        capabilities: capabilities(),
         skills: vec![AgentSkill {
-            id: format!("{:?}", cfg.agent).to_lowercase(),
-            name: skill_name.to_string(),
-            description: skill_description.to_string(),
+            id: spec.id.clone(),
+            name: spec.input.as_ref().map_or_else(|| spec.name.clone(), |i| i.label.clone()),
+            description: spec.input.as_ref().map(|i| i.hint.clone()).unwrap_or_default(),
             tags: vec![],
-            examples: Some(vec![example.to_string()]),
+            examples: spec.input.as_ref().map(|i| vec![i.example.clone()]),
             input_modes: None,
             output_modes: None,
             security_requirements: None,
         }],
         default_input_modes: vec!["text/plain".to_string()],
         default_output_modes: vec!["text/plain".to_string()],
-        supported_interfaces: vec![AgentInterface::new(
-            format!("{}/jsonrpc", cfg.public_url),
-            TRANSPORT_PROTOCOL_JSONRPC,
-        )],
+        supported_interfaces: vec![AgentInterface::new(format!("{}/jsonrpc", agent_url(cfg, spec)), TRANSPORT_PROTOCOL_JSONRPC)],
         security_schemes: None,
         security_requirements: None,
         documentation_url: None,
@@ -132,25 +96,19 @@ fn agent_card(cfg: &Config) -> AgentCard {
     }
 }
 
-async fn build_handler(cfg: &Config, store: impl TaskStore) -> DefaultRequestHandler {
-    match cfg.agent {
-        AgentKind::Fake => DefaultRequestHandler::new(fake::FakeAgent::default(), store),
-        AgentKind::DadJokes => DefaultRequestHandler::new(
-            dadjokes::DadJokes {
-                bedrock: bedrock::Bedrock::new(cfg.model.clone()).await,
-                canceled: Default::default(),
-            },
-            store,
-        ),
-        AgentKind::SysReport => DefaultRequestHandler::new(
-            sysreport::SysReport {
-                bedrock: bedrock::Bedrock::new(cfg.model.clone()).await,
-                script: cfg.script.clone(),
-                canceled: Default::default(),
-            },
-            store,
-        ),
-    }
+/// Discovery for the Controller; also its health check. Public, like agent cards.
+fn agents_index(cfg: &Config, specs: &[AgentSpec]) -> Value {
+    json!({
+        "runner": cfg.name,
+        "location": cfg.location,
+        "agents": specs.iter().map(|s| json!({
+            "id": s.id,
+            "name": s.name,
+            "description": s.description,
+            "input": s.input,
+            "url": agent_url(cfg, s),
+        })).collect::<Vec<_>>(),
+    })
 }
 
 async fn require_bearer(expected: Arc<String>, req: Request, next: Next) -> Result<Response, StatusCode> {
@@ -162,6 +120,15 @@ async fn require_bearer(expected: Arc<String>, req: Request, next: Next) -> Resu
     if ok { Ok(next.run(req).await) } else { Err(StatusCode::UNAUTHORIZED) }
 }
 
+fn agent_router(cfg: &Config, spec: &AgentSpec, store: store::SharedStore, runs: exec::Runs, bearer: Arc<String>) -> axum::Router {
+    let executor = exec::ExecAgent { spec: Arc::new(spec.clone()), runs };
+    let handler = Arc::new(DefaultRequestHandler::new(executor, store).with_capabilities(capabilities()));
+    let rpc = jsonrpc_router(handler).layer(middleware::from_fn(move |req, next| require_bearer(bearer.clone(), req, next)));
+    axum::Router::new()
+        .nest("/jsonrpc", rpc)
+        .merge(agent_card_router(Arc::new(StaticAgentCard::new(agent_card(cfg, spec)))))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
     tracing_subscriber::fmt()
@@ -171,25 +138,28 @@ async fn main() -> Result<(), String> {
         .init();
 
     let cfg = load_config()?;
-    let store = store::SqliteTaskStore::open(&cfg.db).map_err(|e| e.to_string())?;
-    let orphans = store.fail_orphans().map_err(|e| e.to_string())?;
+    let specs = manifest::load(&cfg.agents_dir, cfg.only.as_deref())?;
+    if specs.is_empty() {
+        return Err(format!("no agents found in {}", cfg.agents_dir.display()));
+    }
+
+    let sqlite = store::SqliteTaskStore::open(&cfg.db).map_err(|e| e.to_string())?;
+    let orphans = sqlite.fail_orphans().map_err(|e| e.to_string())?;
     if orphans > 0 {
         tracing::warn!(orphans, "marked tasks interrupted by restart as failed");
     }
-
-    let card = agent_card(&cfg);
-    let handler = Arc::new(build_handler(&cfg, store).await.with_capabilities(card.capabilities.clone()));
+    let store = store::SharedStore(Arc::new(sqlite));
+    let runs = exec::Runs::default();
     let bearer = Arc::new(format!("Bearer {}", cfg.token));
-    let rpc = jsonrpc_router(handler).layer(middleware::from_fn(move |req, next| {
-        require_bearer(bearer.clone(), req, next)
-    }));
-    let app = axum::Router::new()
-        .nest("/jsonrpc", rpc)
-        .merge(agent_card_router(Arc::new(StaticAgentCard::new(card))));
 
-    let listener = tokio::net::TcpListener::bind(&cfg.bind)
-        .await
-        .map_err(|e| e.to_string())?;
-    tracing::info!(name = %cfg.name, agent = ?cfg.agent, model = %cfg.model, bind = %cfg.bind, public_url = %cfg.public_url, "runner listening");
+    let index = Arc::new(agents_index(&cfg, &specs));
+    let app = specs.iter().fold(
+        axum::Router::new().route("/agents", get(move || { let index = index.clone(); async move { Json((*index).clone()) } })),
+        |app, spec| app.nest(&format!("/agents/{}", spec.id), agent_router(&cfg, spec, store.clone(), runs.clone(), bearer.clone())),
+    );
+
+    let listener = tokio::net::TcpListener::bind(&cfg.bind).await.map_err(|e| e.to_string())?;
+    let ids: Vec<&str> = specs.iter().map(|s| s.id.as_str()).collect();
+    tracing::info!(name = %cfg.name, agents = ?ids, bind = %cfg.bind, public_url = %cfg.public_url, "runner listening");
     axum::serve(listener, app).await.map_err(|e| e.to_string())
 }

@@ -16,8 +16,9 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-aws-config = { version = "1.13.3", features = ["behavior-version-latest"] }
-aws-sdk-bedrockruntime = "1.156.0"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.1"
+libc = "0.2.191"
 
 [profile.release]
 strip = true

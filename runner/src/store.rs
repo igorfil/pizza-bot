@@ -1,10 +1,33 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use a2a::*;
 use a2a_server::TaskStore;
 use a2a_server::task_store::TaskVersion;
 use async_trait::async_trait;
 use rusqlite::{Connection, OptionalExtension, params};
+
+/// One SQLite store shared by every agent the runner hosts; task ids are unique across agents.
+#[derive(Clone)]
+pub struct SharedStore(pub Arc<SqliteTaskStore>);
+
+#[async_trait]
+impl TaskStore for SharedStore {
+    async fn create(&self, task: Task) -> Result<TaskVersion, A2AError> {
+        self.0.create(task).await
+    }
+    async fn update(&self, task: Task) -> Result<TaskVersion, A2AError> {
+        self.0.update(task).await
+    }
+    async fn get(&self, task_id: &str) -> Result<Option<Task>, A2AError> {
+        self.0.get(task_id).await
+    }
+    async fn list(&self, req: &ListTasksRequest) -> Result<ListTasksResponse, A2AError> {
+        self.0.list(req).await
+    }
+    async fn begin_cancel(&self, task_id: &str) -> Result<Task, A2AError> {
+        self.0.begin_cancel(task_id).await
+    }
+}
 
 pub struct SqliteTaskStore {
     conn: Mutex<Connection>,

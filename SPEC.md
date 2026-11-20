@@ -258,13 +258,13 @@ Goal: prove the core loop works, not build the product. Gaps deliberately skippe
 
 Scope:
 - 1 Controller on the laptop.
-- 2 Runners with a fake agent: one local (laptop), one remote (EC2).
-- 1 simple TUI.
+- 2 Runners: one local (laptop), one remote (EC2).
+- 2 UIs: a TUI, and an Agent Fleet screen in pizza-bot (`docs/PIZZA-BOT.md`).
 
 Stack:
 - Controller + TUI: Bun + TypeScript, `@a2a-js/sdk` client (A2A v1.0, JSON-RPC binding), `bun:sqlite` Msg log.
 - Runner: Rust, official `a2a-rs` SDK (`a2a-lf`, `a2a-server-lf`), SQLite task store (`rusqlite`), single static binary.
-- Remote: EC2 instance, Runner on public port, bearer token, security group limited to the laptop IP.
+- Remote: EC2 instance, Runner on 127.0.0.1, reached over SSH-over-SSM tunnel (no inbound ports), bearer token. See `docs/DEPLOY.md`.
 
 Agents (runner picks one with `RUNNER_AGENT`):
 - `dadjokes` on EC2: input is a topic, Bedrock `us.openai.gpt-6.1-terra` writes 5 jokes. Uses the instance role.
@@ -276,6 +276,9 @@ Pass criteria:
 2. Kill the Controller (or sleep the laptop) mid-task. Runners keep going.
 3. Restart the Controller (or wake). Both tasks catch up to the correct state and artifact without user action.
 4. Stop a Runner mid-task. Controller marks it `unreachable`, retries with backoff, recovers when the Runner returns.
+
+Result (2026-11-19): all four pass, against the local runner and the EC2 runner. Verified facts and
+gotchas are in `docs/LEARNINGS.md`.
 
 ## 15. Open questions
 

@@ -1,6 +1,6 @@
 import { ClientFactory, ClientFactoryOptions, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
-import type { AgentInfo, Artifact, RunnerRef, TaskSnapshot, TaskUpdate } from "./types.ts";
+import type { AgentInfo, Artifact, Endpoint, RunnerRef, TaskSnapshot, TaskUpdate } from "./types.ts";
 
 const CALL_TIMEOUT_MS = 10_000;
 
@@ -59,15 +59,16 @@ const factory = new ClientFactory(
 const clients = new Map<string, Client>();
 
 /** @throws when the agent card cannot be fetched */
-const clientFor = async (runner: RunnerRef): Promise<Client> => {
-  const cached = clients.get(runner.url);
+const clientFor = async (endpoint: Endpoint): Promise<Client> => {
+  const cached = clients.get(endpoint.url);
   if (cached) return cached;
-  const client = await factory.createFromUrl(runner.url);
-  clients.set(runner.url, client);
+  // A relative card path keeps the `/agents/<id>` prefix; the SDK's default is absolute and would drop it.
+  const client = await factory.createFromUrl(`${endpoint.url}/`, ".well-known/agent-card.json");
+  clients.set(endpoint.url, client);
   return client;
 };
 
-const auth = (runner: RunnerRef) => ({ Authorization: `Bearer ${runner.token}` });
+const auth = (endpoint: Endpoint) => ({ Authorization: `Bearer ${endpoint.token}` });
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -81,26 +82,35 @@ const attempt = async <T>(f: () => Promise<T>): Promise<Outcome<T>> => {
   }
 };
 
-type CardJson = { description?: unknown; skills?: { name?: unknown; description?: unknown; examples?: unknown }[] };
+type IndexJson = {
+  location?: unknown;
+  agents?: { id?: unknown; name?: unknown; description?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
+};
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
-const toAgentInfo = (card: CardJson): AgentInfo => {
-  const skill = card.skills?.[0];
-  return {
-    description: str(card.description),
-    examples: (card.skills ?? []).flatMap((s) =>
-      Array.isArray(s.examples) ? s.examples.filter((e): e is string => typeof e === "string") : [],
-    ),
-    input: skill ? { label: str(skill.name), hint: str(skill.description) } : null,
-  };
-};
+const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | null =>
+  str(a.id)
+    ? {
+        id: str(a.id),
+        name: str(a.name) || str(a.id),
+        description: str(a.description),
+        input: a.input ? { label: str(a.input.label), hint: str(a.input.hint), example: str(a.input.example) } : null,
+      }
+    : null;
 
-export const checkRunner = (runner: RunnerRef): Promise<Outcome<AgentInfo>> =>
+export type RunnerIndex = { agents: AgentInfo[]; location: string | null };
+
+/** The runner's `GET /agents` is both discovery and its health check. */
+export const checkRunner = (runner: RunnerRef): Promise<Outcome<RunnerIndex>> =>
   attempt(async () => {
-    const res = await fetch(`${runner.url}/.well-known/agent-card.json`, { signal: AbortSignal.timeout(5_000) });
-    if (!res.ok) throw new Error(`agent card: HTTP ${res.status}`);
-    return toAgentInfo((await res.json()) as CardJson);
+    const res = await fetch(`${runner.url}/agents`, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) throw new Error(`runner index: HTTP ${res.status}`);
+    const index = (await res.json()) as IndexJson;
+    return {
+      agents: (index.agents ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null),
+      location: str(index.location) || null,
+    };
   });
 
 const asTask = (result: unknown): A2ATask => {
@@ -108,9 +118,9 @@ const asTask = (result: unknown): A2ATask => {
   throw new Error("agent replied with a message, not a task");
 };
 
-export const dispatch = (runner: RunnerRef, prompt: string): Promise<Outcome<TaskSnapshot>> =>
+export const dispatch = (endpoint: Endpoint, prompt: string): Promise<Outcome<TaskSnapshot>> =>
   attempt(async () => {
-    const client = await clientFor(runner);
+    const client = await clientFor(endpoint);
     const result = await client.sendMessage(
       {
         tenant: "",
@@ -131,41 +141,41 @@ export const dispatch = (runner: RunnerRef, prompt: string): Promise<Outcome<Tas
           returnImmediately: true,
         },
       },
-      { serviceParameters: auth(runner), signal: AbortSignal.timeout(CALL_TIMEOUT_MS) },
+      { serviceParameters: auth(endpoint), signal: AbortSignal.timeout(CALL_TIMEOUT_MS) },
     );
     return toSnapshot(asTask(result));
   });
 
-export const getTask = (runner: RunnerRef, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
+export const getTask = (endpoint: Endpoint, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
   attempt(async () => {
-    const client = await clientFor(runner);
+    const client = await clientFor(endpoint);
     const task = await client.getTask(
       { tenant: "", id: remoteId },
-      { serviceParameters: auth(runner), signal: AbortSignal.timeout(CALL_TIMEOUT_MS) },
+      { serviceParameters: auth(endpoint), signal: AbortSignal.timeout(CALL_TIMEOUT_MS) },
     );
     return toSnapshot(task);
   });
 
-export const cancel = (runner: RunnerRef, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
+export const cancel = (endpoint: Endpoint, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
   attempt(async () => {
-    const client = await clientFor(runner);
+    const client = await clientFor(endpoint);
     const task = await client.cancelTask(
       { tenant: "", id: remoteId, metadata: undefined },
-      { serviceParameters: auth(runner), signal: AbortSignal.timeout(CALL_TIMEOUT_MS) },
+      { serviceParameters: auth(endpoint), signal: AbortSignal.timeout(CALL_TIMEOUT_MS) },
     );
     return toSnapshot(task);
   });
 
 /** Resolves when the stream ends; `null` for a clean end, otherwise the error text. */
 export const stream = async (
-  runner: RunnerRef,
+  endpoint: Endpoint,
   remoteId: string,
   signal: AbortSignal,
   onEvent: (event: StreamEvent) => void,
 ): Promise<string | null> => {
   const result = await attempt(async () => {
-    const client = await clientFor(runner);
-    for await (const event of client.resubscribeTask({ tenant: "", id: remoteId }, { serviceParameters: auth(runner), signal })) {
+    const client = await clientFor(endpoint);
+    for await (const event of client.resubscribeTask({ tenant: "", id: remoteId }, { serviceParameters: auth(endpoint), signal })) {
       const mapped = toStreamEvent(event);
       if (mapped) onEvent(mapped);
     }

@@ -1,0 +1,13 @@
+name = "Morning brief"
+description = "Reads your Outlook inbox (last 24h) and today's calendar, and tells you what needs your attention (us.anthropic.claude-haiku-5-5 on Bedrock)."
+command = "uv run --quiet agent.py"
+timeout_secs = 180
+
+[input]
+label = "Focus"
+hint = "optional, e.g. anything from my manager? (leave empty for the full brief)"
+example = ""
+
+[env]
+MODEL = "us.anthropic.claude-haiku-5-5"
+OUTLOOK_MCP = "aws-outlook-mcp"

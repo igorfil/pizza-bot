@@ -1,6 +1,10 @@
+import { chatFailed, chatReplied, createChat, failInterruptedChats, sendChatMessage } from "./chat.ts";
 import type {
+  Agent,
   AgentInfo,
   Effect,
+  Endpoint,
+  LocalClock,
   Model,
   Msg,
   Notification,
@@ -22,7 +26,15 @@ const MAX_NOTIFICATIONS = 20;
 
 export type Result = [Model, Effect[]];
 
-export const initialModel = (): Model => ({ now: 0, runners: {}, tasks: {}, notifications: [] });
+export const initialModel = (): Model => ({ now: 0, runners: {}, agents: {}, tasks: {}, chats: {}, notifications: [], local: null });
+
+export const agentKey = (runner: string, id: string): string => `${runner}/${id}`;
+
+/** "07:30" → 450; null for anything that isn't a valid HH:MM. */
+export const minuteOfDay = (at: string): number | null => {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(at);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
 
 const TERMINAL: ReadonlySet<TaskState> = new Set(["completed", "failed", "canceled", "rejected", "lost"]);
 
@@ -32,6 +44,8 @@ export const backoffMs = (failures: number): number =>
   Math.min(1000 * 2 ** Math.max(failures - 1, 0), MAX_BACKOFF_MS);
 
 const ref = (r: Runner): RunnerRef => ({ name: r.name, url: r.url, token: r.token });
+
+const endpoint = (r: Runner, agentId: string): Endpoint => ({ url: `${r.url}/agents/${agentId}`, token: r.token });
 
 const notify = (model: Model, level: Notification["level"], text: string): Model => ({
   ...model,
@@ -48,12 +62,17 @@ const setRunner = (model: Model, runner: Runner): Model => ({
   runners: { ...model.runners, [runner.name]: runner },
 });
 
+const setAgent = (model: Model, agent: Agent): Model => ({
+  ...model,
+  agents: { ...model.agents, [agent.key]: agent },
+});
+
 const isSyncable = (task: Task): task is Task & { remoteId: string } =>
   !isTerminal(task) && task.remoteId !== null;
 
 const getTaskEffect = (model: Model, task: Task & { remoteId: string }): Effect[] => {
   const runner = model.runners[task.runner];
-  return runner ? [{ type: "GetTask", taskId: task.id, runner: ref(runner), remoteId: task.remoteId }] : [];
+  return runner ? [{ type: "GetTask", taskId: task.id, endpoint: endpoint(runner, task.agent), remoteId: task.remoteId }] : [];
 };
 
 const applySnapshot = (task: Task, snapshot: TaskSnapshot, now: number): Task => ({
@@ -121,13 +140,76 @@ const dueResyncs = (model: Model): Result => {
   return [next, due.flatMap((t) => getTaskEffect(model, t))];
 };
 
-const tick = (model: Model, now: number): Result => {
+const createTask = (model: Model, taskId: string, key: string, prompt: string, trigger: Task["trigger"]): Result => {
+  const agent = model.agents[key];
+  const runner = agent ? model.runners[agent.runner] : undefined;
+  if (!agent || !runner) return [notify(model, "error", `unknown agent ${key}`), []];
+  if (model.tasks[taskId]) return [model, []];
+  const task: Task = {
+    id: taskId,
+    runner: agent.runner,
+    agent: agent.id,
+    prompt,
+    remoteId: null,
+    state: "dispatching",
+    statusText: null,
+    artifacts: [],
+    createdAt: model.now,
+    updatedAt: model.now,
+    trigger,
+    ackedAt: null,
+    lastSyncAt: model.now,
+    streamEpoch: 0,
+    streamFailures: 0,
+    streamRetryAt: 0,
+  };
+  return [setTask(model, task), [{ type: "Dispatch", taskId, endpoint: endpoint(runner, agent.id), prompt }]];
+};
+
+/** One run per agent per local day, on the first tick at or after its time (so a sleeping laptop catches up on wake). */
+const dueSchedules = (model: Model): Result => {
+  const local = model.local;
+  if (!local) return [model, []];
+  const due = Object.values(model.agents).filter((a) => {
+    const at = a.schedule ? minuteOfDay(a.schedule.at) : null;
+    return at !== null && local.minute >= at && a.lastScheduledDay !== local.day;
+  });
+  return due.reduce<Result>(
+    ([m, effects], a) => {
+      const marked = setAgent(m, { ...a, lastScheduledDay: local.day });
+      const [next, more] = createTask(marked, `schedule:${a.key}:${local.day}`, a.key, a.schedule?.prompt ?? "", "schedule");
+      return [next, [...effects, ...more]];
+    },
+    [model, []],
+  );
+};
+
+const tick = (model: Model, now: number, local: LocalClock | undefined): Result => {
   const woke = model.now !== 0 && now - model.now > WAKE_GAP_MS;
-  const ticked = { ...model, now };
+  const ticked = { ...model, now, local: local ?? model.local };
   const [afterWake, wakeEffects] = woke ? resyncAll(notify(ticked, "info", "wake detected, resyncing")) : [ticked, []];
   const [afterChecks, checkEffects] = dueRunnerChecks(afterWake);
   const [afterResync, resyncEffects] = dueResyncs(afterChecks);
-  return [afterResync, [...wakeEffects, ...checkEffects, ...resyncEffects]];
+  const [afterSchedules, scheduleEffects] = dueSchedules(afterResync);
+  return [afterSchedules, [...wakeEffects, ...checkEffects, ...resyncEffects, ...scheduleEffects]];
+};
+
+const setSchedule = (model: Model, key: string, at: string | null, prompt: string): Result => {
+  const agent = model.agents[key];
+  if (!agent) return [notify(model, "error", `unknown agent ${key}`), []];
+  if (at === null) return [setAgent(model, { ...agent, schedule: null }), []];
+  const minute = minuteOfDay(at);
+  if (minute === null) return [notify(model, "error", `invalid schedule time ${at}; use HH:MM`), []];
+  // Setting 07:30 at 15:00 shouldn't fire right away; today's slot counts as already done.
+  const passedToday = model.local !== null && model.local.minute >= minute;
+  return [
+    notify(
+      setAgent(model, { ...agent, schedule: { at, prompt }, lastScheduledDay: passedToday ? model.local!.day : agent.lastScheduledDay }),
+      "info",
+      `${agent.name} runs daily at ${at}`,
+    ),
+    [],
+  ];
 };
 
 const runnerFailed = (model: Model, name: string, error: string): Model => {
@@ -144,19 +226,36 @@ const runnerFailed = (model: Model, name: string, error: string): Model => {
   return runner.status === "unreachable" ? updated : notify(updated, "error", `runner ${name} unreachable: ${error}`);
 };
 
-const runnerOk = (model: Model, name: string, agent: AgentInfo | undefined): Result => {
+/** Keeps schedules of agents the runner still serves; agents it dropped disappear. */
+const syncAgents = (model: Model, runner: string, infos: AgentInfo[]): Model => {
+  const others = Object.fromEntries(Object.entries(model.agents).filter(([, a]) => a.runner !== runner));
+  const mine = Object.fromEntries(
+    infos.map((info): [string, Agent] => {
+      const key = agentKey(runner, info.id);
+      const prev = model.agents[key];
+      return [key, { ...info, key, runner, schedule: prev?.schedule ?? null, lastScheduledDay: prev?.lastScheduledDay ?? null }];
+    }),
+  );
+  return { ...model, agents: { ...others, ...mine } };
+};
+
+const runnerOk = (model: Model, name: string, agents: AgentInfo[], location: string | null): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
   const recovered = runner.status !== "healthy";
-  const updated = setRunner(model, {
-    ...runner,
-    status: "healthy",
-    failures: 0,
-    lastError: null,
-    lastSeenAt: model.now,
-    nextCheckAt: model.now + HEALTH_INTERVAL_MS,
-    agent: agent ?? runner.agent ?? null,
-  });
+  const updated = syncAgents(
+    setRunner(model, {
+      ...runner,
+      status: "healthy",
+      failures: 0,
+      lastError: null,
+      lastSeenAt: model.now,
+      nextCheckAt: model.now + HEALTH_INTERVAL_MS,
+      location,
+    }),
+    name,
+    agents,
+  );
   const catchUp = recovered
     ? Object.values(model.tasks)
         .filter(isSyncable)
@@ -184,52 +283,35 @@ export const update = (model: Model, msg: Msg): Result => {
         nextCheckAt: model.now + HEALTH_INTERVAL_MS,
         lastSeenAt: null,
         lastError: null,
-        agent: null,
+        location: null,
       };
       return [notify(setRunner(model, runner), "info", `runner ${msg.name} added`), [{ type: "CheckRunner", runner: ref(runner) }]];
     }
 
     case "RemoveRunner": {
       const { [msg.name]: _removed, ...runners } = model.runners;
-      return [{ ...model, runners }, []];
+      const agents = Object.fromEntries(Object.entries(model.agents).filter(([, a]) => a.runner !== msg.name));
+      return [{ ...model, runners, agents }, []];
     }
 
-    case "CreateTask": {
-      const runner = model.runners[msg.runner];
-      if (!runner) return [notify(model, "error", `unknown runner ${msg.runner}`), []];
-      const task: Task = {
-        id: msg.taskId,
-        runner: msg.runner,
-        prompt: msg.prompt,
-        remoteId: null,
-        state: "dispatching",
-        statusText: null,
-        artifacts: [],
-        createdAt: model.now,
-        updatedAt: model.now,
-        lastSyncAt: model.now,
-        streamEpoch: 0,
-        streamFailures: 0,
-        streamRetryAt: 0,
-      };
-      return [setTask(model, task), [{ type: "Dispatch", taskId: task.id, runner: ref(runner), prompt: msg.prompt }]];
-    }
+    case "CreateTask":
+      return createTask(model, msg.taskId, msg.agent, msg.prompt, "manual");
 
     case "CancelTask":
       return withTask(model, msg.taskId, (task) => {
         const runner = model.runners[task.runner];
         if (!isSyncable(task) || !runner) return [notify(model, "error", `task ${task.id} cannot be canceled`), []];
-        return [model, [{ type: "Cancel", taskId: task.id, runner: ref(runner), remoteId: task.remoteId }]];
+        return [model, [{ type: "Cancel", taskId: task.id, endpoint: endpoint(runner, task.agent), remoteId: task.remoteId }]];
       });
 
     case "Booted":
-      return resyncAll(markLostDispatches({ ...model, now: msg.now }));
+      return resyncAll(failInterruptedChats(markLostDispatches({ ...model, now: msg.now })));
 
     case "Tick":
-      return tick(model, msg.now);
+      return tick(model, msg.now, msg.local);
 
     case "RunnerOk":
-      return runnerOk(model, msg.name, msg.agent);
+      return runnerOk(model, msg.name, msg.agents, msg.location);
 
     case "RunnerFailed":
       return [runnerFailed(model, msg.name, msg.error), []];
@@ -272,8 +354,38 @@ export const update = (model: Model, msg: Msg): Result => {
 
     case "CancelFailed":
       return [notify(model, "error", `cancel ${msg.taskId} failed: ${msg.error}`), []];
+
+    case "AckInbox":
+      return withTask(model, msg.taskId, (task) =>
+        isTerminal(task) && !task.ackedAt ? [setTask(model, { ...task, ackedAt: model.now }), []] : [model, []],
+      );
+
+    case "AckAllInbox":
+      return [inboxOf(model).reduce((m, t) => setTask(m, { ...t, ackedAt: m.now }), model), []];
+
+    case "CreateChat":
+      if (model.chats[msg.chatId]) return [model, []];
+      return createChat(model, msg.chatId, msg.fromTaskId, msg.text);
+
+    case "SendChatMessage":
+      return sendChatMessage(model, msg.chatId, msg.text);
+
+    case "ChatReplied":
+      return [chatReplied(model, msg.chatId, msg.text), []];
+
+    case "ChatFailed":
+      return [chatFailed(model, msg.chatId, msg.error), []];
+
+    case "SetSchedule":
+      return setSchedule(model, msg.agent, msg.at, msg.prompt);
   }
 };
+
+/** Finished runs nobody has dealt with yet, newest first. */
+export const inboxOf = (model: Model): Task[] =>
+  Object.values(model.tasks)
+    .filter((t) => isTerminal(t) && !t.ackedAt)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 
 export const subscriptions = (model: Model): Sub[] =>
   Object.values(model.tasks)
@@ -282,6 +394,6 @@ export const subscriptions = (model: Model): Sub[] =>
     .flatMap((t): Sub[] => {
       const runner = model.runners[t.runner];
       return runner?.status === "healthy"
-        ? [{ type: "TaskStream", key: `${t.id}#${t.streamEpoch}`, taskId: t.id, epoch: t.streamEpoch, runner: ref(runner), remoteId: t.remoteId }]
+        ? [{ type: "TaskStream", key: `${t.id}#${t.streamEpoch}`, taskId: t.id, epoch: t.streamEpoch, endpoint: endpoint(runner, t.agent), remoteId: t.remoteId }]
         : [];
     });

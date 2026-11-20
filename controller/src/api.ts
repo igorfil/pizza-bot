@@ -23,15 +23,36 @@ export const toIntent = (type: string, p: Record<string, unknown>): IntentMsg | 
     case "RemoveRunner":
       return str(p.name) ? { type, name: p.name } : "RemoveRunner needs name";
     case "CreateTask":
-      return str(p.runner) && typeof p.prompt === "string"
-        ? { type, taskId: crypto.randomUUID(), runner: p.runner, prompt: p.prompt }
-        : "CreateTask needs runner, prompt";
+      return str(p.agent) && typeof p.prompt === "string"
+        ? { type, taskId: crypto.randomUUID(), agent: p.agent, prompt: p.prompt }
+        : "CreateTask needs agent (<runner>/<id>), prompt";
     case "CancelTask":
       return str(p.taskId) ? { type, taskId: p.taskId } : "CancelTask needs taskId";
+    case "AckInbox":
+      return str(p.taskId) ? { type, taskId: p.taskId } : "AckInbox needs taskId";
+    case "AckAllInbox":
+      return { type };
+    case "CreateChat":
+      return {
+        type,
+        chatId: crypto.randomUUID(),
+        fromTaskId: str(p.fromTaskId) ? p.fromTaskId : null,
+        text: typeof p.text === "string" ? p.text : "",
+      };
+    case "SendChatMessage":
+      return str(p.chatId) && str(p.text) ? { type, chatId: p.chatId, text: p.text } : "SendChatMessage needs chatId, text";
+    case "SetSchedule":
+      return str(p.agent)
+        ? { type, agent: p.agent, at: str(p.at) ? p.at : null, prompt: typeof p.prompt === "string" ? p.prompt : "" }
+        : "SetSchedule needs agent (and at=HH:MM, or empty to turn it off)";
     default:
       return `unknown intent ${type}`;
   }
 };
+
+/** Lets a UI select what it just created (e.g. open the new chat). */
+const createdId = (intent: IntentMsg): string | null =>
+  intent.type === "CreateTask" ? intent.taskId : intent.type === "CreateChat" ? intent.chatId : null;
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 
@@ -42,7 +63,7 @@ const postMsg = async (req: Request, runtime: Runtime): Promise<Response> => {
   const intent = toIntent(body.type, (body.payload ?? {}) as Record<string, unknown>);
   if (typeof intent === "string") return json({ error: intent }, 400);
   const { version, duplicate } = runtime.send(body.msg_id, intent);
-  return json({ accepted_at_version: version, duplicate }, duplicate ? 200 : 202);
+  return json({ accepted_at_version: version, duplicate, id: duplicate ? null : createdId(intent) }, duplicate ? 200 : 202);
 };
 
 const sseFrame = (version: number, model: Model) =>
@@ -71,22 +92,42 @@ const streamModel = (req: Request, runtime: Runtime): Response => {
   });
 };
 
-export const serveApi = (runtime: Runtime, opts: { port: number; token: string }) =>
+const route = (req: Request, runtime: Runtime, token: string): Response | Promise<Response> => {
+  if (req.headers.get("authorization") !== `Bearer ${token}`) return json({ error: "unauthorized" }, 401);
+  const { pathname } = new URL(req.url);
+  if (req.method === "POST" && pathname === "/msg") return postMsg(req, runtime);
+  if (req.method === "GET" && pathname === "/model") {
+    const { version, model } = runtime.snapshot();
+    return json({ version, model: publicModel(model) });
+  }
+  if (req.method === "GET" && pathname === "/model/stream") return streamModel(req, runtime);
+  return json({ error: "not found" }, 404);
+};
+
+const corsHeaders = (origin: string) => ({
+  "access-control-allow-origin": origin,
+  "access-control-allow-headers": "authorization, content-type",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  vary: "origin",
+});
+
+const withCors = async (res: Response | Promise<Response>, origin: string): Promise<Response> => {
+  const r = await res;
+  Object.entries(corsHeaders(origin)).forEach(([k, v]) => r.headers.set(k, v));
+  return r;
+};
+
+export const serveApi = (runtime: Runtime, opts: { port: number; token: string; allowedOrigins: ReadonlySet<string> }) =>
   Bun.serve({
     hostname: "127.0.0.1",
     port: opts.port,
     idleTimeout: 0,
     fetch: (req) => {
-      // Browsers always send Origin; refusing it stops random websites driving the fleet via localhost.
-      if (req.headers.get("origin")) return json({ error: "browser origins not allowed" }, 403);
-      if (req.headers.get("authorization") !== `Bearer ${opts.token}`) return json({ error: "unauthorized" }, 401);
-      const { pathname } = new URL(req.url);
-      if (req.method === "POST" && pathname === "/msg") return postMsg(req, runtime);
-      if (req.method === "GET" && pathname === "/model") {
-        const { version, model } = runtime.snapshot();
-        return json({ version, model: publicModel(model) });
-      }
-      if (req.method === "GET" && pathname === "/model/stream") return streamModel(req, runtime);
-      return json({ error: "not found" }, 404);
+      const origin = req.headers.get("origin");
+      if (origin === null) return route(req, runtime, opts.token);
+      // Browsers always send Origin; only explicitly allowed UIs may drive the fleet via localhost.
+      if (!opts.allowedOrigins.has(origin)) return json({ error: "browser origin not allowed" }, 403);
+      if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(origin) });
+      return withCors(route(req, runtime, opts.token), origin);
     },
   });
