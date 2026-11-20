@@ -1,0 +1,2036 @@
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index dd3c0b5..4d427ba 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -40,6 +40,7 @@ import { composerDraftStore } from "./composer-draft-store.js";
+ import { adminVisibility, type AppView } from "./admin-visibility.js";
+ import { AppNavigation } from "./components/AppNavigation.js";
+ import { LogsModule } from "./components/logs/LogsModule.js";
++import { FleetScreen } from "./components/fleet/FleetScreen.js";
+ import { useDesktopConnection } from "./use-desktop-connection.js";
+ import { useDesktopNotifications } from "./desktop-notifications.js";
+ import { initialThreadId } from "./initial-thread-selection.js";
+@@ -457,6 +458,10 @@ export function App() {
+                 onRefresh={pluginsAdmin.refreshPlugin}
+               />
+             </div>
++          ) : view === "fleet" ? (
++            <div className="module-hub">
++              <FleetScreen />
++            </div>
+           ) : view === "logs" ? (
+             <div className="module-hub">
+               <LogsModule client={client} />
+diff --git a/apps/web/src/admin-visibility.ts b/apps/web/src/admin-visibility.ts
+index 7505055..ea6f327 100644
+--- a/apps/web/src/admin-visibility.ts
++++ b/apps/web/src/admin-visibility.ts
+@@ -4,6 +4,7 @@ export type AppView =
+   | "memories"
+   | "skills"
+   | "mcp"
++  | "fleet"
+   | "plugins"
+   | "logs"
+   | "settings";
+diff --git a/apps/web/src/components/AppNavigation.tsx b/apps/web/src/components/AppNavigation.tsx
+index eef2089..30d3405 100644
+--- a/apps/web/src/components/AppNavigation.tsx
++++ b/apps/web/src/components/AppNavigation.tsx
+@@ -6,6 +6,7 @@ import {
+   Cable,
+   Inbox,
+   MoreHorizontal,
++  Network,
+   Pizza,
+   Puzzle,
+   ScrollText,
+@@ -72,6 +73,12 @@ const pluginsDestination: NavDestination = {
+   icon: Puzzle,
+ };
+ 
++const fleetDestination: NavDestination = {
++  view: "fleet",
++  label: L.fleetSection,
++  icon: Network,
++};
++
+ const settingsDestination: NavDestination = {
+   view: "settings",
+   label: L.settingsSection,
+@@ -146,6 +153,7 @@ export function AppNavigation({
+     mcpDestination,
+     ...(enableMemories ? [memoriesDestination] : []),
+     ...(enableAutomations ? [automationsDestination] : []),
++    fleetDestination,
+   ];
+   const mobileDestinations = [
+     inboxDestination,
+@@ -155,6 +163,7 @@ export function AppNavigation({
+   const mobileFeatureDestinations = [
+     ...(enableMemories ? [memoriesDestination] : []),
+     ...(enableAutomations ? [automationsDestination] : []),
++    fleetDestination,
+   ];
+   const utilityDestinations = [
+     pluginsDestination,
+diff --git a/apps/web/src/lexicon.ts b/apps/web/src/lexicon.ts
+index 2db2643..26f95d7 100644
+--- a/apps/web/src/lexicon.ts
++++ b/apps/web/src/lexicon.ts
+@@ -3,6 +3,7 @@ export const L = {
+   memoriesSection: "Memories",
+   skillsSection: "Skills",
+   mcpSection: "MCP Servers",
++  fleetSection: "Agent Fleet",
+   schedulesSection: "Schedules",
+   webhooksSection: "Webhooks",
+   automationsSection: "Automations",
+diff --git a/apps/web/src/styles.css b/apps/web/src/styles.css
+index 20c66bc..d4e05d5 100644
+--- a/apps/web/src/styles.css
++++ b/apps/web/src/styles.css
+@@ -1925,6 +1925,168 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
+   }
+ }
+ 
++.fleet-module { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
++.fleet-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
++.fleet-link { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dim); }
++.fleet-link-error { font-size: 12px; color: var(--warn); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.fleet-running { font-size: 12.5px; color: var(--info); }
++.fleet-state { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
++.fleet-tone-ok { color: var(--ok); }
++.fleet-tone-bad { color: var(--bad); }
++.fleet-tone-warn { color: var(--warn); }
++.fleet-tone-info { color: var(--info); }
++.fleet-tone-muted, .fleet-muted { color: var(--dim); }
++.fleet-empty { padding: 20px; text-align: center; color: var(--dim); border: 1px dashed var(--border); border-radius: 10px; }
++.fleet-waiting { margin: 24px; }
++.fleet-small-btn { height: 28px; padding: 0 10px; gap: 6px; font-size: 12.5px; }
++.fleet-icon-btn {
++  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: 0 0 auto;
++  padding: 0; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--dim); cursor: pointer;
++}
++.fleet-icon-btn:hover:not(:disabled) { color: var(--text); }
++.fleet-icon-btn:disabled { opacity: .5; cursor: default; }
++.fleet-link-btn {
++  display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: transparent;
++  color: var(--brand); font: inherit; font-size: 12.5px; cursor: pointer;
++}
++.fleet-link-btn:disabled { color: var(--dim); opacity: .6; cursor: default; }
++.fleet-artifact-text {
++  margin: 0; padding: 10px 12px; max-height: 300px; overflow: auto;
++  font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
++  border-radius: 8px; background: var(--panel-2); color: var(--dim);
++}
++.fleet-connect { max-width: 560px; padding: 24px; }
++
++/* Inbox: the newest unread result on top, the next ones peeking out behind it. */
++.fleet-inbox { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px 40px; }
++.fleet-inbox-bar { max-width: 760px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
++.fleet-stack { position: relative; max-width: 760px; margin: 0 auto; padding-bottom: calc(var(--fleet-stack-depth, 0) * 12px); }
++.fleet-stack-shadow {
++  position: absolute; inset: 0; bottom: calc(var(--fleet-stack-depth, 0) * 12px);
++  transform: translate(calc(var(--fleet-stack-i) * 12px), calc(var(--fleet-stack-i) * 12px));
++  border: 1px solid color-mix(in oklch, var(--brand) 35%, var(--border)); border-radius: 14px;
++  background: color-mix(in oklch, var(--brand) 6%, var(--panel)); opacity: calc(1 - var(--fleet-stack-i) * .3);
++}
++.fleet-inbox-card {
++  position: relative; display: flex; flex-direction: column; gap: 14px; padding: 22px 26px;
++  border: 1px solid color-mix(in oklch, var(--brand) 55%, var(--border)); border-radius: 14px;
++  background: color-mix(in oklch, var(--brand) 8%, var(--panel)); box-shadow: 0 10px 30px rgb(0 0 0 / .18);
++}
++.fleet-inbox-card.failed { border-color: color-mix(in oklch, var(--bad) 55%, var(--border)); }
++.fleet-inbox-card-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
++.fleet-inbox-agent {
++  padding: 2px 8px; border-radius: 999px; font-weight: 600;
++  background: color-mix(in oklch, var(--brand) 18%, transparent); color: var(--brand);
++}
++.fleet-inbox-title { margin: 0; font-size: 20px; font-weight: 650; text-align: center; color: var(--text); }
++.fleet-inbox-body { display: flex; flex-direction: column; gap: 10px; }
++.fleet-inbox-result {
++  padding: 14px 18px; border-radius: 10px; font-size: 14px; line-height: 1.6;
++  border: 1px solid color-mix(in oklch, var(--brand) 30%, var(--border)); background: var(--panel);
++}
++.fleet-inbox-error { margin: 0; padding: 10px 14px; border-radius: 8px; color: var(--bad); background: color-mix(in oklch, var(--bad) 10%, transparent); }
++.fleet-inbox-extra summary { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
++.fleet-inbox-extra[open] summary { margin-bottom: 6px; }
++.fleet-inbox-ask { display: flex; gap: 8px; }
++.fleet-inbox-ask .field-input { flex: 1; min-width: 0; }
++.fleet-inbox-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
++.fleet-inbox-actions button { gap: 6px; }
++.fleet-inbox-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--dim); }
++.fleet-inbox-empty-title { margin: 6px 0 0; font-size: 16px; font-weight: 600; color: var(--text); }
++.fleet-inbox-empty p { margin: 0; }
++
++/* Chats: list on the left, conversation on the right. */
++.fleet-chats { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px 1fr; }
++.fleet-chat-list { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; padding: 14px; border-right: 1px solid var(--border); }
++.fleet-chat-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
++.fleet-new-chat { gap: 6px; justify-content: center; }
++.fleet-chat-list-empty { margin: 8px 4px; font-size: 13px; }
++.fleet-chat-row {
++  width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 9px 10px; text-align: left; cursor: pointer;
++  border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); font: inherit;
++}
++.fleet-chat-row:hover { background: var(--panel-2); }
++.fleet-chat-row.active { border-color: var(--border); background: var(--panel-2); }
++.fleet-chat-row-title { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.fleet-chat-row-sub { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--dim); }
++.fleet-chat-badge { padding: 0 6px; border-radius: 999px; background: color-mix(in oklch, var(--brand) 18%, transparent); color: var(--brand); }
++.fleet-chat-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
++.fleet-chat-scroll { flex: 1; min-height: 0; }
++.fleet-chat-content { gap: 16px; padding: 20px 28px; max-width: 860px; margin: 0 auto; width: 100%; }
++.fleet-chat-context summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12.5px; color: var(--brand); }
++.fleet-chat-context[open] summary { margin-bottom: 8px; }
++.fleet-chat-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 60px 0; color: var(--dim); text-align: center; }
++.fleet-bubble-assistant {
++  padding: 12px 16px; border-radius: 12px;
++  border: 1px solid color-mix(in oklch, var(--brand) 40%, var(--border)); background: color-mix(in oklch, var(--brand) 9%, var(--panel));
++}
++.fleet-user-text { white-space: pre-wrap; }
++.fleet-typing { flex-direction: row; gap: 5px; align-items: center; min-height: 20px; }
++.fleet-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); animation: fleet-typing 1.2s infinite ease-in-out; }
++.fleet-typing span:nth-child(2) { animation-delay: .15s; }
++.fleet-typing span:nth-child(3) { animation-delay: .3s; }
++@keyframes fleet-typing { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
++.fleet-chat-error { margin: 0; font-size: 13px; color: var(--bad); }
++.fleet-composer { display: flex; gap: 8px; align-items: flex-end; padding: 12px 28px 18px; border-top: 1px solid var(--border); }
++.fleet-composer .field-input { flex: 1; min-width: 0; resize: none; }
++.fleet-composer .btn-primary { gap: 6px; }
++
++/* Agents: a monitor grid of cards. */
++.fleet-agents { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px 40px; }
++.fleet-agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; align-items: start; }
++.fleet-agent-card {
++  display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 12px; font-size: 13px;
++  border: 1px solid color-mix(in oklch, var(--ok) 45%, var(--border)); background: color-mix(in oklch, var(--brand) 6%, var(--panel));
++}
++.fleet-agent-card.down { opacity: .55; border-color: var(--border); background: var(--panel); }
++.fleet-agent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
++.fleet-agent-name { margin: 0; font-size: 14px; font-weight: 650; }
++.fleet-agent-where { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12.5px; }
++.fleet-agent-desc { margin: 0; line-height: 1.45; }
++.fleet-agent-down { margin: 0; font-weight: 650; letter-spacing: .02em; color: var(--bad); display: flex; flex-direction: column; gap: 2px; }
++.fleet-agent-down-why { font-weight: 400; letter-spacing: 0; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
++.fleet-agent-live { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--info); }
++.fleet-agent-live .fleet-link-btn { margin-left: auto; }
++.fleet-agent-health { margin: 0; font-size: 12.5px; }
++.fleet-strip { display: flex; align-items: center; gap: 3px; min-height: 16px; font-size: 12px; }
++.fleet-strip-cell { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 14px; background: var(--dim); }
++.fleet-strip-ok { background: var(--ok); }
++.fleet-strip-bad { background: var(--bad); }
++.fleet-strip-warn { background: var(--warn); }
++.fleet-strip-muted { background: color-mix(in oklch, var(--dim) 60%, transparent); }
++.fleet-strip-running { background: var(--info); animation: fleet-pulse 1.4s infinite ease-in-out; }
++@keyframes fleet-pulse { 50% { opacity: .4; } }
++.fleet-agent-run { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
++.fleet-agent-run-actions { display: flex; justify-content: flex-end; gap: 6px; }
++.fleet-agent-links { display: flex; align-items: center; gap: 10px; padding-top: 4px; }
++.fleet-agent-links-spacer { flex: 1; }
++.fleet-agent-remove { width: 28px; height: 28px; }
++.fleet-inline-runs { list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
++.fleet-inline-runs li { display: grid; grid-template-columns: 14px 78px 64px 1fr; align-items: center; gap: 6px; }
++.fleet-inline-runs-input { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.fleet-agent-add {
++  align-items: center; justify-content: center; min-height: 150px; cursor: pointer; color: var(--dim);
++  border-style: dashed; border-color: var(--border); background: transparent; font: inherit;
++}
++.fleet-agent-add:hover { color: var(--text); border-color: var(--brand); }
++.fleet-agent-form { border-color: var(--border); }
++.fleet-runner { display: flex; flex-direction: column; gap: 10px; margin-bottom: 26px; }
++.fleet-runner-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); }
++.fleet-runner-name { margin: 0; font-size: 14px; font-weight: 650; color: var(--text); }
++.fleet-runner-where { display: inline-flex; align-items: center; gap: 4px; }
++.fleet-runner-error { flex-basis: 100%; color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
++.fleet-agent-id { font-family: var(--mono); font-size: 11px; color: var(--dim); }
++.fleet-agent-schedule { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--dim); }
++.fleet-agent-schedule-form { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
++.fleet-agent-schedule-label { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
++.fleet-time { width: auto; padding: 4px 8px; font-size: 12.5px; }
++.fleet-inbox-scheduled { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); }
++@media (max-width: 720px) {
++  .fleet-chats { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
++  .fleet-chat-list { max-height: 180px; border-right: 0; border-bottom: 1px solid var(--border); }
++  .fleet-inbox-card { padding: 16px; }
++}
++
+ /* Keep this breakpoint synchronized with MOBILE_BREAKPOINT in use-is-mobile.ts. */
+ @media (max-width: 768px) {
+   /* iOS zooms focused text-entry controls whose computed font is below 16px. */
+diff --git a/apps/web/src/components/fleet/AgentsView.tsx b/apps/web/src/components/fleet/AgentsView.tsx
+new file mode 100644
+index 0000000..2387930
+--- /dev/null
++++ b/apps/web/src/components/fleet/AgentsView.tsx
+@@ -0,0 +1,380 @@
++import { useState, type FormEvent } from "react";
++import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Play, Plus, Server, Square, Trash2, X } from "lucide-react";
++import { useAppToast } from "../AppToast.js";
++import { ConfirmationDialog } from "../ConfirmationDialog.js";
++import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
++import type { FleetSend } from "./FleetModule.js";
++import {
++  activeRun,
++  agentsOf,
++  ago,
++  defaultInput,
++  inputLabel,
++  isFinished,
++  runnerHealth,
++  runnerLocation,
++  runnerTone,
++  runsOf,
++  runStrip,
++  taskTone,
++} from "./fleet-view-model.js";
++
++const INLINE_RUNS = 5;
++
++const stripTone = (t: FleetTask) => (isFinished(t) ? taskTone(t.state) : "running");
++
++const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
++
++export function AgentsView({ model, send }: { model: FleetModel; send: FleetSend }) {
++  const [adding, setAdding] = useState(false);
++  const agents = agentsOf(model);
++  const runners = Object.values(model.runners).sort((a, b) => a.name.localeCompare(b.name));
++  return (
++    <div className="fleet-agents">
++      {runners.map((r) => (
++        <RunnerGroup key={r.name} model={model} runner={r} agents={agents.filter((a) => a.runner === r.name)} send={send} />
++      ))}
++      <div className="fleet-agent-grid">
++        {adding ? (
++          <AddRunnerCard send={send} onDone={() => setAdding(false)} />
++        ) : (
++          <button type="button" className="fleet-agent-card fleet-agent-add" onClick={() => setAdding(true)}>
++            <Plus size={22} strokeWidth={1.5} />
++            Add runner
++          </button>
++        )}
++      </div>
++    </div>
++  );
++}
++
++export function RunnerGroup({
++  model,
++  runner,
++  agents,
++  send,
++}: {
++  model: FleetModel;
++  runner: FleetRunner;
++  agents: FleetAgent[];
++  send: FleetSend;
++}) {
++  const notify = useAppToast();
++  const [confirmRemove, setConfirmRemove] = useState(false);
++  const Where = placeIcon(runner);
++  const down = runner.status === "unreachable";
++  return (
++    <section className={`fleet-runner${down ? " down" : ""}`} aria-label={`Runner ${runner.name}`}>
++      <header className="fleet-runner-head">
++        <Server size={15} aria-hidden="true" />
++        <h3 className="fleet-runner-name">{runner.name}</h3>
++        <span className={`dot dot-${runnerTone(runner.status)}`} title={runner.status} />
++        <span className="fleet-runner-where">
++          <Where size={14} aria-hidden="true" /> {runnerLocation(runner)}
++        </span>
++        <span className={down ? "fleet-tone-bad" : "fleet-muted"}>
++          {down ? `unreachable · ${runnerHealth(model, runner)}` : runnerHealth(model, runner)}
++        </span>
++        {down && runner.lastError && <span className="fleet-runner-error">{runner.lastError}</span>}
++        <span className="fleet-agent-links-spacer" />
++        <button
++          type="button"
++          className="fleet-icon-btn fleet-agent-remove"
++          onClick={() => setConfirmRemove(true)}
++          aria-label={`Remove runner ${runner.name}`}
++          title="Remove runner"
++        >
++          <Trash2 size={13} />
++        </button>
++      </header>
++      <div className="fleet-agent-grid">
++        {agents.length === 0 ? (
++          <p className="fleet-muted">{runner.lastSeenAt === null ? "Waiting for the runner to list its agents…" : "This runner serves no agents."}</p>
++        ) : (
++          agents.map((a) => <AgentCard key={a.key} model={model} agent={a} runner={runner} send={send} />)
++        )}
++      </div>
++      {confirmRemove && (
++        <ConfirmationDialog
++          title="Remove runner?"
++          message={`Stop tracking ${runner.name} and its ${agents.length} agent(s)? The runner keeps running; the Controller just forgets it.`}
++          confirmLabel="Remove"
++          destructive
++          onCancel={() => setConfirmRemove(false)}
++          onConfirm={() => {
++            setConfirmRemove(false);
++            void send("RemoveRunner", { name: runner.name }).catch((e: unknown) =>
++              notify({ title: "Couldn't remove the runner", description: e instanceof Error ? e.message : undefined, tone: "error" }),
++            );
++          }}
++        />
++      )}
++    </section>
++  );
++}
++
++export function AgentCard({
++  model,
++  agent,
++  runner,
++  send,
++}: {
++  model: FleetModel;
++  agent: FleetAgent;
++  runner: FleetRunner;
++  send: FleetSend;
++}) {
++  const notify = useAppToast();
++  const [showRuns, setShowRuns] = useState(false);
++  const [running, setRunning] = useState(false);
++  const [input, setInput] = useState("");
++  const [starting, setStarting] = useState(false);
++  const active = activeRun(model, agent.key);
++  const strip = runStrip(model, agent.key);
++  const down = runner.status === "unreachable";
++  const label = inputLabel(agent);
++
++  const openRun = () => {
++    setInput(defaultInput(model, agent.key));
++    setRunning(true);
++  };
++
++  const start = async (event: FormEvent) => {
++    event.preventDefault();
++    setStarting(true);
++    try {
++      await send("CreateTask", { agent: agent.key, prompt: input.trim() });
++      setRunning(false);
++      notify({ title: `Started ${agent.name}`, description: "The result will land in the Inbox.", tone: "success" });
++    } catch (e) {
++      notify({ title: `Couldn't start ${agent.name}`, description: e instanceof Error ? e.message : undefined, tone: "error" });
++    } finally {
++      setStarting(false);
++    }
++  };
++
++  const cancel = async (task: FleetTask) => {
++    try {
++      await send("CancelTask", { taskId: task.id });
++    } catch (e) {
++      notify({ title: "Couldn't cancel the run", description: e instanceof Error ? e.message : undefined, tone: "error" });
++    }
++  };
++
++  return (
++    <article className={`fleet-agent-card${down ? " down" : ""}`} aria-label={agent.name}>
++      <header className="fleet-agent-head">
++        <h3 className="fleet-agent-name">{agent.name}</h3>
++        <span className="fleet-agent-id">{agent.key}</span>
++      </header>
++      <p className="fleet-agent-desc">{agent.description}</p>
++
++      {down ? (
++        <p className="fleet-agent-down">UNREACHABLE</p>
++      ) : active ? (
++        <p className="fleet-agent-live">
++          <LoaderCircle size={13} className="spin" aria-hidden="true" /> {active.statusText ?? active.state}
++          <button type="button" className="fleet-link-btn" onClick={() => void cancel(active)}>
++            <Square size={11} /> cancel
++          </button>
++        </p>
++      ) : null}
++
++      <div className="fleet-strip" aria-label={`Last ${strip.length} runs`}>
++        {strip.length === 0 ? (
++          <span className="fleet-muted">No runs yet</span>
++        ) : (
++          strip.map((t) => (
++            <span
++              key={t.id}
++              className={`fleet-strip-cell fleet-strip-${stripTone(t)}`}
++              title={`${t.state} · ${ago(model.now, t.createdAt)}${t.prompt ? ` · ${t.prompt}` : ""}`}
++            />
++          ))
++        )}
++      </div>
++
++      <ScheduleRow key={agent.schedule?.at ?? "none"} agent={agent} send={send} />
++
++      {running && (
++        <form className="fleet-agent-run" onSubmit={(e) => void start(e)}>
++          <label className="field">
++            <span className="field-label">{label}</span>
++            {agent.input?.hint && <span className="field-hint">{agent.input.hint}</span>}
++            <input
++              className="field-input"
++              value={input}
++              onChange={(e) => setInput(e.target.value)}
++              aria-label={`${label} for ${agent.name}`}
++              autoFocus
++            />
++          </label>
++          <div className="fleet-agent-run-actions">
++            <button type="button" className="btn-secondary fleet-small-btn" onClick={() => setRunning(false)} disabled={starting}>
++              <X size={13} /> Close
++            </button>
++            <button type="submit" className="btn-primary fleet-small-btn" disabled={starting}>
++              {starting ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />} Run
++            </button>
++          </div>
++        </form>
++      )}
++
++      <footer className="fleet-agent-links">
++        <button type="button" className="fleet-link-btn" onClick={() => setShowRuns((v) => !v)} aria-expanded={showRuns}>
++          [runs] {showRuns ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
++        </button>
++        <button type="button" className="fleet-link-btn" disabled title="Evals are coming soon">
++          [evals]
++        </button>
++        <span className="fleet-agent-links-spacer" />
++        {!running && (
++          <button type="button" className="btn-secondary fleet-small-btn" onClick={openRun} disabled={!!active || down}>
++            <Play size={13} /> Run
++          </button>
++        )}
++      </footer>
++
++      {showRuns && <InlineRuns model={model} runs={runsOf(model, agent.key).slice(0, INLINE_RUNS)} />}
++    </article>
++  );
++}
++
++const DEFAULT_SCHEDULE = "07:30";
++
++export function ScheduleRow({ agent, send }: { agent: FleetAgent; send: FleetSend }) {
++  const notify = useAppToast();
++  const [editing, setEditing] = useState(false);
++  const [at, setAt] = useState(agent.schedule?.at ?? DEFAULT_SCHEDULE);
++  const [saving, setSaving] = useState(false);
++
++  const save = async (next: string | null) => {
++    setSaving(true);
++    try {
++      await send("SetSchedule", { agent: agent.key, at: next ?? "", prompt: agent.schedule?.prompt ?? "" });
++      setEditing(false);
++      notify({ title: next ? `${agent.name} runs daily at ${next}` : `Turned off ${agent.name}'s schedule`, tone: "success" });
++    } catch (e) {
++      notify({ title: "Couldn't save the schedule", description: e instanceof Error ? e.message : undefined, tone: "error" });
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  if (!editing) {
++    return (
++      <p className="fleet-agent-schedule">
++        <AlarmClock size={13} aria-hidden="true" />
++        <span>{agent.schedule ? `Daily at ${agent.schedule.at}` : "Not scheduled"}</span>
++        <button type="button" className="fleet-link-btn" onClick={() => setEditing(true)}>
++          {agent.schedule ? "change" : "schedule"}
++        </button>
++      </p>
++    );
++  }
++
++  return (
++    <form
++      className="fleet-agent-schedule-form"
++      onSubmit={(e) => {
++        e.preventDefault();
++        void save(at);
++      }}
++    >
++      <label className="fleet-agent-schedule-label">
++        <AlarmClock size={13} aria-hidden="true" /> Daily at
++        <input
++          type="time"
++          className="field-input fleet-time"
++          value={at}
++          onChange={(e) => setAt(e.target.value)}
++          aria-label={`Daily run time for ${agent.name}`}
++          required
++        />
++      </label>
++      <span className="fleet-agent-links-spacer" />
++      {agent.schedule && (
++        <button type="button" className="fleet-link-btn" onClick={() => void save(null)} disabled={saving}>
++          turn off
++        </button>
++      )}
++      <button type="button" className="fleet-link-btn" onClick={() => setEditing(false)} disabled={saving}>
++        cancel
++      </button>
++      <button type="submit" className="btn-primary fleet-small-btn" disabled={saving || !at}>
++        Save
++      </button>
++    </form>
++  );
++}
++
++function InlineRuns({ model, runs }: { model: FleetModel; runs: FleetTask[] }) {
++  if (runs.length === 0) return <p className="fleet-muted fleet-inline-runs">No runs yet.</p>;
++  return (
++    <ul className="fleet-inline-runs">
++      {runs.map((t) => (
++        <li key={t.id}>
++          <span className={`fleet-strip-cell fleet-strip-${stripTone(t)}`} aria-hidden="true" />
++          <span className={`fleet-state fleet-tone-${taskTone(t.state)}`}>{t.state}</span>
++          <span className="fleet-muted">{ago(model.now, t.createdAt)}</span>
++          <span className="fleet-inline-runs-input">{t.prompt || "(no input)"}</span>
++        </li>
++      ))}
++    </ul>
++  );
++}
++
++function AddRunnerCard({ send, onDone }: { send: FleetSend; onDone: () => void }) {
++  const notify = useAppToast();
++  const [name, setName] = useState("");
++  const [url, setUrl] = useState("http://127.0.0.1:");
++  const [token, setToken] = useState("");
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const canSave = name.trim() !== "" && /^https?:\/\/.+/.test(url.trim()) && token.trim() !== "" && !saving;
++
++  const save = async (event: FormEvent) => {
++    event.preventDefault();
++    if (!canSave) return;
++    setSaving(true);
++    setError(null);
++    try {
++      await send("AddRunner", { name: name.trim(), url: url.trim(), token: token.trim() });
++      notify({ title: `Added runner ${name.trim()}`, description: "Its agents appear once it answers.", tone: "success" });
++      onDone();
++    } catch (e) {
++      setError(e instanceof Error ? e.message : "Couldn't add the runner.");
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  return (
++    <form className="fleet-agent-card fleet-agent-form" onSubmit={(e) => void save(e)} aria-label="Add runner">
++      <h3 className="fleet-agent-name">Add runner</h3>
++      <p className="field-hint">A runner hosts the agents in its agents/ folder. Add it once; its agents show up here.</p>
++      <label className="field">
++        <span className="field-label">Name</span>
++        <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ec2" autoFocus />
++      </label>
++      <label className="field">
++        <span className="field-label">Runner URL</span>
++        <input className="field-input mono" value={url} onChange={(e) => setUrl(e.target.value)} />
++        <span className="field-hint">As the Controller sees it, e.g. the local end of an SSH tunnel.</span>
++      </label>
++      <label className="field">
++        <span className="field-label">Runner token</span>
++        <input className="field-input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
++      </label>
++      {error && <div className="schedule-editor-error" role="alert">{error}</div>}
++      <div className="fleet-agent-run-actions">
++        <button type="button" className="btn-secondary fleet-small-btn" onClick={onDone} disabled={saving}>
++          Cancel
++        </button>
++        <button type="submit" className="btn-primary fleet-small-btn" disabled={!canSave}>
++          {saving ? "Adding…" : "Add runner"}
++        </button>
++      </div>
++    </form>
++  );
++}
+diff --git a/apps/web/src/components/fleet/ChatsView.tsx b/apps/web/src/components/fleet/ChatsView.tsx
+new file mode 100644
+index 0000000..c53ce76
+--- /dev/null
++++ b/apps/web/src/components/fleet/ChatsView.tsx
+@@ -0,0 +1,158 @@
++import { useState, type FormEvent, type KeyboardEvent } from "react";
++import { MessageCircle, Plus, SendHorizontal, Sparkles } from "lucide-react";
++import { Conversation, ConversationContent } from "@/components/ai-elements/conversation";
++import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
++import { useAppToast } from "../AppToast.js";
++import type { FleetChat, FleetModel } from "./fleet-types.js";
++import type { FleetSend } from "./FleetModule.js";
++import { ago, chatsOf } from "./fleet-view-model.js";
++
++export function ChatsView({
++  model,
++  send,
++  selectedId,
++  onSelect,
++}: {
++  model: FleetModel;
++  send: FleetSend;
++  selectedId: string | null;
++  onSelect: (id: string | null) => void;
++}) {
++  const chats = chatsOf(model);
++  const selected = selectedId ? model.chats?.[selectedId] : undefined;
++
++  return (
++    <div className="fleet-chats">
++      <aside className="fleet-chat-list" aria-label="Chats">
++        <button type="button" className="btn-primary fleet-new-chat" onClick={() => onSelect(null)}>
++          <Plus size={15} /> New chat
++        </button>
++        {chats.length === 0 ? (
++          <p className="fleet-muted fleet-chat-list-empty">No chats yet.</p>
++        ) : (
++          <ul>
++            {chats.map((c) => (
++              <li key={c.id}>
++                <button
++                  type="button"
++                  className={`fleet-chat-row${c.id === selectedId ? " active" : ""}`}
++                  onClick={() => onSelect(c.id)}
++                  aria-current={c.id === selectedId}
++                >
++                  <span className="fleet-chat-row-title">{c.title}</span>
++                  <span className="fleet-chat-row-sub">
++                    {c.context && <span className="fleet-chat-badge">from run</span>}
++                    {c.pending ? "replying…" : ago(model.now, c.updatedAt)}
++                  </span>
++                </button>
++              </li>
++            ))}
++          </ul>
++        )}
++      </aside>
++      <ChatPane key={selected?.id ?? "new"} chat={selected} send={send} onCreated={onSelect} />
++    </div>
++  );
++}
++
++export function ChatPane({
++  chat,
++  send,
++  onCreated,
++}: {
++  chat: FleetChat | undefined;
++  send: FleetSend;
++  onCreated: (id: string) => void;
++}) {
++  const notify = useAppToast();
++  const [draft, setDraft] = useState("");
++  const [sending, setSending] = useState(false);
++  const blocked = sending || chat?.pending === true;
++
++  const submit = async (event?: FormEvent) => {
++    event?.preventDefault();
++    const text = draft.trim();
++    if (!text || blocked) return;
++    setSending(true);
++    try {
++      if (chat) {
++        await send("SendChatMessage", { chatId: chat.id, text });
++      } else {
++        const id = await send("CreateChat", { text });
++        if (id) onCreated(id);
++      }
++      setDraft("");
++    } catch (e) {
++      notify({ title: "Couldn't send the message", description: e instanceof Error ? e.message : undefined, tone: "error" });
++    } finally {
++      setSending(false);
++    }
++  };
++
++  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
++    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
++      event.preventDefault();
++      void submit();
++    }
++  };
++
++  return (
++    <section className="fleet-chat-pane" aria-label={chat?.title ?? "New chat"}>
++      <Conversation className="fleet-chat-scroll">
++        <ConversationContent className="fleet-chat-content">
++          {chat?.context && (
++            <details className="fleet-chat-context">
++              <summary>
++                <Sparkles size={13} /> Started from an agent result
++              </summary>
++              <pre className="fleet-artifact-text">{chat.context.text}</pre>
++            </details>
++          )}
++          {!chat || chat.messages.length === 0 ? (
++            <div className="fleet-chat-empty">
++              <MessageCircle size={40} strokeWidth={1} />
++              <p>{chat?.context ? "Ask anything about this result." : "Start a conversation with the fleet assistant."}</p>
++            </div>
++          ) : (
++            chat.messages.map((m) => (
++              <Message from={m.role} key={m.id}>
++                <MessageContent className={m.role === "assistant" ? "fleet-bubble-assistant" : undefined}>
++                  {m.role === "assistant" ? <MessageResponse>{m.text}</MessageResponse> : <span className="fleet-user-text">{m.text}</span>}
++                </MessageContent>
++              </Message>
++            ))
++          )}
++          {chat?.pending && (
++            <Message from="assistant">
++              <MessageContent className="fleet-bubble-assistant fleet-typing" aria-label="Assistant is replying">
++                <span />
++                <span />
++                <span />
++              </MessageContent>
++            </Message>
++          )}
++          {chat?.error && !chat.pending && (
++            <p className="fleet-chat-error" role="alert">
++              Couldn't get a reply: {chat.error}
++            </p>
++          )}
++        </ConversationContent>
++      </Conversation>
++      <form className="fleet-composer" onSubmit={(e) => void submit(e)}>
++        <textarea
++          className="field-input"
++          rows={2}
++          value={draft}
++          onChange={(e) => setDraft(e.target.value)}
++          onKeyDown={onKeyDown}
++          placeholder={chat?.pending ? "Waiting for the reply…" : "Message the assistant (Enter to send, Shift+Enter for a new line)"}
++          aria-label="Message"
++          autoFocus
++        />
++        <button type="submit" className="btn-primary" disabled={blocked || !draft.trim()}>
++          <SendHorizontal size={15} /> Send
++        </button>
++      </form>
++    </section>
++  );
++}
+diff --git a/apps/web/src/components/fleet/FleetModule.test.tsx b/apps/web/src/components/fleet/FleetModule.test.tsx
+new file mode 100644
+index 0000000..e0744b1
+--- /dev/null
++++ b/apps/web/src/components/fleet/FleetModule.test.tsx
+@@ -0,0 +1,229 @@
++import { renderToStaticMarkup } from "react-dom/server";
++import { describe, expect, it } from "vitest";
++import { AppToastProvider } from "../AppToast.js";
++import { FleetConnectForm, FleetLinkBadge, FleetModule } from "./FleetModule.js";
++import { InboxCard, InboxView } from "./InboxView.js";
++import { ChatPane } from "./ChatsView.js";
++import { AgentCard, AgentsView } from "./AgentsView.js";
++import type { FleetChat, FleetModel, FleetTask } from "./fleet-types.js";
++
++const NOW = 1_000_000;
++
++const jokes: FleetTask = {
++  id: "t1",
++  runner: "ec2",
++  agent: "dadjokes",
++  prompt: "coffee",
++  state: "completed",
++  statusText: "jokes delivered",
++  artifacts: [{ id: "jokes", name: "jokes", text: "It got mugged." }],
++  createdAt: NOW - 60_000,
++  updatedAt: NOW - 57_000,
++  ackedAt: null,
++};
++
++const chat: FleetChat = {
++  id: "c1",
++  title: "hello",
++  context: null,
++  messages: [
++    { id: "c1:0", role: "user", text: "hello there", at: NOW - 5_000 },
++    { id: "c1:1", role: "assistant", text: "General Kenobi", at: NOW - 4_000 },
++  ],
++  pending: false,
++  error: null,
++  createdAt: NOW - 5_000,
++  updatedAt: NOW - 4_000,
++};
++
++const model: FleetModel = {
++  now: NOW,
++  runners: {
++    ec2: {
++      name: "ec2",
++      url: "http://127.0.0.1:9471",
++      status: "healthy",
++      failures: 0,
++      nextCheckAt: NOW + 15_000,
++      lastSeenAt: NOW - 3_000,
++      lastError: null,
++      location: "EC2 us-west-2",
++    },
++  },
++  agents: {
++    "ec2/dadjokes": {
++      key: "ec2/dadjokes",
++      runner: "ec2",
++      id: "dadjokes",
++      name: "Dad jokes",
++      description: "Writes dad jokes.",
++      input: { label: "Topic", hint: "what the jokes are about", example: "penguins" },
++      schedule: null,
++    },
++  },
++  tasks: { t1: jokes },
++  chats: { c1: chat },
++  notifications: [],
++};
++
++const noop = async () => null;
++const wrap = (node: React.ReactNode) => renderToStaticMarkup(<AppToastProvider>{node}</AppToastProvider>);
++
++describe("FleetModule", () => {
++  it("shows the unread count on the Inbox tab", () => {
++    const html = wrap(<FleetModule model={model} link={{ kind: "live" }} send={noop} onEditConnection={() => {}} />);
++    expect(html).toContain("Inbox (1)");
++  });
++
++  it("waits for the Controller before showing any view", () => {
++    const html = wrap(<FleetModule model={null} link={{ kind: "connecting" }} send={noop} onEditConnection={() => {}} />);
++    expect(html).toContain("Waiting for the Controller");
++  });
++});
++
++describe("InboxView", () => {
++  it("says all caught up when nothing is unread", () => {
++    const read = { ...model, tasks: { t1: { ...jokes, ackedAt: NOW } } };
++    expect(wrap(<InboxView model={read} send={noop} onOpenChat={() => {}} />)).toContain("All caught up");
++  });
++
++  it("leaves running tasks out of the inbox", () => {
++    const busy = { ...model, tasks: { t1: { ...jokes, state: "working" as const } } };
++    expect(wrap(<InboxView model={busy} send={noop} onOpenChat={() => {}} />)).toContain("All caught up");
++  });
++
++  it("offers mark-all-read only when there is more than one result", () => {
++    const two = { ...model, tasks: { t1: jokes, t2: { ...jokes, id: "t2" } } };
++    expect([
++      wrap(<InboxView model={model} send={noop} onOpenChat={() => {}} />).includes("Mark all read"),
++      wrap(<InboxView model={two} send={noop} onOpenChat={() => {}} />).includes("Mark all read"),
++    ]).toEqual([false, true]);
++  });
++});
++
++describe("InboxCard", () => {
++  const card = (task: FleetTask) => wrap(<InboxCard model={model} task={task} send={noop} onOpenChat={() => {}} />);
++
++  it("names the agent and its runner", () => {
++    const html = card(jokes);
++    expect([html.includes("Dad jokes"), html.includes("on ec2")]).toEqual([true, true]);
++  });
++
++  it("titles the card with the agent's input label and the prompt", () => {
++    expect(card(jokes)).toContain("Topic: coffee");
++  });
++
++  it("shows the result", () => {
++    expect(card(jokes)).toContain("It got mugged.");
++  });
++
++  it("offers the acknowledge and continue-in-chat actions", () => {
++    const html = card(jokes);
++    expect([html.includes("Ok, got it"), html.includes("Continue in chat")]).toEqual([true, true]);
++  });
++
++  it("explains why a run failed", () => {
++    expect(card({ ...jokes, state: "failed", statusText: "bedrock: throttled", artifacts: [] })).toContain("bedrock: throttled");
++  });
++
++  it("keeps secondary outputs collapsed", () => {
++    const report = {
++      ...jokes,
++      artifacts: [
++        { id: "metrics", name: "metrics", text: "load 4.5" },
++        { id: "summary", name: "summary", text: "All good" },
++      ],
++    };
++    expect(card(report)).toMatch(/<details[^>]*><summary>metrics<\/summary>/);
++  });
++});
++
++describe("ChatPane", () => {
++  it("renders both sides of the conversation", () => {
++    const html = wrap(<ChatPane chat={chat} send={noop} onCreated={() => {}} />);
++    expect([html.includes("hello there"), html.includes("General Kenobi")]).toEqual([true, true]);
++  });
++
++  it("shows a typing indicator while a reply is pending", () => {
++    expect(wrap(<ChatPane chat={{ ...chat, pending: true }} send={noop} onCreated={() => {}} />)).toContain("Assistant is replying");
++  });
++
++  it("shows why a reply failed", () => {
++    expect(wrap(<ChatPane chat={{ ...chat, error: "throttled" }} send={noop} onCreated={() => {}} />)).toContain("throttled");
++  });
++
++  it("invites a first message for a new chat", () => {
++    expect(wrap(<ChatPane chat={undefined} send={noop} onCreated={() => {}} />)).toContain("Start a conversation");
++  });
++});
++
++describe("AgentsView", () => {
++  const view = (m: FleetModel) => wrap(<AgentsView model={m} send={noop} />);
++
++  it("groups agents under their runner with its location", () => {
++    const html = view(model);
++    expect([html.includes("Runner ec2"), html.includes("EC2 us-west-2"), html.includes("Dad jokes")]).toEqual([true, true, true]);
++  });
++
++  it("marks agents of an unreachable runner", () => {
++    const down = { ...model, runners: { ec2: { ...model.runners.ec2!, status: "unreachable" as const } } };
++    expect(view(down)).toContain("UNREACHABLE");
++  });
++
++  it("says so when a runner serves no agents", () => {
++    expect(view({ ...model, agents: {} })).toContain("This runner serves no agents.");
++  });
++});
++
++describe("AgentCard", () => {
++  const card = (m: FleetModel) =>
++    wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} />);
++
++  it("shows the agent's key", () => {
++    expect(card(model)).toContain("ec2/dadjokes");
++  });
++
++  it("draws one history cell per run", () => {
++    const three = { ...model, tasks: { a: { ...jokes, id: "a" }, b: { ...jokes, id: "b", state: "failed" as const }, c: { ...jokes, id: "c" } } };
++    expect(card(three).match(/fleet-strip-cell/g)?.length).toBe(3);
++  });
++
++  it("shows evals as not available yet", () => {
++    expect(card(model)).toMatch(/<button[^>]*disabled=""[^>]*>\[evals\]/);
++  });
++
++  it("shows the daily schedule", () => {
++    const scheduled = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, schedule: { at: "07:30", prompt: "" } } } };
++    expect(card(scheduled)).toContain("Daily at 07:30");
++  });
++
++  it("says when an agent isn't scheduled", () => {
++    expect(card(model)).toContain("Not scheduled");
++  });
++});
++
++describe("InboxCard trigger", () => {
++  it("marks runs started by the schedule", () => {
++    const html = wrap(<InboxCard model={model} task={{ ...jokes, trigger: "schedule" }} send={noop} onOpenChat={() => {}} />);
++    expect(html).toContain("scheduled");
++  });
++});
++
++describe("FleetLinkBadge", () => {
++  it.each([
++    [{ kind: "live" } as const, "Live"],
++    [{ kind: "retrying", error: "down" } as const, "Reconnecting…"],
++    [{ kind: "rejected", error: "bad token" } as const, "Not connected"],
++  ])("renders %o as %s", (link, text) => {
++    expect(renderToStaticMarkup(<FleetLinkBadge link={link} />)).toContain(text);
++  });
++});
++
++describe("FleetConnectForm", () => {
++  it("shows the Controller's rejection reason", () => {
++    const html = renderToStaticMarkup(
++      <FleetConnectForm initial={null} error="The Controller rejected the token." onConnect={() => {}} />,
++    );
++    expect(html).toContain("The Controller rejected the token.");
++  });
++});
+diff --git a/apps/web/src/components/fleet/FleetModule.tsx b/apps/web/src/components/fleet/FleetModule.tsx
+new file mode 100644
+index 0000000..127aebf
+--- /dev/null
++++ b/apps/web/src/components/fleet/FleetModule.tsx
+@@ -0,0 +1,161 @@
++import { useState } from "react";
++import { Network, PlugZap } from "lucide-react";
++import { ModuleHeader } from "../ModuleHeader.js";
++import { ModuleTabs } from "../ModuleTabs.js";
++import { L } from "../../lexicon.js";
++import { DEFAULT_FLEET_URL, type FleetConnection, type FleetIntent } from "./fleet-client.js";
++import type { FleetModel } from "./fleet-types.js";
++import type { FleetLink } from "./use-fleet.js";
++import { inboxOf, runningCount } from "./fleet-view-model.js";
++import { InboxView } from "./InboxView.js";
++import { ChatsView } from "./ChatsView.js";
++import { AgentsView } from "./AgentsView.js";
++
++export type FleetSend = (type: FleetIntent, payload: Record<string, string>) => Promise<string | null>;
++
++export type FleetTab = "inbox" | "chats" | "agents";
++
++export function FleetLinkBadge({ link }: { link: FleetLink }) {
++  const [tone, text] =
++    link.kind === "live"
++      ? ["ok", "Live"]
++      : link.kind === "connecting"
++        ? ["info", "Connecting…"]
++        : link.kind === "retrying"
++          ? ["warn", "Reconnecting…"]
++          : ["bad", "Not connected"];
++  return (
++    <span className="fleet-link" title={"error" in link ? link.error : undefined} role="status">
++      <span className={`dot dot-${tone}`} aria-hidden="true" /> {text}
++    </span>
++  );
++}
++
++export interface FleetModuleProps {
++  model: FleetModel | null;
++  link: FleetLink;
++  send: FleetSend;
++  onEditConnection: () => void;
++  initialTab?: FleetTab;
++}
++
++export function FleetModule({ model, link, send, onEditConnection, initialTab = "inbox" }: FleetModuleProps) {
++  const [tab, setTab] = useState<FleetTab>(initialTab);
++  const [chatId, setChatId] = useState<string | null>(null);
++  const unread = model ? inboxOf(model).length : 0;
++  const running = model ? runningCount(model) : 0;
++
++  const openChat = (id: string) => {
++    setChatId(id);
++    setTab("chats");
++  };
++
++  return (
++    <section className="module fleet-module">
++      <ModuleHeader icon={<Network size={18} />} title={L.fleetSection}>
++        <span className="module-header-spacer" />
++        {running > 0 && <span className="fleet-running">{running} running</span>}
++        {link.kind === "retrying" && <span className="fleet-link-error">{link.error}</span>}
++        <FleetLinkBadge link={link} />
++        <button type="button" className="btn-secondary" onClick={onEditConnection}>
++          <PlugZap size={15} /> Connection
++        </button>
++      </ModuleHeader>
++      <ModuleTabs<FleetTab>
++        ariaLabel="Agent Fleet views"
++        active={tab}
++        onSelect={setTab}
++        tabs={[
++          { key: "inbox", label: unread > 0 ? `Inbox (${unread})` : "Inbox" },
++          { key: "chats", label: "Chats" },
++          { key: "agents", label: "Agents" },
++        ]}
++      />
++      <div className="fleet-body" role="tabpanel">
++        {!model ? (
++          <div className="fleet-empty fleet-waiting">Waiting for the Controller to send the fleet…</div>
++        ) : tab === "inbox" ? (
++          <InboxView model={model} send={send} onOpenChat={openChat} />
++        ) : tab === "chats" ? (
++          <ChatsView model={model} send={send} selectedId={chatId} onSelect={setChatId} />
++        ) : (
++          <AgentsView model={model} send={send} />
++        )}
++      </div>
++    </section>
++  );
++}
++
++export function FleetConnectForm({
++  initial,
++  error,
++  onConnect,
++  onCancel,
++}: {
++  initial: FleetConnection | null;
++  error?: string;
++  onConnect: (connection: FleetConnection) => void;
++  onCancel?: () => void;
++}) {
++  const [url, setUrl] = useState(initial?.url ?? DEFAULT_FLEET_URL);
++  const [token, setToken] = useState(initial?.token ?? "");
++  const origin = typeof window === "undefined" ? "" : window.location.origin;
++  const canConnect = /^https?:\/\/.+/.test(url.trim()) && token.trim() !== "";
++
++  return (
++    <section className="module fleet-module">
++      <ModuleHeader icon={<Network size={18} />} title={L.fleetSection} />
++      <form
++        className="resource-editor fleet-connect"
++        onSubmit={(e) => {
++          e.preventDefault();
++          if (canConnect) onConnect({ url: url.trim(), token: token.trim() });
++        }}
++      >
++        <header className="resource-editor-head">
++          <h2 className="resource-editor-title">Connect to a fleet Controller</h2>
++          <p className="field-hint">
++            The Controller runs on your machine and tracks agents on local and remote runners. This screen is a view
++            of it: runs keep going when the app is closed.
++          </p>
++        </header>
++        <div className="resource-editor-body">
++          <label className="field">
++            <span className="field-label">Controller URL</span>
++            <input className="field-input mono" value={url} onChange={(e) => setUrl(e.target.value)} />
++          </label>
++          <label className="field">
++            <span className="field-label">API token</span>
++            <input
++              className="field-input mono"
++              type="password"
++              value={token}
++              onChange={(e) => setToken(e.target.value)}
++              autoComplete="off"
++              autoFocus
++            />
++            <span className="field-hint">
++              Copy it with <code>cat ~/.agent-fleet/token</code>.
++            </span>
++          </label>
++          <p className="field-hint">
++            Start the Controller with <code>FLEET_ALLOWED_ORIGINS={origin || "<this app's origin>"}</code> so it accepts
++            requests from this app.
++          </p>
++          {error && <div className="schedule-editor-error" role="alert">{error}</div>}
++        </div>
++        <footer className="resource-editor-actions">
++          <span className="resource-editor-actions-spacer" />
++          {onCancel && (
++            <button type="button" className="btn-secondary" onClick={onCancel}>
++              Cancel
++            </button>
++          )}
++          <button type="submit" className="btn-primary" disabled={!canConnect}>
++            Connect
++          </button>
++        </footer>
++      </form>
++    </section>
++  );
++}
+diff --git a/apps/web/src/components/fleet/FleetScreen.tsx b/apps/web/src/components/fleet/FleetScreen.tsx
+new file mode 100644
+index 0000000..9e3fcb3
+--- /dev/null
++++ b/apps/web/src/components/fleet/FleetScreen.tsx
+@@ -0,0 +1,24 @@
++import { useState } from "react";
++import { FleetConnectForm, FleetModule } from "./FleetModule.js";
++import { useFleet } from "./use-fleet.js";
++
++// Mounted only while the Fleet view is open, so the Model stream closes when you leave it.
++export function FleetScreen() {
++  const fleet = useFleet();
++  const [editing, setEditing] = useState(false);
++
++  if (editing || fleet.link.kind === "unconfigured" || fleet.link.kind === "rejected") {
++    return (
++      <FleetConnectForm
++        initial={fleet.connection}
++        error={fleet.link.kind === "rejected" ? fleet.link.error : undefined}
++        onConnect={(connection) => {
++          fleet.connect(connection);
++          setEditing(false);
++        }}
++        onCancel={editing && fleet.link.kind !== "unconfigured" ? () => setEditing(false) : undefined}
++      />
++    );
++  }
++  return <FleetModule model={fleet.model} link={fleet.link} send={fleet.send} onEditConnection={() => setEditing(true)} />;
++}
+diff --git a/apps/web/src/components/fleet/InboxView.tsx b/apps/web/src/components/fleet/InboxView.tsx
+new file mode 100644
+index 0000000..1909230
+--- /dev/null
++++ b/apps/web/src/components/fleet/InboxView.tsx
+@@ -0,0 +1,178 @@
++import { useState, type FormEvent } from "react";
++import { AlarmClock, Check, CheckCheck, Inbox, MessageSquare, RotateCcw, SendHorizontal } from "lucide-react";
++import { MessageResponse } from "@/components/ai-elements/message";
++import { useAppToast } from "../AppToast.js";
++import type { FleetModel, FleetTask } from "./fleet-types.js";
++import type { FleetSend } from "./FleetModule.js";
++import { agentName, ago, artifactsNewestFirst, inboxOf, runTitle, taskAgentKey, taskTone } from "./fleet-view-model.js";
++
++const STACK_DEPTH = 2;
++
++export function InboxView({
++  model,
++  send,
++  onOpenChat,
++}: {
++  model: FleetModel;
++  send: FleetSend;
++  onOpenChat: (chatId: string) => void;
++}) {
++  const notify = useAppToast();
++  const items = inboxOf(model);
++  const top = items[0];
++
++  const ackAll = async () => {
++    try {
++      await send("AckAllInbox", {});
++    } catch (e) {
++      notify({ title: "Couldn't clear the inbox", description: e instanceof Error ? e.message : undefined, tone: "error" });
++    }
++  };
++
++  if (!top) {
++    return (
++      <div className="fleet-inbox-empty">
++        <Inbox size={40} strokeWidth={1} />
++        <p className="fleet-inbox-empty-title">All caught up</p>
++        <p className="fleet-muted">When an agent finishes a run, its result shows up here.</p>
++      </div>
++    );
++  }
++
++  return (
++    <div className="fleet-inbox">
++      <div className="fleet-inbox-bar">
++        <span className="fleet-muted">
++          {items.length === 1 ? "1 result to review" : `${items.length} results to review`}
++        </span>
++        {items.length > 1 && (
++          <button type="button" className="btn-secondary fleet-small-btn" onClick={() => void ackAll()}>
++            <CheckCheck size={14} /> Mark all read
++          </button>
++        )}
++      </div>
++      <div className="fleet-stack" style={{ ["--fleet-stack-depth" as string]: Math.min(items.length - 1, STACK_DEPTH) }}>
++        {items.slice(1, 1 + STACK_DEPTH).map((t, i) => (
++          <div key={t.id} className="fleet-stack-shadow" style={{ ["--fleet-stack-i" as string]: i + 1 }} aria-hidden="true" />
++        ))}
++        <InboxCard key={top.id} model={model} task={top} send={send} onOpenChat={onOpenChat} />
++      </div>
++    </div>
++  );
++}
++
++export function InboxCard({
++  model,
++  task,
++  send,
++  onOpenChat,
++}: {
++  model: FleetModel;
++  task: FleetTask;
++  send: FleetSend;
++  onOpenChat: (chatId: string) => void;
++}) {
++  const notify = useAppToast();
++  const [question, setQuestion] = useState("");
++  const [busy, setBusy] = useState(false);
++  const [primary, ...others] = artifactsNewestFirst(task);
++  const failed = taskTone(task.state) === "bad";
++
++  const act = async (label: string, action: () => Promise<unknown>) => {
++    setBusy(true);
++    try {
++      await action();
++    } catch (e) {
++      notify({ title: `Couldn't ${label}`, description: e instanceof Error ? e.message : undefined, tone: "error" });
++    } finally {
++      setBusy(false);
++    }
++  };
++
++  const continueInChat = (text: string) =>
++    act("start the chat", async () => {
++      const chatId = await send("CreateChat", { fromTaskId: task.id, text });
++      if (chatId) onOpenChat(chatId);
++    });
++
++  const ask = (event: FormEvent) => {
++    event.preventDefault();
++    if (question.trim()) void continueInChat(question.trim());
++  };
++
++  return (
++    <article className={`fleet-inbox-card${failed ? " failed" : ""}`} aria-label={runTitle(model, task)}>
++      <header className="fleet-inbox-card-head">
++        <span className="fleet-inbox-agent">{agentName(model, task)}</span>
++        <span className="fleet-muted">on {task.runner}</span>
++        {task.trigger === "schedule" && (
++          <span className="fleet-inbox-scheduled">
++            <AlarmClock size={12} aria-hidden="true" /> scheduled
++          </span>
++        )}
++        <span className={`fleet-state fleet-tone-${taskTone(task.state)}`}>{task.state}</span>
++        <span className="fleet-muted">· {ago(model.now, task.updatedAt)}</span>
++      </header>
++      <h2 className="fleet-inbox-title">{runTitle(model, task)}</h2>
++
++      <div className="fleet-inbox-body">
++        {failed && task.statusText && <p className="fleet-inbox-error">{task.statusText}</p>}
++        {primary ? (
++          <div className="fleet-inbox-result">
++            <MessageResponse>{primary.text}</MessageResponse>
++          </div>
++        ) : (
++          !failed && <p className="fleet-muted">This run produced no output.</p>
++        )}
++        {others.map((a) => (
++          <details key={a.id} className="fleet-inbox-extra">
++            <summary>{a.name || a.id}</summary>
++            <pre className="fleet-artifact-text">{a.text}</pre>
++          </details>
++        ))}
++      </div>
++
++      <form className="fleet-inbox-ask" onSubmit={ask}>
++        <input
++          className="field-input"
++          value={question}
++          onChange={(e) => setQuestion(e.target.value)}
++          placeholder="Ask a follow-up about this result…"
++          aria-label="Ask a follow-up"
++          disabled={busy}
++        />
++        <button type="submit" className="btn-secondary fleet-icon-btn" disabled={busy || !question.trim()} aria-label="Ask in chat">
++          <SendHorizontal size={15} />
++        </button>
++      </form>
++
++      <footer className="fleet-inbox-actions">
++        <button
++          type="button"
++          className="btn-secondary"
++          disabled={busy}
++          onClick={() =>
++            void act("run it again", async () => {
++              await send("CreateTask", { agent: taskAgentKey(task), prompt: task.prompt });
++              notify({ title: `Started ${agentName(model, task)} again`, tone: "success" });
++            })
++          }
++        >
++          <RotateCcw size={14} /> Run again
++        </button>
++        <button type="button" className="btn-secondary" disabled={busy} onClick={() => void continueInChat("")}>
++          <MessageSquare size={14} /> Continue in chat
++        </button>
++        <button
++          type="button"
++          className="btn-primary"
++          disabled={busy}
++          onClick={() => void act("mark it read", () => send("AckInbox", { taskId: task.id }))}
++          autoFocus
++        >
++          <Check size={15} /> Ok, got it
++        </button>
++      </footer>
++    </article>
++  );
++}
+diff --git a/apps/web/src/components/fleet/fleet-client.ts b/apps/web/src/components/fleet/fleet-client.ts
+new file mode 100644
+index 0000000..f76e5a3
+--- /dev/null
++++ b/apps/web/src/components/fleet/fleet-client.ts
+@@ -0,0 +1,101 @@
++import { createParser } from "eventsource-parser";
++import type { FleetModel } from "./fleet-types.js";
++
++export interface FleetConnection {
++  url: string;
++  token: string;
++}
++
++const STORAGE_KEY = "pizza.fleet.connection";
++export const DEFAULT_FLEET_URL = "http://127.0.0.1:7700";
++// Matches agent-fleet's dev.sh so a local test setup connects with no configuration.
++export const DEV_FLEET_CONNECTION: FleetConnection = { url: DEFAULT_FLEET_URL, token: "fleet-dev-token" };
++
++export function loadFleetConnection(): FleetConnection {
++  try {
++    const raw = localStorage.getItem(STORAGE_KEY);
++    if (!raw) return DEV_FLEET_CONNECTION;
++    const parsed = JSON.parse(raw) as Partial<FleetConnection>;
++    return typeof parsed.url === "string" && typeof parsed.token === "string"
++      ? { url: parsed.url, token: parsed.token }
++      : DEV_FLEET_CONNECTION;
++  } catch {
++    return DEV_FLEET_CONNECTION;
++  }
++}
++
++export function saveFleetConnection(connection: FleetConnection | null): void {
++  if (connection) localStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
++  else localStorage.removeItem(STORAGE_KEY);
++}
++
++export class FleetError extends Error {
++  constructor(
++    message: string,
++    readonly status?: number,
++  ) {
++    super(message);
++  }
++}
++
++const base = (c: FleetConnection) => c.url.replace(/\/+$/, "");
++const auth = (c: FleetConnection) => ({ authorization: `Bearer ${c.token}` });
++
++const failure = async (res: Response): Promise<FleetError> => {
++  const body = (await res.json().catch(() => ({}))) as { error?: string };
++  return new FleetError(body.error ?? `HTTP ${res.status}`, res.status);
++};
++
++export type FleetIntent =
++  | "AddRunner"
++  | "RemoveRunner"
++  | "CreateTask"
++  | "CancelTask"
++  | "AckInbox"
++  | "AckAllInbox"
++  | "CreateChat"
++  | "SendChatMessage"
++  | "SetSchedule";
++
++/**
++ * @returns the id the Controller minted (new task or chat), if any
++ * @throws FleetError when the Controller rejects the intent or is unreachable
++ */
++export async function sendFleetIntent(
++  connection: FleetConnection,
++  type: FleetIntent,
++  payload: Record<string, string>,
++): Promise<string | null> {
++  const res = await fetch(`${base(connection)}/msg`, {
++    method: "POST",
++    headers: { ...auth(connection), "content-type": "application/json" },
++    body: JSON.stringify({ msg_id: crypto.randomUUID(), type, payload }),
++  });
++  if (!res.ok) throw await failure(res);
++  const body = (await res.json().catch(() => ({}))) as { id?: unknown };
++  return typeof body.id === "string" ? body.id : null;
++}
++
++/**
++ * Streams full Model snapshots until `signal` aborts or the stream ends.
++ * EventSource can't send an Authorization header, so this reads SSE over fetch.
++ * @throws FleetError on non-2xx (e.g. 401 bad token, 403 origin not allowed)
++ */
++export async function streamFleetModel(
++  connection: FleetConnection,
++  signal: AbortSignal,
++  onModel: (model: FleetModel) => void,
++): Promise<void> {
++  const res = await fetch(`${base(connection)}/model/stream`, { headers: auth(connection), signal });
++  if (!res.ok || !res.body) throw await failure(res);
++  const parser = createParser({
++    onEvent: (event) => onModel((JSON.parse(event.data) as { model: FleetModel }).model),
++  });
++  const decoder = new TextDecoder();
++  const reader = res.body.getReader();
++  for (;;) {
++    const { done, value } = await reader.read();
++    if (done) return;
++    parser.feed(decoder.decode(value, { stream: true }));
++  }
++}
+diff --git a/apps/web/src/components/fleet/fleet-types.ts b/apps/web/src/components/fleet/fleet-types.ts
+new file mode 100644
+index 0000000..82adde8
+--- /dev/null
++++ b/apps/web/src/components/fleet/fleet-types.ts
+@@ -0,0 +1,89 @@
++// Mirrors the agent-fleet Controller's public Model (GET /model). Runner tokens never reach the UI.
++export type FleetRunnerStatus = "unknown" | "healthy" | "unreachable";
++
++/** A host process (one per machine). Health is per runner; it hosts many agents. */
++export interface FleetRunner {
++  name: string;
++  url: string;
++  status: FleetRunnerStatus;
++  failures: number;
++  nextCheckAt: number;
++  lastSeenAt: number | null;
++  lastError: string | null;
++  location: string | null;
++}
++
++/** What users run, schedule and see. Key: `<runner>/<id>`. */
++export interface FleetAgent {
++  key: string;
++  runner: string;
++  id: string;
++  name: string;
++  description: string;
++  input: { label: string; hint: string; example: string } | null;
++  schedule: { at: string; prompt: string } | null;
++}
++
++export type FleetTaskState =
++  | "dispatching"
++  | "submitted"
++  | "working"
++  | "input-required"
++  | "completed"
++  | "failed"
++  | "canceled"
++  | "rejected"
++  | "lost";
++
++export interface FleetArtifact {
++  id: string;
++  name: string;
++  text: string;
++}
++
++export interface FleetTask {
++  id: string;
++  runner: string;
++  agent: string;
++  prompt: string;
++  state: FleetTaskState;
++  statusText: string | null;
++  artifacts: FleetArtifact[];
++  createdAt: number;
++  updatedAt: number;
++  trigger?: "manual" | "schedule";
++  ackedAt?: number | null;
++}
++
++export interface FleetNotification {
++  at: number;
++  level: "info" | "error";
++  text: string;
++}
++
++export interface FleetChatMessage {
++  id: string;
++  role: "user" | "assistant";
++  text: string;
++  at: number;
++}
++
++export interface FleetChat {
++  id: string;
++  title: string;
++  context: { taskId: string; text: string } | null;
++  messages: FleetChatMessage[];
++  pending: boolean;
++  error: string | null;
++  createdAt: number;
++  updatedAt: number;
++}
++
++export interface FleetModel {
++  now: number;
++  runners: Record<string, FleetRunner>;
++  agents: Record<string, FleetAgent>;
++  tasks: Record<string, FleetTask>;
++  chats?: Record<string, FleetChat>;
++  notifications: FleetNotification[];
++}
+diff --git a/apps/web/src/components/fleet/fleet-view-model.test.ts b/apps/web/src/components/fleet/fleet-view-model.test.ts
+new file mode 100644
+index 0000000..b7b2d67
+--- /dev/null
++++ b/apps/web/src/components/fleet/fleet-view-model.test.ts
+@@ -0,0 +1,174 @@
++import { describe, expect, it } from "vitest";
++import type { FleetModel, FleetTask } from "./fleet-types.js";
++import { activeRun, ago, artifactsNewestFirst, defaultInput, duration, inboxOf, runnerHealth, runnerLocation, runsOf, runStrip, runTitle } from "./fleet-view-model.js";
++
++const NOW = 1_000_000;
++
++const KEY = "ec2/dadjokes";
++
++const task = (overrides: Partial<FleetTask>): FleetTask => ({
++  id: "t1",
++  runner: "ec2",
++  agent: "dadjokes",
++  prompt: "kubernetes",
++  state: "completed",
++  statusText: "jokes delivered",
++  artifacts: [],
++  createdAt: NOW - 60_000,
++  updatedAt: NOW - 55_000,
++  ...overrides,
++});
++
++const model = (tasks: FleetTask[], example = "penguins"): FleetModel => ({
++  now: NOW,
++  runners: {
++    ec2: {
++      name: "ec2",
++      url: "http://127.0.0.1:9471",
++      status: "healthy",
++      failures: 0,
++      nextCheckAt: NOW + 15_000,
++      lastSeenAt: NOW - 3_000,
++      lastError: null,
++      location: null,
++    },
++  },
++  agents: {
++    [KEY]: {
++      key: KEY,
++      runner: "ec2",
++      id: "dadjokes",
++      name: "Dad jokes",
++      description: "Dad jokes",
++      input: { label: "Topic", hint: "what about", example },
++      schedule: null,
++    },
++  },
++  tasks: Object.fromEntries(tasks.map((t) => [t.id, t])),
++  notifications: [],
++});
++
++describe("runsOf", () => {
++  it("lists an agent's runs newest first", () => {
++    const m = model([task({ id: "old", createdAt: NOW - 90_000 }), task({ id: "new", createdAt: NOW - 10_000 })]);
++    expect(runsOf(m, KEY).map((t) => t.id)).toEqual(["new", "old"]);
++  });
++
++  it("excludes other agents' runs", () => {
++    expect(runsOf(model([task({ agent: "other" })]), KEY)).toEqual([]);
++  });
++
++  it("excludes the same agent id on another runner", () => {
++    expect(runsOf(model([task({ runner: "laptop" })]), KEY)).toEqual([]);
++  });
++});
++
++describe("activeRun", () => {
++  it("returns the run that has not finished", () => {
++    const m = model([task({ id: "done" }), task({ id: "live", state: "working", createdAt: NOW - 1_000 })]);
++    expect(activeRun(m, KEY)?.id).toBe("live");
++  });
++
++  it("is undefined when every run has finished", () => {
++    expect(activeRun(model([task({ state: "failed" })]), KEY)).toBeUndefined();
++  });
++});
++
++describe("defaultInput", () => {
++  it("prefers the last prompt over the card example", () => {
++    expect(defaultInput(model([task({ prompt: "coffee" })]), KEY)).toBe("coffee");
++  });
++
++  it("falls back to the card example when there are no runs", () => {
++    expect(defaultInput(model([]), KEY)).toBe("penguins");
++  });
++
++  it("is empty without runs or examples", () => {
++    expect(defaultInput(model([], ""), KEY)).toBe("");
++  });
++});
++
++describe("artifactsNewestFirst", () => {
++  it("puts the last artifact first", () => {
++    const t = task({
++      artifacts: [
++        { id: "metrics", name: "metrics", text: "raw" },
++        { id: "summary", name: "summary", text: "ok" },
++      ],
++    });
++    expect(artifactsNewestFirst(t).map((a) => a.id)).toEqual(["summary", "metrics"]);
++  });
++});
++
++describe("inboxOf", () => {
++  it("lists unread finished runs newest first", () => {
++    const m = model([task({ id: "old", updatedAt: NOW - 90_000 }), task({ id: "new", updatedAt: NOW - 1_000 })]);
++    expect(inboxOf(m).map((t) => t.id)).toEqual(["new", "old"]);
++  });
++
++  it("drops acknowledged runs", () => {
++    expect(inboxOf(model([task({ ackedAt: NOW })]))).toEqual([]);
++  });
++
++  it("drops runs still in progress", () => {
++    expect(inboxOf(model([task({ state: "working" })]))).toEqual([]);
++  });
++});
++
++describe("runTitle", () => {
++  it("combines the agent's input label with the prompt", () => {
++    const m = model([]);
++    expect(runTitle(m, task({ prompt: "coffee" }))).toBe("Topic: coffee");
++  });
++
++  it("falls back to a report title without a prompt", () => {
++    expect(runTitle(model([]), task({ prompt: "" }))).toBe("Your dad jokes");
++  });
++});
++
++describe("runStrip", () => {
++  it("orders the last runs oldest to newest", () => {
++    const m = model([task({ id: "a", createdAt: NOW - 30_000 }), task({ id: "b", createdAt: NOW - 10_000 })]);
++    expect(runStrip(m, KEY).map((t) => t.id)).toEqual(["a", "b"]);
++  });
++
++  it("keeps at most the last ten runs", () => {
++    const many = Array.from({ length: 14 }, (_, i) => task({ id: `t${i}`, createdAt: NOW - i * 1_000 }));
++    expect(runStrip(model(many), KEY)).toHaveLength(10);
++  });
++});
++
++describe("runnerLocation", () => {
++  it("uses the location the runner reports", () => {
++    expect(runnerLocation({ ...model([]).runners.ec2!, location: "EC2 us-west-2" })).toBe("EC2 us-west-2");
++  });
++
++  it("falls back to the runner's host", () => {
++    expect(runnerLocation({ ...model([]).runners.ec2!, location: null })).toBe("127.0.0.1:9471");
++  });
++});
++
++describe("formatting", () => {
++  it.each([
++    [2_000, "just now"],
++    [42_000, "42s ago"],
++    [5 * 60_000, "5m ago"],
++    [3 * 3_600_000, "3h ago"],
++    [2 * 86_400_000, "2d ago"],
++  ])("ago(%i ms) is %s", (elapsed, expected) => {
++    expect(ago(NOW, NOW - elapsed)).toBe(expected);
++  });
++
++  it.each([
++    [6_000, "6s"],
++    [62_000, "1m 02s"],
++  ])("duration(%i ms) is %s", (ms, expected) => {
++    expect(duration(ms)).toBe(expected);
++  });
++
++  it("shows the retry countdown for an unreachable runner", () => {
++    const m = model([]);
++    const runner = { ...m.runners.ec2!, status: "unreachable" as const, nextCheckAt: NOW + 8_000 };
++    expect(runnerHealth(m, runner)).toBe("retry in 8s");
++  });
++});
+diff --git a/apps/web/src/components/fleet/fleet-view-model.ts b/apps/web/src/components/fleet/fleet-view-model.ts
+new file mode 100644
+index 0000000..f8c714e
+--- /dev/null
++++ b/apps/web/src/components/fleet/fleet-view-model.ts
+@@ -0,0 +1,108 @@
++import type { FleetAgent, FleetChat, FleetModel, FleetRunner, FleetTask, FleetTaskState } from "./fleet-types.js";
++
++const TERMINAL: ReadonlySet<FleetTaskState> = new Set(["completed", "failed", "canceled", "rejected", "lost"]);
++
++export const isFinished = (task: FleetTask): boolean => TERMINAL.has(task.state);
++
++export const taskAgentKey = (task: FleetTask): string => `${task.runner}/${task.agent}`;
++
++export const agentsOf = (model: FleetModel): FleetAgent[] =>
++  Object.values(model.agents ?? {}).sort((a, b) => a.runner.localeCompare(b.runner) || a.name.localeCompare(b.name));
++
++export const agentOfTask = (model: FleetModel, task: FleetTask): FleetAgent | undefined => model.agents?.[taskAgentKey(task)];
++
++export const agentName = (model: FleetModel, task: FleetTask): string => agentOfTask(model, task)?.name ?? task.agent;
++
++export const runsOf = (model: FleetModel, agentKey: string): FleetTask[] =>
++  Object.values(model.tasks)
++    .filter((t) => taskAgentKey(t) === agentKey)
++    .sort((a, b) => b.createdAt - a.createdAt);
++
++export const activeRun = (model: FleetModel, agentKey: string): FleetTask | undefined =>
++  runsOf(model, agentKey).find((t) => !isFinished(t));
++
++export const runningCount = (model: FleetModel): number =>
++  Object.values(model.tasks).filter((t) => !isFinished(t)).length;
++
++export type Tone = "ok" | "warn" | "bad" | "info" | "muted";
++
++export const runnerTone = (status: FleetRunner["status"]): Tone =>
++  status === "healthy" ? "ok" : status === "unreachable" ? "bad" : "warn";
++
++export const taskTone = (state: FleetTaskState): Tone => {
++  switch (state) {
++    case "completed":
++      return "ok";
++    case "failed":
++    case "rejected":
++    case "lost":
++      return "bad";
++    case "input-required":
++      return "warn";
++    case "canceled":
++      return "muted";
++    default:
++      return "info";
++  }
++};
++
++/** Last prompt wins over the manifest example: re-running with tweaks is the common case. */
++export const defaultInput = (model: FleetModel, agentKey: string): string =>
++  runsOf(model, agentKey)[0]?.prompt ?? model.agents?.[agentKey]?.input?.example ?? "";
++
++/** Newest artifact first, so a final summary shows above the raw data it was built from. */
++export const artifactsNewestFirst = (task: FleetTask) => [...task.artifacts].reverse();
++
++export const ago = (now: number, at: number): string => {
++  const sec = Math.max(0, Math.round((now - at) / 1000));
++  if (sec < 5) return "just now";
++  if (sec < 60) return `${sec}s ago`;
++  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
++  if (sec < 86_400) return `${Math.round(sec / 3600)}h ago`;
++  return `${Math.round(sec / 86_400)}d ago`;
++};
++
++export const duration = (ms: number): string => {
++  const sec = Math.max(0, Math.round(ms / 1000));
++  return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, "0")}s`;
++};
++
++export const runnerHealth = (model: FleetModel, r: FleetRunner): string => {
++  if (r.status === "unreachable") return `retry in ${Math.max(0, Math.round((r.nextCheckAt - model.now) / 1000))}s`;
++  if (r.lastSeenAt === null) return "checking…";
++  return `seen ${ago(model.now, r.lastSeenAt)}`;
++};
++
++/** Finished runs nobody has dealt with yet, newest first (same rule as the Controller). */
++export const inboxOf = (model: FleetModel): FleetTask[] =>
++  Object.values(model.tasks)
++    .filter((t) => isFinished(t) && !t.ackedAt)
++    .sort((a, b) => b.updatedAt - a.updatedAt);
++
++export const chatsOf = (model: FleetModel): FleetChat[] =>
++  Object.values(model.chats ?? {}).sort((a, b) => b.updatedAt - a.updatedAt);
++
++export const inputLabel = (agent: FleetAgent | undefined): string => agent?.input?.label || "Input";
++
++/** Card heading for an inbox item: what was asked, in the agent's own words. */
++export const runTitle = (model: FleetModel, task: FleetTask): string => {
++  const agent = agentOfTask(model, task);
++  if (!task.prompt) return `Your ${(agent?.name ?? task.agent).toLowerCase()}`;
++  return `${inputLabel(agent)}: ${task.prompt}`;
++};
++
++/** Where a runner is; falls back to its host when it doesn't say. */
++export const runnerLocation = (r: FleetRunner): string => {
++  if (r.location) return r.location;
++  try {
++    return new URL(r.url).host;
++  } catch {
++    return r.url;
++  }
++};
++
++export const RUN_STRIP_LENGTH = 10;
++
++/** Oldest-to-newest outcomes of the last runs, for the agent card's history strip. */
++export const runStrip = (model: FleetModel, agentKey: string): FleetTask[] =>
++  runsOf(model, agentKey).slice(0, RUN_STRIP_LENGTH).reverse();
+diff --git a/apps/web/src/components/fleet/use-fleet.ts b/apps/web/src/components/fleet/use-fleet.ts
+new file mode 100644
+index 0000000..b9d3381
+--- /dev/null
++++ b/apps/web/src/components/fleet/use-fleet.ts
+@@ -0,0 +1,86 @@
++import { useCallback, useEffect, useState } from "react";
++import {
++  loadFleetConnection,
++  saveFleetConnection,
++  sendFleetIntent,
++  streamFleetModel,
++  FleetError,
++  type FleetConnection,
++  type FleetIntent,
++} from "./fleet-client.js";
++import type { FleetModel } from "./fleet-types.js";
++
++export type FleetLink =
++  | { kind: "unconfigured" }
++  | { kind: "connecting" }
++  | { kind: "live" }
++  | { kind: "retrying"; error: string }
++  | { kind: "rejected"; error: string };
++
++const RETRY_MS = 2_000;
++
++const describe = (e: unknown): string => {
++  if (e instanceof FleetError && e.status === 401) return "The Controller rejected the token.";
++  if (e instanceof FleetError && e.status === 403)
++    return "The Controller doesn't allow this app's origin. Add it to FLEET_ALLOWED_ORIGINS.";
++  if (e instanceof FleetError) return e.message;
++  return "Can't reach the Controller. Is it running?";
++};
++
++/** Auth and origin failures won't fix themselves, so they stop the retry loop. */
++const isFatal = (e: unknown) => e instanceof FleetError && (e.status === 401 || e.status === 403);
++
++export function useFleet() {
++  const [connection, setConnection] = useState<FleetConnection | null>(loadFleetConnection);
++  const [model, setModel] = useState<FleetModel | null>(null);
++  const [link, setLink] = useState<FleetLink>({ kind: "connecting" });
++
++  useEffect(() => {
++    if (!connection) return;
++    const abort = new AbortController();
++    let timer: ReturnType<typeof setTimeout> | undefined;
++
++    const follow = async () => {
++      try {
++        await streamFleetModel(connection, abort.signal, (next) => {
++          setModel(next);
++          setLink({ kind: "live" });
++        });
++        if (!abort.signal.aborted) setLink({ kind: "retrying", error: "The Controller closed the stream." });
++      } catch (e) {
++        if (abort.signal.aborted) return;
++        if (isFatal(e)) return setLink({ kind: "rejected", error: describe(e) });
++        setLink({ kind: "retrying", error: describe(e) });
++      }
++      if (!abort.signal.aborted) timer = setTimeout(() => void follow(), RETRY_MS);
++    };
++
++    setLink({ kind: "connecting" });
++    void follow();
++    return () => {
++      abort.abort();
++      clearTimeout(timer);
++    };
++  }, [connection]);
++
++  const connect = useCallback((next: FleetConnection | null) => {
++    saveFleetConnection(next);
++    setModel(null);
++    setLink(next ? { kind: "connecting" } : { kind: "unconfigured" });
++    setConnection(next);
++  }, []);
++
++  const send = useCallback(
++    async (type: FleetIntent, payload: Record<string, string>): Promise<string | null> => {
++      if (!connection) throw new FleetError("Not connected to a Controller.");
++      try {
++        return await sendFleetIntent(connection, type, payload);
++      } catch (e) {
++        throw new FleetError(describe(e));
++      }
++    },
++    [connection],
++  );
++
++  return { connection, model, link, connect, send };
++}
+diff --git a/scripts/dev-fleet.sh b/scripts/dev-fleet.sh
+new file mode 100755
+index 0000000..0014b01
+--- /dev/null
++++ b/scripts/dev-fleet.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++# One-command local test of the Agent Fleet screen: pizza-bot api-server on :8080 plus Vite on :5173.
++# Start agent-fleet's dev.sh first; this screen connects to its Controller with the shared dev token.
++set -u
++cd "$(dirname "$0")/.."
++
++[ -d apps/web/node_modules ] || [ -d node_modules ] || npm install
++[ -d packages/core/dist ] || npm run build
++
++trap 'kill 0' EXIT INT TERM
++PORT=8080 PIZZA_DATA_ROOT="${PIZZA_DATA_ROOT:-/tmp/pizza-bot-fleet-dev}" npx tsx apps/api-server/src/index.ts &
++npm run dev -w @pizza-bot/web -- --port 5173 --strictPort &
++
++echo "pizza-bot fleet dev: open http://localhost:5173 and click Agent Fleet (Ctrl-C stops everything)"
++wait

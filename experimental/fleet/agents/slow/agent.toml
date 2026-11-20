@@ -1,0 +1,9 @@
+name = "Slow test agent"
+description = "Reports progress N times, S seconds apart, then returns a result. For disconnect tests; no LLM."
+command = "python3 agent.py"
+timeout_secs = 3600
+
+[input]
+label = "Plan"
+hint = "steps=N every=S <text>"
+example = "steps=10 every=3 hello"

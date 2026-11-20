@@ -1,0 +1,12 @@
+name = "Dad jokes"
+description = "Writes 5 dad jokes about any topic (us.openai.gpt-6.1-terra on Bedrock)."
+command = "uv run --quiet agent.py"
+timeout_secs = 120
+
+[input]
+label = "Topic"
+hint = "what the jokes should be about"
+example = "kubernetes"
+
+[env]
+MODEL = "us.openai.gpt-6.1-terra"
