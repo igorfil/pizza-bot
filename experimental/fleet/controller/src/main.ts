@@ -1,9 +1,10 @@
+#!/usr/bin/env node
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { serveApi } from "./api.ts";
-import { openLog } from "./log.ts";
-import { startRuntime } from "./runtime.ts";
+import { serveApi } from "./api.js";
+import { openLog } from "./log.js";
+import { startRuntime } from "./runtime.js";
 
 const home = process.env.FLEET_HOME ?? join(homedir(), ".agent-fleet");
 const port = Number(process.env.FLEET_PORT ?? 7700);

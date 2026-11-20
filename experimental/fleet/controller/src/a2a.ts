@@ -1,6 +1,6 @@
 import { ClientFactory, ClientFactoryOptions, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
-import type { AgentInfo, Artifact, Endpoint, RunnerRef, TaskSnapshot, TaskUpdate } from "./types.ts";
+import type { AgentInfo, Artifact, Endpoint, RunnerRef, TaskSnapshot, TaskUpdate } from "./types.js";
 
 const CALL_TIMEOUT_MS = 10_000;
 

@@ -52,7 +52,7 @@ export type Task = {
   artifacts: Artifact[];
   createdAt: number;
   updatedAt: number;
-  trigger?: "manual" | "schedule";
+  trigger: "manual" | "schedule";
   /** Set once the user has dealt with the finished run in the inbox. */
   ackedAt: number | null;
   lastSyncAt: number;

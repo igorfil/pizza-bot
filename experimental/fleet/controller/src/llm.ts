@@ -1,6 +1,6 @@
 import { BedrockRuntimeClient, ConverseCommand, type Message } from "@aws-sdk/client-bedrock-runtime";
-import type { Outcome } from "./a2a.ts";
-import type { LlmTurn } from "./types.ts";
+import type { Outcome } from "./a2a.js";
+import type { LlmTurn } from "./types.js";
 
 const MODEL = process.env.FLEET_CHAT_MODEL ?? "us.anthropic.claude-haiku-5-5";
 const TIMEOUT_MS = 60_000;

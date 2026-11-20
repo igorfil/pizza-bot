@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import type { Model, Msg, TaskSnapshot } from "../src/types.ts";
-import { inboxOf, initialModel, subscriptions, update, WAKE_GAP_MS } from "../src/update.ts";
+import { describe, expect, test } from "vitest";
+import type { Model, Msg, TaskSnapshot } from "./types.js";
+import { inboxOf, initialModel, subscriptions, update, WAKE_GAP_MS } from "./update.js";
 
 const run = (msgs: Msg[], start: Model = initialModel()) =>
   msgs.reduce<[Model, ReturnType<typeof update>[1]]>(([m], msg) => update(m, msg), [start, []]);

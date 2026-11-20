@@ -1,5 +1,8 @@
-import { INTENT_TYPES, type IntentMsg, type Model } from "./types.ts";
-import type { Runtime } from "./runtime.ts";
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
+import { INTENT_TYPES, type IntentMsg, type Model } from "./types.js";
+import type { Runtime } from "./runtime.js";
 
 const KEEPALIVE_MS = 15_000;
 
@@ -54,56 +57,6 @@ export const toIntent = (type: string, p: Record<string, unknown>): IntentMsg | 
 const createdId = (intent: IntentMsg): string | null =>
   intent.type === "CreateTask" ? intent.taskId : intent.type === "CreateChat" ? intent.chatId : null;
 
-const json = (body: unknown, status = 200) => Response.json(body, { status });
-
-const postMsg = async (req: Request, runtime: Runtime): Promise<Response> => {
-  const body = (await req.json().catch(() => null)) as Envelope | null;
-  if (!body || !str(body.msg_id) || !str(body.type)) return json({ error: "need msg_id and type" }, 400);
-  if (!INTENT_TYPES.has(body.type)) return json({ error: `${body.type} is not an intent` }, 400);
-  const intent = toIntent(body.type, (body.payload ?? {}) as Record<string, unknown>);
-  if (typeof intent === "string") return json({ error: intent }, 400);
-  const { version, duplicate } = runtime.send(body.msg_id, intent);
-  return json({ accepted_at_version: version, duplicate, id: duplicate ? null : createdId(intent) }, duplicate ? 200 : 202);
-};
-
-const sseFrame = (version: number, model: Model) =>
-  `id: ${version}\ndata: ${JSON.stringify({ version, model: publicModel(model) })}\n\n`;
-
-const streamModel = (req: Request, runtime: Runtime): Response => {
-  const enc = new TextEncoder();
-  let cleanup = () => {};
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const push = (text: string) => controller.enqueue(enc.encode(text));
-      const { version, model } = runtime.snapshot();
-      push(sseFrame(version, model));
-      const off = runtime.onChange((v, m) => push(sseFrame(v, m)));
-      const keepalive = setInterval(() => push(": keepalive\n\n"), KEEPALIVE_MS);
-      cleanup = () => {
-        off();
-        clearInterval(keepalive);
-      };
-      req.signal.addEventListener("abort", cleanup);
-    },
-    cancel: () => cleanup(),
-  });
-  return new Response(body, {
-    headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" },
-  });
-};
-
-const route = (req: Request, runtime: Runtime, token: string): Response | Promise<Response> => {
-  if (req.headers.get("authorization") !== `Bearer ${token}`) return json({ error: "unauthorized" }, 401);
-  const { pathname } = new URL(req.url);
-  if (req.method === "POST" && pathname === "/msg") return postMsg(req, runtime);
-  if (req.method === "GET" && pathname === "/model") {
-    const { version, model } = runtime.snapshot();
-    return json({ version, model: publicModel(model) });
-  }
-  if (req.method === "GET" && pathname === "/model/stream") return streamModel(req, runtime);
-  return json({ error: "not found" }, 404);
-};
-
 const corsHeaders = (origin: string) => ({
   "access-control-allow-origin": origin,
   "access-control-allow-headers": "authorization, content-type",
@@ -111,23 +64,56 @@ const corsHeaders = (origin: string) => ({
   vary: "origin",
 });
 
-const withCors = async (res: Response | Promise<Response>, origin: string): Promise<Response> => {
-  const r = await res;
-  Object.entries(corsHeaders(origin)).forEach(([k, v]) => r.headers.set(k, v));
-  return r;
+export type ApiOptions = { token: string; allowedOrigins: ReadonlySet<string> };
+
+/** The HTTP API as a Hono app, separate from the server so tests can call `app.request`. */
+export const createApi = (runtime: Runtime, opts: ApiOptions): Hono => {
+  const app = new Hono();
+
+  app.use("*", async (c, next) => {
+    const origin = c.req.header("origin");
+    if (origin !== undefined) {
+      // Browsers always send Origin; only explicitly allowed UIs may drive the fleet via localhost.
+      if (!opts.allowedOrigins.has(origin)) return c.json({ error: "browser origin not allowed" }, 403);
+      Object.entries(corsHeaders(origin)).forEach(([k, v]) => c.header(k, v));
+      if (c.req.method === "OPTIONS") return c.body(null, 204);
+    }
+    if (c.req.header("authorization") !== `Bearer ${opts.token}`) return c.json({ error: "unauthorized" }, 401);
+    await next();
+  });
+
+  app.post("/msg", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as Envelope | null;
+    if (!body || !str(body.msg_id) || !str(body.type)) return c.json({ error: "need msg_id and type" }, 400);
+    if (!INTENT_TYPES.has(body.type)) return c.json({ error: `${body.type} is not an intent` }, 400);
+    const intent = toIntent(body.type, (body.payload ?? {}) as Record<string, unknown>);
+    if (typeof intent === "string") return c.json({ error: intent }, 400);
+    const { version, duplicate } = runtime.send(body.msg_id, intent);
+    return c.json({ accepted_at_version: version, duplicate, id: duplicate ? null : createdId(intent) }, duplicate ? 200 : 202);
+  });
+
+  app.get("/model", (c) => {
+    const { version, model } = runtime.snapshot();
+    return c.json({ version, model: publicModel(model) });
+  });
+
+  app.get("/model/stream", (c) =>
+    streamSSE(c, async (stream) => {
+      const frame = (version: number, model: Model) =>
+        stream.writeSSE({ id: String(version), data: JSON.stringify({ version, model: publicModel(model) }) });
+      const { version, model } = runtime.snapshot();
+      await frame(version, model);
+      const off = runtime.onChange((v, m) => void frame(v, m));
+      const keepalive = setInterval(() => void stream.write(": keepalive\n\n"), KEEPALIVE_MS);
+      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      off();
+      clearInterval(keepalive);
+    }),
+  );
+
+  app.notFound((c) => c.json({ error: "not found" }, 404));
+  return app;
 };
 
-export const serveApi = (runtime: Runtime, opts: { port: number; token: string; allowedOrigins: ReadonlySet<string> }) =>
-  Bun.serve({
-    hostname: "127.0.0.1",
-    port: opts.port,
-    idleTimeout: 0,
-    fetch: (req) => {
-      const origin = req.headers.get("origin");
-      if (origin === null) return route(req, runtime, opts.token);
-      // Browsers always send Origin; only explicitly allowed UIs may drive the fleet via localhost.
-      if (!opts.allowedOrigins.has(origin)) return json({ error: "browser origin not allowed" }, 403);
-      if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(origin) });
-      return withCors(route(req, runtime, opts.token), origin);
-    },
-  });
+export const serveApi = (runtime: Runtime, opts: ApiOptions & { port: number }) =>
+  serve({ fetch: createApi(runtime, opts).fetch, hostname: "127.0.0.1", port: opts.port });

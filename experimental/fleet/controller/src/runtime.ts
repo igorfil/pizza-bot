@@ -1,8 +1,8 @@
-import * as a2a from "./a2a.ts";
-import * as llm from "./llm.ts";
-import type { MsgLog } from "./log.ts";
-import type { Effect, LocalClock, Model, Msg, Sub } from "./types.ts";
-import { initialModel, subscriptions, TICK_MS, update } from "./update.ts";
+import * as a2a from "./a2a.js";
+import * as llm from "./llm.js";
+import type { MsgLog } from "./log.js";
+import type { Effect, LocalClock, Model, Msg, Sub } from "./types.js";
+import { initialModel, subscriptions, TICK_MS, update } from "./update.js";
 
 export type Runtime = {
   send: (msgId: string, msg: Msg) => { version: number; duplicate: boolean };

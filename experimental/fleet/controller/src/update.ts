@@ -1,4 +1,4 @@
-import { chatFailed, chatReplied, createChat, failInterruptedChats, sendChatMessage } from "./chat.ts";
+import { chatFailed, chatReplied, createChat, failInterruptedChats, sendChatMessage } from "./chat.js";
 import type {
   Agent,
   AgentInfo,
@@ -15,7 +15,7 @@ import type {
   TaskSnapshot,
   TaskState,
   TaskUpdate,
-} from "./types.ts";
+} from "./types.js";
 
 export const TICK_MS = 2_000;
 export const HEALTH_INTERVAL_MS = 15_000;

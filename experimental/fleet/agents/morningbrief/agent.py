@@ -86,7 +86,13 @@ class Conversation:
 
 
 def conversations(inbox_text: str, since: datetime) -> list[Conversation]:
-    emails = first_json(inbox_text)["content"]["emails"]  # type: ignore[index]
+    reply = first_json(inbox_text)
+    content = reply.get("content") if isinstance(reply, dict) else None
+    if not isinstance(content, dict) or "emails" not in content:
+        # Seen at 07:30 after an overnight Midway expiry: a reply without content instead of a tool error.
+        detail = reply.get("error") or reply.get("message") if isinstance(reply, dict) else None
+        raise RuntimeError(f"Outlook returned no inbox ({detail or 'unexpected reply'}); is Midway fresh? run mwinit")
+    emails = content["emails"]
     convs = (
         Conversation(
             topic=e.get("topic", ""),

@@ -1,4 +1,4 @@
-import type { Chat, ChatMessage, Effect, LlmTurn, Model, Task } from "./types.ts";
+import type { Chat, ChatMessage, Effect, LlmTurn, Model, Task } from "./types.js";
 
 export const CHAT_SYSTEM =
   "You are the assistant inside an agent-fleet dashboard. Be concise and practical. " +
