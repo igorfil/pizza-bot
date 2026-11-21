@@ -61,26 +61,28 @@ export function FleetModule({ model, link, send, onEditConnection, initialTab = 
           <PlugZap size={15} /> Connection
         </button>
       </ModuleHeader>
-      <ModuleTabs<FleetTab>
-        ariaLabel="Fleet views"
-        active={tab}
-        onSelect={setTab}
-        tabs={[
-          { key: "inbox", label: unread > 0 ? `Inbox (${unread})` : "Inbox" },
-          { key: "chats", label: "Chats" },
-          { key: "agents", label: "Agents" },
-        ]}
-      />
-      <div className="fleet-body" role="tabpanel">
-        {!model ? (
-          <div className="fleet-empty fleet-waiting">Waiting for the Controller to send the fleet…</div>
-        ) : tab === "inbox" ? (
-          <InboxView model={model} send={send} onOpenChat={openChat} />
-        ) : tab === "chats" ? (
-          <ChatsView model={model} send={send} selectedId={chatId} onSelect={setChatId} />
-        ) : (
-          <AgentsView model={model} send={send} />
-        )}
+      <div className="fleet-layout">
+        <ModuleTabs<FleetTab>
+          ariaLabel="Fleet views"
+          active={tab}
+          onSelect={setTab}
+          tabs={[
+            { key: "inbox", label: unread > 0 ? `Inbox (${unread})` : "Inbox" },
+            { key: "chats", label: "Chats" },
+            { key: "agents", label: "Agents" },
+          ]}
+        />
+        <div className="fleet-body" role="tabpanel">
+          {!model ? (
+            <div className="fleet-empty fleet-waiting">Waiting for the Controller to send the fleet…</div>
+          ) : tab === "inbox" ? (
+            <InboxView model={model} send={send} onOpenChat={openChat} />
+          ) : tab === "chats" ? (
+            <ChatsView model={model} send={send} selectedId={chatId} onSelect={setChatId} />
+          ) : (
+            <AgentsView model={model} send={send} />
+          )}
+        </div>
       </div>
     </section>
   );
