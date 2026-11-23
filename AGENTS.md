@@ -219,21 +219,12 @@ first line of documentation.
 
 ## Git workflow
 
-Every agent-driven change MUST use a dedicated branch in an isolated worktree.
-Make all edits in that worktree; keep the main checkout available for review.
-Name branches `<type>/<kebab-case-description>` using an intent such as `fix`,
-`feat`, `refactor`, `docs`, `test`, or `chore`. Branch names MUST describe the
-change, not the implementation tool, agent, author, or worktree.
+Work on the currently checked-out branch; don't create branches unless asked.
+When a branch is asked for, name it `<type>/<kebab-case-description>` using an
+intent such as `fix`, `feat`, `refactor`, `docs`, `test`, or `chore`. Branch
+names MUST describe the change, not the implementation tool, agent, or author.
 
-Create worktrees under the main checkout's repo-local
-`.worktrees/<kebab-case-description>` directory. The worktree directory MUST
-match the description portion of its branch name; omit the `<type>/` prefix.
-For example:
-`git worktree add .worktrees/skill-worker-bundled-files -b fix/skill-worker-bundled-files main`.
-
-A fresh worktree needs its own `npm install` before building or testing;
-otherwise workspace imports can resolve against stale output from another
-checkout. Run `npm run build` before starting any application entrypoint:
+Run `npm run build` before starting any application entrypoint:
 `@pizza-bot/*` imports resolve to their built `dist/` output, while `typecheck`
 and `test` build only their task dependencies. Keep the affected tests and
 typecheck green, and run the full CI checks before opening a PR. Do not merge to
@@ -245,19 +236,10 @@ authentication failure in the sandbox, rerun that command outside the sandbox
 before diagnosing an expired credential or requesting reauthentication. Do not
 extract or repackage credentials as a workaround.
 
-After a PR is merged, clean up from the main checkout by removing the worktree
-before deleting its local branch:
-
-```bash
-git worktree remove .worktrees/<kebab-case-description>
-git branch -d <type>/<kebab-case-description>
-git fetch --prune
-```
-
-If GitHub did not delete the remote head branch, remove it with
-`git push origin --delete <type>/<kebab-case-description>`. Use
-`git worktree prune` only to clear stale metadata for worktree directories that
-were already removed; it does not remove a valid worktree.
+After a PR is merged, delete its local branch with
+`git branch -d <type>/<kebab-case-description>` and run `git fetch --prune`. If
+GitHub did not delete the remote head branch, remove it with
+`git push origin --delete <type>/<kebab-case-description>`.
 
 <!-- BEGIN:turborepo-agent-rules -->
 
