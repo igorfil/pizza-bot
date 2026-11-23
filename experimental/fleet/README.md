@@ -283,6 +283,7 @@ Agents in this repo (details in [agents/README.md](agents/README.md)):
 | Agent | Where | Input | Does | Artifacts |
 |---|---|---|---|---|
 | `dadjokes` | EC2 | topic | Bedrock `gpt-6.1-terra` writes 5 dad jokes | `jokes` |
+| `geofact` | EC2 | optional place | Bedrock Nova Micro tells one random geography fact | `fact` |
 | `sysreport` | laptop | optional focus | `sysinfo.sh` → Bedrock Haiku summary, OK / WATCH / HOT | `metrics`, `summary` |
 | `morningbrief` | laptop | optional focus | Outlook MCP (inbox 24h + today's calendar) → Bedrock Haiku brief | `brief` |
 | `slow` | laptop | `steps=N every=S text` | N progress updates S seconds apart; no LLM | `result` |

@@ -352,11 +352,11 @@ describe("aws guide: steps", () => {
     expect(r.kind === "working" && r.view.steps?.current).toBe(2);
   });
 
-  test("a new runner serves no agents until some are added", async () => {
+  test("a new runner serves dadjokes and geofact until agents change", async () => {
     const scripts: string[] = [];
     const p = ports({ aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")) })) });
     await answer(stateOf(await toTarget(p)), { instance: "i-online", name: "ec2" }, p);
-    expect(installs(scripts)[0]).toMatch(/^RUNNER_AGENTS=$/m);
+    expect(installs(scripts)[0]).toMatch(/^RUNNER_AGENTS=dadjokes,geofact$/m);
   });
 });
 

@@ -24,7 +24,7 @@ cat > /etc/fleet-runner.env <<'EOF'
 RUNNER_NAME=ec2
 RUNNER_LOCATION=EC2 eu-west-1
 RUNNER_AGENTS_DIR=/opt/fleet-agents
-RUNNER_AGENTS=
+RUNNER_AGENTS=dadjokes,geofact
 AWS_REGION=eu-west-1
 RUNNER_TOKEN=abc123
 RUNNER_BIND=127.0.0.1:9000

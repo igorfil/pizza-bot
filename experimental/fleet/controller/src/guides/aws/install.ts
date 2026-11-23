@@ -8,7 +8,7 @@ export const AGENTS_TARBALL = "fleet-agents.tar.gz";
 
 /**
  * Bootstrap run as root over SSM RunCommand. Idempotent: running it again upgrades in place.
- * The runner starts serving no agents; the Controller turns them on with `PUT /agents`.
+ * A fresh runner serves `dadjokes` and `geofact`, for an easy first test; the Controller changes that with `PUT /agents`.
  * Every interpolated value is validated by the guide (names, agent ids, hex token, URL).
  */
 export const installScript = (o: InstallOptions): string => `#!/bin/bash
@@ -34,7 +34,7 @@ cat > /etc/fleet-runner.env <<'EOF'
 RUNNER_NAME=${o.name}
 RUNNER_LOCATION=EC2 ${o.region}
 RUNNER_AGENTS_DIR=/opt/fleet-agents
-RUNNER_AGENTS=
+RUNNER_AGENTS=dadjokes,geofact
 AWS_REGION=${o.region}
 RUNNER_TOKEN=${o.token}
 RUNNER_BIND=127.0.0.1:${o.port}

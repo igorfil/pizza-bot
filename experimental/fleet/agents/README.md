@@ -82,6 +82,7 @@ input; stdout and exit code carry the contract unchanged.
 | id | Runs on | Input | Uses |
 |---|---|---|---|
 | `dadjokes` | EC2 | topic | Bedrock `us.openai.gpt-6.1-terra` |
+| `geofact` | EC2 | optional place | Bedrock `us.amazon.nova-micro-v1:0` |
 | `sysreport` | laptop | optional focus | `sysinfo.sh` + Bedrock Haiku 5.5 |
 | `morningbrief` | laptop | optional focus | Outlook MCP (`aws-outlook-mcp`, read-only) + Bedrock Haiku 5.5 |
 | `slow` | laptop | `steps=N every=S text` | nothing; for disconnect tests |

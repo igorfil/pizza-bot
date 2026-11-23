@@ -1,0 +1,12 @@
+name = "Geography fact"
+description = "Tells one random geography fact, optionally about a place (us.amazon.nova-micro-v1:0 on Bedrock)."
+command = "uv run --quiet agent.py"
+timeout_secs = 120
+
+[input]
+label = "Place"
+hint = "optional: a country, region or landform"
+example = "Iceland"
+
+[env]
+MODEL = "us.amazon.nova-micro-v1:0"
