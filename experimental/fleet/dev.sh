@@ -1,13 +1,14 @@
 #!/bin/bash
 # One command from a fresh clone to the running fleet experiment: checks prerequisites, runs npm install,
-# builds everything, frees the ports, then starts pizza-bot's web app and api-server with the fleet
-# (`npm run dev:both`). Ctrl-C stops everything.
+# builds everything, frees the ports, then starts the pizza-bot desktop app (Electron) with the fleet
+# (`npm run dev`). Ctrl-C stops everything.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-WEB_PORT="${PIZZA_WEB_PORT:-5173}"
-PORTS=("$WEB_PORT" "${PORT:-8080}" 7700 9301)
+# Vite serves the app's UI to Electron; Electron's own api-server takes a port the OS assigns.
+WEB_PORT="${PIZZA_WEB_PORT:-5273}"
+PORTS=("$WEB_PORT" 7700 9301)
 export PATH="$HOME/.cargo/bin:$PATH"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -89,5 +90,5 @@ for port in "${PORTS[@]}"; do
   [ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
 done
 
-step "Starting: web http://localhost:$WEB_PORT (open Fleet in the left rail), api-server :${PORT:-8080}, Controller :7700, laptop runner :9301"
-exec npm run dev:both
+step "Starting the desktop app (open Fleet in the left rail), Controller :7700, laptop runner :9301"
+exec npm run dev

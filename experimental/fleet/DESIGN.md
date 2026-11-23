@@ -489,7 +489,7 @@ agent). It needs Rust and uv on PATH.
 - `npm run dev:both`: the browser-only variant.
 - `PIZZA_FLEET=0` skips the fleet, and a missing Rust toolchain skips it with a warning.
 - `experimental/fleet/dev.sh` is the one command from a fresh clone: it checks prerequisites, runs
-  `npm install` and `npm run build`, frees the ports, then runs `npm run dev:both`.
+  `npm install` and `npm run build`, frees the ports, then runs `npm run dev` (the Electron app).
 
 **Open questions.**
 - Q-INT-1 **CI.** CI runs `npm run build` on Ubuntu and Windows. It now needs `uv` (not installed by

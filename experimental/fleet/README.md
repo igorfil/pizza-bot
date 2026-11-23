@@ -37,9 +37,9 @@ experimental/fleet/dev.sh
 2. Runs **`npm install`**.
 3. Runs **`npm run build`**: pizza-bot, the fleet Controller, the runner, its **arm64 and x86_64 Linux
    builds for EC2** and the agents' Python environments. It stops if either Linux build is missing.
-4. **Frees the ports** it needs (5173, 8080, 7700, 9301), stopping whatever listens on them.
-5. Starts **`npm run dev:both`**: the web app at <http://localhost:5173> (open **Fleet** in the left rail),
-   pizza-bot's api-server on :8080, the Controller on :7700 and the laptop runner on :9301, which is
+4. **Frees the ports** it needs (5273, 7700, 9301), stopping whatever listens on them.
+5. Starts **`npm run dev`**: the pizza-bot desktop app (Electron, with its UI from Vite on :5273; open
+   **Fleet** in the left rail), the Controller on :7700 and the laptop runner on :9301, which is
    registered on a fresh Controller. Ctrl-C stops everything.
 
 Then **Agents → Add runner → AWS EC2** puts a runner on one of your instances, and **Add agent** on a
