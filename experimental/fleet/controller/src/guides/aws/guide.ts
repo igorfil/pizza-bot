@@ -1,9 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { fail, ok, type Outcome } from "../../outcome.js";
-import type { AwsCredentials, GuideInput, GuideResult, GuideState, NewRunner, StepView, TransportSpec } from "../../types.js";
+import type { AwsCredentials, ChecklistItem, GuideInput, GuideResult, GuideState, NewRunner, StepView, TransportSpec } from "../../types.js";
 import { reveal } from "../../vault.js";
 import { nameProblem, type GuidePorts, type RunnerGuide } from "../guide.js";
-import { detectScript, installScript, parseDetect, uninstallScript } from "./install.js";
+import { AGENT_MODELS } from "../../agent-models.js";
+import { bedrockScript, detectScript, installScript, parseBedrock, parseDetect, uninstallScript } from "./install.js";
 import { LOCAL_RELEASE_DIR } from "./local-build.js";
 import type { Arch, Ec2Host, Instance } from "./port.js";
 
@@ -15,7 +16,7 @@ const CHECK_TIMEOUT_MS = 45_000;
 /** Where account-wide calls go when the profile names no region. */
 const HOME_REGION = "us-east-1";
 
-type Step = "credentials" | "keys" | "target" | "detect" | "detecting" | "push" | "install" | "installing" | "check";
+type Step = "credentials" | "keys" | "target" | "detect" | "detecting" | "push" | "install" | "installing" | "check" | "bedrock" | "bedrocking";
 
 /** Logged after every step: only ids, names and vault keys, never a secret. */
 type AwsState = {
@@ -33,6 +34,8 @@ type AwsState = {
   remotePort?: number;
   /** The instance already ran a runner, so the Controller adopted it instead of installing. */
   adopted?: boolean;
+  /** FLEET_RUNNER_RELEASE=local: the set-up copies this checkout's build first. */
+  local?: boolean;
   commandId?: string;
   polls?: number;
 };
@@ -51,17 +54,54 @@ const ask = (state: AwsState, view: StepView, error?: string): GuideResult => {
   const v = { ...view, steps: stepsOf(state.step) };
   return error === undefined ? { kind: "ask", state: toState(state), view: v } : { kind: "ask", state: toState(state), view: v, error };
 };
-const working = (state: AwsState, title: string, progress: string): GuideResult => ({
-  kind: "working",
-  state: toState(state),
-  view: { title, progress, fields: [], steps: stepsOf(state.step) },
-});
-const failed = (state: AwsState, title: string, error: string): GuideResult => ({
-  kind: "failed",
-  state: toState(state),
-  view: { title, fields: [], body: "Retry repeats this step; Cancel discards the guide.", steps: stepsOf(state.step) },
-  error,
-});
+type SetupItem = { key: "connect" | "push" | "install" | "tunnel" | "bedrock"; label: string; steps: Step[] };
+
+const SETUP: SetupItem[] = [
+  { key: "connect", label: "Connect to the instance", steps: ["detect", "detecting"] },
+  { key: "push", label: "Copy the local build", steps: ["push"] },
+  { key: "install", label: "Install the runner", steps: ["install", "installing"] },
+  { key: "tunnel", label: "Open the tunnel to the runner", steps: ["check"] },
+  { key: "bedrock", label: "Verify Bedrock access", steps: ["bedrock", "bedrocking"] },
+];
+
+const SETUP_TITLE = "Setting up the runner";
+
+/** The set-up as a checklist: done before the current step, then the current one, then pending. */
+const checklistOf = (state: AwsState, failedNow: boolean, progress?: string): StepView["checklist"] => {
+  const items = SETUP.filter((i) => i.key !== "push" || state.local);
+  const at = items.findIndex((i) => i.steps.includes(state.step));
+  if (at < 0) return undefined;
+  return items.map((item, n): ChecklistItem => {
+    if (state.adopted && (item.key === "push" || item.key === "install")) return { label: item.label, state: "skipped", detail: "a runner is already installed" };
+    if (n < at) return { label: item.label, state: "done" };
+    if (n > at) return { label: item.label, state: "pending" };
+    return { label: item.label, state: failedNow ? "failed" : "current", ...(progress && !failedNow ? { detail: progress } : {}) };
+  });
+};
+
+const working = (state: AwsState, title: string, progress: string): GuideResult => {
+  const checklist = checklistOf(state, false, progress);
+  return {
+    kind: "working",
+    state: toState(state),
+    view: { title: checklist ? SETUP_TITLE : title, progress, fields: [], steps: stepsOf(state.step), ...(checklist ? { checklist } : {}) },
+  };
+};
+const failed = (state: AwsState, title: string, error: string): GuideResult => {
+  const checklist = checklistOf(state, true);
+  return {
+    kind: "failed",
+    state: toState(state),
+    view: {
+      title: checklist ? SETUP_TITLE : title,
+      fields: [],
+      body: "Retry repeats this step; Cancel discards the guide.",
+      steps: stepsOf(state.step),
+      ...(checklist ? { checklist } : {}),
+    },
+    error,
+  };
+};
 
 const credentialsView = async (ports: GuidePorts): Promise<StepView> => {
   const profiles = await ports.aws.profiles();
@@ -189,7 +229,11 @@ const chooseTarget = (state: AwsState, input: GuideInput, ports: GuidePorts): Pr
     nameProblem(name, ports.runnerNames) ??
     (state.found?.[instance] ? null : "Pick an instance.");
   if (problem) return target(kept, ports, problem);
-  return working({ ...kept, step: "detect", instanceId: instance, region: state.found![instance]!.region }, "Looking for a runner", "Checking the instance…");
+  return working(
+    { ...kept, step: "detect", instanceId: instance, region: state.found![instance]!.region, local: ports.release === "local" },
+    "Looking for a runner",
+    "Checking the instance…",
+  );
 };
 
 const detect = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
@@ -217,7 +261,7 @@ const waitDetect = async (state: AwsState, ports: GuidePorts): Promise<GuideResu
     if (!result.value.ok) return failed({ ...state, step: "detect" }, "Looking for a runner", result.value.output.trim().split("\n").slice(-5).join("\n") || "the check script failed");
     const found = parseDetect(result.value.output);
     if (found) return adopt(state, found.port, found.token, ports);
-    return ports.release === "local"
+    return state.local
       ? working({ ...state, step: "push" }, "Installing the runner", "Building this checkout's runner and copying it to the instance…")
       : working({ ...state, step: "install" }, "Installing the runner", "Starting…");
   }
@@ -309,11 +353,46 @@ const check = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> =
     const res = await ports.fetch(`${link.value.url}/agents`, { signal: abort.signal }).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
     if (typeof res === "string") return failed(state, "Connecting", res);
     if (!res.ok) return failed(state, "Connecting", `the runner answered HTTP ${res.status}`);
-    return { kind: "done", runner: done(state) };
+    return working({ ...state, step: "bedrock" }, "Checking Bedrock", "Calling each model from the instance…");
   } finally {
     clearTimeout(timer);
     abort.abort();
   }
+};
+
+const bedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+  const h = await host(state, ports);
+  if (!h.ok) return failed(state, "Checking Bedrock", h.error);
+  const sent = await h.value.sendScript(state.instanceId!, bedrockScript(AGENT_MODELS.map((m) => m.id), state.region!));
+  if (!sent.ok) return failed(state, "Checking Bedrock", sent.error);
+  return working({ ...state, step: "bedrocking", commandId: sent.value, polls: 0 }, "Checking Bedrock", "Calling each model from the instance…");
+};
+
+const modelLabel = (id: string): string => AGENT_MODELS.find((m) => m.id === id)?.label ?? id;
+
+/** Agents call Bedrock with the instance role, so a runner whose role reaches no model can't run any. */
+const waitBedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+  const h = await host(state, ports);
+  if (!h.ok) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", h.error);
+  const result = await h.value.scriptResult(state.instanceId!, state.commandId!);
+  if (!result.ok) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", result.error);
+  if (result.value.done) {
+    if (!result.value.ok) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", result.value.output.trim().split("\n").slice(-5).join("\n") || "the Bedrock check failed");
+    const { usable, refused } = parseBedrock(result.value.output);
+    if (usable.length === 0) {
+      const why = refused.map((r) => `${modelLabel(r.model)}: ${r.reason}`).join(", ") || "no model answered";
+      return failed(
+        { ...state, step: "bedrock" },
+        "Checking Bedrock",
+        `The instance role can't call any model (${why}). Allow bedrock:InvokeModel for them on the instance role, then Retry.`,
+      );
+    }
+    return { kind: "done", runner: done(state) };
+  }
+  const polls = (state.polls ?? 0) + 1;
+  if (polls > MAX_DETECT_POLLS) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", "the Bedrock check did not finish in 2 minutes");
+  await ports.sleep(POLL_MS);
+  return working({ ...state, polls }, "Checking Bedrock", `Calling each model from the instance… (${polls * (POLL_MS / 1000)}s)`);
 };
 
 export const awsGuide: RunnerGuide = {
@@ -356,6 +435,10 @@ export const awsGuide: RunnerGuide = {
         return waitInstall(state, ports);
       case "check":
         return check(state, ports);
+      case "bedrock":
+        return bedrock(state, ports);
+      case "bedrocking":
+        return waitBedrock(state, ports);
     }
   },
 

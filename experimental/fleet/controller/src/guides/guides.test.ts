@@ -24,14 +24,24 @@ const fakeHost = (over: Partial<Ec2Host> = {}): Ec2Host => ({
   ...over,
 });
 
+const BEDROCK_OK = "FLEET_BEDROCK us.anthropic.claude-haiku-5-5 ok\n";
+
+/** The Bedrock check gets `bedrock` as its output; every other script goes to the host as given. */
+const withBedrock = (host: Ec2Host, bedrock: string): Ec2Host => ({
+  ...host,
+  sendScript: async (id, script) => (script.includes("FLEET_BEDROCK") ? ok("bedrock-check") : host.sendScript(id, script)),
+  scriptResult: async (id, cmd) => (cmd === "bedrock-check" ? ok({ done: true, ok: true, output: bedrock }) : host.scriptResult(id, cmd)),
+});
+
 /** One host for every region, or one per region; `calls` records the region of every host asked for. */
 const fakeAws = (
   host: Ec2Host | ((region: string) => Ec2Host) = fakeHost(),
   profiles: { name: string; region: string | null }[] = [{ name: "default", region: "eu-west-1" }],
   calls: string[] = [],
+  bedrock = BEDROCK_OK,
 ): AwsPort => ({
   profiles: async () => profiles,
-  host: async (_creds, region) => (calls.push(region), ok(typeof host === "function" ? host(region) : host)),
+  host: async (_creds, region) => (calls.push(region), ok(withBedrock(typeof host === "function" ? host(region) : host, bedrock))),
 });
 
 const upTransport: Transport = { open: async () => ok({ url: "http://127.0.0.1:5555", closed: new Promise(() => {}) }) };
@@ -386,6 +396,74 @@ describe("aws guide: local build (temporary)", () => {
     });
     await answer(stateOf(await toTarget(p)), pick, p);
     expect(pushes).toEqual([]);
+  });
+});
+
+describe("aws guide: set-up checklist", () => {
+  const pick = { instance: "i-online", name: "ec2" };
+
+  /** Every screen the guide shows from picking the instance until it finishes. */
+  const screens = async (p: GuidePorts): Promise<GuideResult[]> => {
+    const seen: GuideResult[] = [];
+    const walk = async (r: GuideResult): Promise<void> => {
+      seen.push(r);
+      if (r.kind === "working") await walk(await awsGuide.step(r.state, null, p));
+    };
+    await walk(await awsGuide.step(stateOf(await toTarget(p)), pick, p));
+    return seen;
+  };
+  const marks = (r: GuideResult) => (r.kind === "working" || r.kind === "failed" ? (r.view.checklist ?? []).map((i) => `${i.label}:${i.state}`) : []);
+
+  test("lists every set-up step and works through them in order", async () => {
+    const seen = await screens(ports());
+    expect(seen.filter((r) => r.kind === "working").map((r) => marks(r).find((m) => m.endsWith(":current")))).toEqual([
+      "Connect to the instance:current",
+      "Connect to the instance:current",
+      "Install the runner:current",
+      "Install the runner:current",
+      "Open the tunnel to the runner:current",
+      "Verify Bedrock access:current",
+      "Verify Bedrock access:current",
+    ]);
+  });
+
+  test("checks off the steps before the current one", async () => {
+    const seen = await screens(ports());
+    const atBedrock = seen.find((r) => marks(r).includes("Verify Bedrock access:current"))!;
+    expect(marks(atBedrock)).toEqual(["Connect to the instance:done", "Install the runner:done", "Open the tunnel to the runner:done", "Verify Bedrock access:current"]);
+  });
+
+  test("shows the current step's progress under it", async () => {
+    const seen = await screens(ports());
+    const installing = seen.find((r) => r.kind === "working" && r.view.checklist?.some((i) => i.state === "current" && i.label === "Install the runner"));
+    expect(installing?.kind === "working" && installing.view.checklist?.find((i) => i.state === "current")?.detail).toBe("Starting…");
+  });
+
+  test("an adopted runner skips installing", async () => {
+    const found = "FLEET_RUNNER=present\nFLEET_RUNNER_PORT=9000\nFLEET_RUNNER_TOKEN=abc\n";
+    const seen = await screens(ports({ aws: fakeAws(fakeHost({ scriptResult: async () => ok({ done: true, ok: true, output: found }) })) }));
+    expect(marks(seen.find((r) => marks(r).includes("Open the tunnel to the runner:current"))!)).toContain("Install the runner:skipped");
+  });
+
+  test("the local build adds a copy step", async () => {
+    const seen = await screens(ports({ release: "local", pushLocalBuild: async () => ok(undefined) }));
+    expect(marks(seen[0]!)).toEqual(["Connect to the instance:current", "Copy the local build:pending", "Install the runner:pending", "Open the tunnel to the runner:pending", "Verify Bedrock access:pending"]);
+  });
+
+  test("a failed step is marked on the checklist", async () => {
+    const down: Transport = { open: async () => fail("SessionManagerPlugin is not found") };
+    const seen = await screens(ports({ transports: () => down }));
+    expect(marks(seen.at(-1)!)).toContain("Open the tunnel to the runner:failed");
+  });
+
+  test("an instance role that reaches no model fails with how to fix it", async () => {
+    const denied = "FLEET_BEDROCK us.anthropic.claude-haiku-5-5 AccessDeniedException\n";
+    const seen = await screens(ports({ aws: fakeAws(fakeHost(), undefined, undefined, denied) }));
+    const last = seen.at(-1)!;
+    expect([last.kind, last.kind === "failed" && last.error]).toEqual([
+      "failed",
+      "The instance role can't call any model (Claude Haiku 5.5: AccessDeniedException). Allow bedrock:InvokeModel for them on the instance role, then Retry.",
+    ]);
   });
 });
 

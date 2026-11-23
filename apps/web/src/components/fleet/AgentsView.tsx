@@ -172,7 +172,7 @@ export function RunnerGroup({
           </button>
         </div>
       )}
-      {addingAgent && <AddAgentDialog runner={runner} send={send} onClose={() => setAddingAgent(false)} />}
+      {addingAgent && <AddAgentDialog model={model} runner={runner} send={send} onClose={() => setAddingAgent(false)} />}
       {confirmRemove && (
         <RemoveRunnerDialog
           runner={runner}

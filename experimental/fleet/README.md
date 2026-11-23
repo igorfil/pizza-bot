@@ -175,6 +175,7 @@ Intents (only these are accepted over the API; world Msgs are rejected):
 |---|---|
 | `AddRunner` | `name, token`, and `url` (direct) or `transport` (below) |
 | `AddAgents` | `runner`, `agents` (ids from the runner's `available`); the runner starts serving them |
+| `CreateAgent` | `runner`, `name`, `model` (one of the model's `agentModels`), `systemPrompt`; the runner creates and serves a prompt agent |
 | `UpdateRunner` | `name`, plus any of `url`/`transport`, `token`; the link reopens with the new config |
 | `RemoveRunner` | `name` |
 | `CreateTask` | `agent` (`<runner>/<id>`), `prompt` (may be empty) |
@@ -254,6 +255,7 @@ is in [agents/README.md](agents/README.md): JSON on stdin, JSON-line events on s
 | `RUNNER_BIND` | `127.0.0.1:9000` | |
 | `RUNNER_PUBLIC_URL` | `http://$RUNNER_BIND` | base URL agent cards advertise; must be the URL the Controller uses |
 | `RUNNER_DB` | `runner.db` | SQLite task store, shared by all its agents |
+| `RUNNER_CREATED_AGENTS_DIR` | `created-agents` next to `RUNNER_DB` | agents made with `POST /agents`; kept outside `RUNNER_AGENTS_DIR`, which an upgrade replaces |
 | `RUNNER_NAME` | `runner` | runner name in `GET /agents` |
 | `RUNNER_LOCATION` | none | where it runs ("this laptop", "EC2 us-west-2"); in `GET /agents` and card `provider.organization` |
 
@@ -263,6 +265,10 @@ Endpoints:
 - `GET /agents`: public; `{runner, location, agents: [...], available: [...]}`, each entry
   `{id, name, description, input, url}`. `agents` are served; `available` are on disk but off. The
   Controller uses it for discovery and as the runner health check.
+- `POST /agents`: bearer token required; `{name, model, systemPrompt}` writes a prompt agent
+  (`agent.toml`, `system.md`, and the built-in `agent.py` harness) into `RUNNER_CREATED_AGENTS_DIR`,
+  serves it at once, and answers with the new index plus `created: <id>`. The index's `canCreate`
+  says a runner supports it.
 - `PUT /agents`: bearer token required; `{agents: [ids]}` replaces the served set, saves it in
   `RUNNER_DB` so it survives restarts, and answers with the new index. Unserved agents answer 404.
 - `/agents/<id>/.well-known/agent-card.json`: public A2A agent card per agent. Its one skill carries

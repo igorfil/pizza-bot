@@ -386,6 +386,32 @@ describe("adding agents", () => {
   });
 });
 
+describe("creating an agent", () => {
+  const poet = { name: "Haiku poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku." };
+  const creator: Msg = { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: [], canCreate: true };
+  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), creator];
+  const made = { id: "haiku-poet", name: "Haiku poet", description: "", input: null };
+
+  test("asks the runner to create it and shows it as being added", () => {
+    const [model, effects] = run([...ready, { type: "CreateAgent", runner: "local", agent: poet }]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([
+      { state: "adding", agents: ["Haiku poet"] },
+      [{ type: "CreateRunnerAgent", runner: "local", endpoint: { url: "http://x", token }, agent: poet }],
+    ]);
+  });
+
+  test("the runner's answer lists the new agent", () => {
+    const answered: Msg = { type: "AgentsSet", runner: "local", added: ["haiku-poet"], agents: [made, sys], location: "laptop", available: [], canCreate: true };
+    const [model] = run([...ready, { type: "CreateAgent", runner: "local", agent: poet }, answered]);
+    expect([Object.keys(model.agents), model.runners.local?.agentsChange]).toEqual([["local/haiku-poet", "local/sys"], null]);
+  });
+
+  test("a runner that can't create agents is refused without calling it", () => {
+    const [model, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy(), { type: "CreateAgent", runner: "local", agent: poet }]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([{ state: "failed", agents: ["Haiku poet"], error: "local can't create agents; update the runner" }, []]);
+  });
+});
+
 describe("updating a runner", () => {
   const ssh = { kind: "ssh", host: "box", user: null, port: null, identityFile: null, remotePort: 9000 } as const;
   const newToken = { kind: "vault", key: "runner/local/k2" } as const;

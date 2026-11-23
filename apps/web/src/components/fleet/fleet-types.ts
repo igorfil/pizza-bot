@@ -24,6 +24,8 @@ export interface FleetRunner {
   location: string | null;
   /** Agents the runner could serve but doesn't; null when it can't change its agents. */
   available?: FleetAgentInfo[] | null;
+  /** The runner can create prompt agents (CreateAgent). */
+  canCreateAgents?: boolean;
   agentsChange?: FleetAgentsChange | null;
 }
 
@@ -119,6 +121,13 @@ export interface FleetStepView {
   fields: FleetStepField[];
   submit?: string;
   steps?: { labels: string[]; current: number };
+  checklist?: FleetChecklistItem[];
+}
+
+export interface FleetChecklistItem {
+  label: string;
+  state: "done" | "current" | "pending" | "skipped" | "failed";
+  detail?: string;
 }
 
 export interface FleetGuideSession {
@@ -147,5 +156,7 @@ export interface FleetModel {
   chats?: Record<string, FleetChat>;
   guideSessions?: Record<string, FleetGuideSession>;
   guideCatalog?: FleetGuideInfo[];
+  /** Models CreateAgent accepts. */
+  agentModels?: { id: string; label: string }[];
   notifications: FleetNotification[];
 }

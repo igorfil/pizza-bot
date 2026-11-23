@@ -108,6 +108,42 @@ export const parseDetect = (output: string): ExistingRunner | null => {
   return token && /^[A-Za-z0-9._~+/=-]+$/.test(token) && Number.isInteger(port) && port > 0 && port < 65_536 ? { port, token } : null;
 };
 
+/**
+ * Calls each model once from the instance, with its own credentials (the instance role), the way agents will.
+ * Prints `FLEET_BEDROCK <model> <ok | error code>` per model. Model ids come from AGENT_MODELS.
+ */
+export const bedrockScript = (models: readonly string[], region: string): string => `#!/bin/bash
+set -uo pipefail
+UV=$(command -v uv || echo /usr/local/bin/uv)
+[ -x "$UV" ] || { echo "uv is not installed on the instance" >&2; exit 1; }
+AWS_REGION='${region}' "$UV" run --quiet --no-project --with boto3 python3 - <<'PY'
+import os
+import boto3
+from botocore.exceptions import ClientError
+
+client = boto3.client("bedrock-runtime", region_name=os.environ["AWS_REGION"])
+for model in ${JSON.stringify(models)}:
+    try:
+        client.converse(modelId=model, messages=[{"role": "user", "content": [{"text": "ping"}]}], inferenceConfig={"maxTokens": 1})
+        print(f"FLEET_BEDROCK {model} ok", flush=True)
+    except ClientError as e:
+        print(f"FLEET_BEDROCK {model} {e.response['Error']['Code']}", flush=True)
+    except Exception as e:
+        print(f"FLEET_BEDROCK {model} {type(e).__name__}", flush=True)
+PY
+`;
+
+/** A model counts as usable unless Bedrock refused the caller or doesn't know it; a rejected request still proves access. */
+const USABLE = new Set(["ok", "ValidationException", "ThrottlingException"]);
+
+export const parseBedrock = (output: string): { usable: string[]; refused: { model: string; reason: string }[] } => {
+  const results = [...output.matchAll(/^FLEET_BEDROCK (\S+) (\S+)\s*$/gm)].map((m) => ({ model: m[1]!, reason: m[2]! }));
+  return {
+    usable: results.filter((r) => USABLE.has(r.reason)).map((r) => r.model),
+    refused: results.filter((r) => !USABLE.has(r.reason)),
+  };
+};
+
 export const uninstallScript = (): string => `#!/bin/bash
 set -uo pipefail
 systemctl disable --now fleet-runner

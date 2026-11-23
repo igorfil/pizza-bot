@@ -59,6 +59,8 @@ const replay = (log: MsgLog): { model: Model; version: number } =>
     { model: initialModel(), version: 0 },
   );
 
+const indexFields = ({ agents, location, available, canCreate }: a2a.RunnerIndex) => ({ agents, location, available, canCreate });
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
@@ -90,7 +92,7 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
       case "CheckRunner": {
         const r = await a2a.checkRunner(effect.url);
         return r.ok
-          ? { type: "RunnerOk", name: effect.runner, agents: r.value.agents, location: r.value.location, available: r.value.available }
+          ? { type: "RunnerOk", name: effect.runner, ...indexFields(r.value) }
           : { type: "RunnerFailed", name: effect.runner, error: r.error };
       }
       case "ChatComplete": {
@@ -129,7 +131,14 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
         const ep = await withToken(effect.endpoint);
         const r = ep.ok ? await a2a.setAgents(ep.value.url, ep.value.token, effect.agents) : ep;
         return r.ok
-          ? { type: "AgentsSet", runner: effect.runner, added: effect.added, agents: r.value.agents, location: r.value.location, available: r.value.available }
+          ? { type: "AgentsSet", runner: effect.runner, added: effect.added, ...indexFields(r.value) }
+          : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
+      }
+      case "CreateRunnerAgent": {
+        const ep = await withToken(effect.endpoint);
+        const r = ep.ok ? await a2a.createAgent(ep.value.url, ep.value.token, effect.agent) : ep;
+        return r.ok
+          ? { type: "AgentsSet", runner: effect.runner, added: [r.value.created], ...indexFields(r.value) }
           : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
       }
       case "RetireRunner": {

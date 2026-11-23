@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { installScript } from "./aws/install.js";
+import { installScript, parseBedrock } from "./aws/install.js";
 import { awsProfiles, parseIni } from "./aws/profiles.js";
 
 describe("AWS profiles", () => {
@@ -62,5 +62,18 @@ describe("install script", () => {
 
   test("binds the runner to localhost only", () => {
     expect(script).toContain("RUNNER_BIND=127.0.0.1:9000");
+  });
+});
+
+describe("Bedrock check", () => {
+  test("a refused or unknown model isn't usable; a rejected request still proves access", () => {
+    const out = "FLEET_BEDROCK a ok\nFLEET_BEDROCK b AccessDeniedException\nFLEET_BEDROCK c ValidationException\nFLEET_BEDROCK d ResourceNotFoundException\nnoise\n";
+    expect(parseBedrock(out)).toEqual({
+      usable: ["a", "c"],
+      refused: [
+        { model: "b", reason: "AccessDeniedException" },
+        { model: "d", reason: "ResourceNotFoundException" },
+      ],
+    });
   });
 });

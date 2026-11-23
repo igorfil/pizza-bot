@@ -9,6 +9,7 @@ import type {
   LocalClock,
   Model,
   Msg,
+  NewAgentSpec,
   Runner,
   SecretRef,
   Sub,
@@ -265,7 +266,9 @@ const syncAgents = (model: Model, runner: string, infos: AgentInfo[]): Model => 
   return { ...model, agents: { ...others, ...mine } };
 };
 
-const runnerOk = (model: Model, name: string, agents: AgentInfo[], location: string | null, available: AgentInfo[] | null): Result => {
+type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean };
+
+const runnerOk = (model: Model, name: string, { agents, location, available, canCreate }: RunnerIndex): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
   const recovered = runner.status !== "healthy";
@@ -278,7 +281,8 @@ const runnerOk = (model: Model, name: string, agents: AgentInfo[], location: str
       lastSeenAt: model.now,
       nextCheckAt: model.now + HEALTH_INTERVAL_MS,
       location,
-      available,
+      available: available ?? null,
+      canCreateAgents: canCreate === true,
     }),
     name,
     agents,
@@ -337,28 +341,44 @@ const updateRunner = (model: Model, name: string, transport: TransportSpec | nul
   return [notify(setRunner(model, next), "info", `runner ${name} updated`), stale.length > 0 ? [{ type: "DeleteSecrets", keys: stale }] : []];
 };
 
-/** Asks the runner to serve what it serves now plus `ids`; the runner answers with its new index. */
-const addAgents = (model: Model, name: string, ids: string[]): Result => {
+/** Runs `change` against a reachable runner with no other agent change in flight; a refusal stays on the runner. */
+const changeAgents = (model: Model, name: string, agents: string[], change: (runner: Runner, url: string, fail: (error: string) => Result) => Result): Result => {
   const runner = model.runners[name];
   if (!runner) return [notify(model, "error", `unknown runner ${name}`), []];
-  const fail = (error: string): Result => [setRunner(model, { ...runner, agentsChange: { state: "failed", agents: ids, error } }), []];
+  const fail = (error: string): Result => [setRunner(model, { ...runner, agentsChange: { state: "failed", agents, error } }), []];
   if (runner.agentsChange?.state === "adding") return [model, []];
   if (runner.status !== "healthy" || runner.link.state !== "up") return fail(`${name} isn't reachable right now`);
-  if (!runner.available) return fail(`${name} can't change its agents; update the runner`);
-  const unknown = ids.find((id) => !runner.available!.some((a) => a.id === id));
-  if (unknown) return fail(`${name} has no agent ${unknown} to add`);
-  const served = Object.values(model.agents).filter((a) => a.runner === name).map((a) => a.id);
-  const agents = [...new Set([...served, ...ids])].sort();
-  return [
-    setRunner(model, { ...runner, agentsChange: { state: "adding", agents: ids } }),
-    [{ type: "SetRunnerAgents", runner: name, endpoint: { url: runner.link.url, token: runner.token }, agents, added: ids }],
-  ];
+  return change(runner, runner.link.url, fail);
 };
+
+const changing = (model: Model, runner: Runner, agents: string[], effect: Effect): Result => [
+  setRunner(model, { ...runner, agentsChange: { state: "adding", agents } }),
+  [effect],
+];
+
+/** Asks the runner to serve what it serves now plus `ids`; the runner answers with its new index. */
+const addAgents = (model: Model, name: string, ids: string[]): Result =>
+  changeAgents(model, name, ids, (runner, url, fail) => {
+    if (!runner.available) return fail(`${name} can't change its agents; update the runner`);
+    const unknown = ids.find((id) => !runner.available!.some((a) => a.id === id));
+    if (unknown) return fail(`${name} has no agent ${unknown} to add`);
+    const served = Object.values(model.agents).filter((a) => a.runner === name).map((a) => a.id);
+    const agents = [...new Set([...served, ...ids])].sort();
+    return changing(model, runner, ids, { type: "SetRunnerAgents", runner: name, endpoint: { url, token: runner.token }, agents, added: ids });
+  });
+
+/** The change shows the new agent's name until the runner answers with its id. */
+const createAgent = (model: Model, name: string, agent: NewAgentSpec): Result =>
+  changeAgents(model, name, [agent.name], (runner, url, fail) =>
+    runner.canCreateAgents
+      ? changing(model, runner, [agent.name], { type: "CreateRunnerAgent", runner: name, endpoint: { url, token: runner.token }, agent })
+      : fail(`${name} can't create agents; update the runner`),
+  );
 
 const agentsSet = (model: Model, msg: Extract<Msg, { type: "AgentsSet" }>): Result => {
   const runner = model.runners[msg.runner];
   if (!runner) return [model, []];
-  const [next, effects] = runnerOk(setRunner(model, { ...runner, agentsChange: null }), msg.runner, msg.agents, msg.location, msg.available);
+  const [next, effects] = runnerOk(setRunner(model, { ...runner, agentsChange: null }), msg.runner, msg);
   const names = msg.agents.filter((a) => msg.added.includes(a.id)).map((a) => a.name);
   return [notify(next, "info", `added ${names.join(", ")} to ${msg.runner}`), effects];
 };
@@ -427,10 +447,13 @@ export const update = (model: Model, msg: Msg): Result => {
       return tick(model, msg.now, msg.local);
 
     case "RunnerOk":
-      return runnerOk(model, msg.name, msg.agents, msg.location, msg.available ?? null);
+      return runnerOk(model, msg.name, msg);
 
     case "AddAgents":
       return addAgents(model, msg.runner, msg.agents);
+
+    case "CreateAgent":
+      return createAgent(model, msg.runner, msg.agent);
 
     case "AgentsSet":
       return agentsSet(model, msg);

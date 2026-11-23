@@ -5,6 +5,7 @@ import { FleetConnectForm, FleetLinkBadge, FleetModule } from "./FleetModule.js"
 import { InboxCard, InboxView } from "./InboxView.js";
 import { ChatPane } from "./ChatsView.js";
 import { AgentCard, AgentsView } from "./AgentsView.js";
+import { addAgentModes } from "./AddAgentDialog.js";
 import { GuideCard, GuidePicker } from "./GuideCard.js";
 import type { FleetChat, FleetGuideSession, FleetModel, FleetTask } from "./fleet-types.js";
 
@@ -205,6 +206,30 @@ describe("AgentsView", () => {
   });
 });
 
+describe("Add agent", () => {
+  const runner = model.runners.ec2!;
+  const offer = (over: Partial<typeof runner>) => addAgentModes({ ...runner, ...over });
+  const jokes = [{ id: "dadjokes", name: "Dad jokes", description: "" }];
+
+  it("offers creating first, then turning on existing agents", () => {
+    expect(offer({ canCreateAgents: true, available: jokes })).toEqual({ modes: ["create", "existing"] });
+  });
+
+  it("offers only creating when nothing is left to turn on", () => {
+    expect(offer({ canCreateAgents: true, available: [] })).toEqual({ modes: ["create"] });
+  });
+
+  it("asks for a runner update when the runner can do neither", () => {
+    const r = offer({ canCreateAgents: false, available: null });
+    expect("blocker" in r && r.blocker).toContain("Update the runner");
+  });
+
+  it("waits for an unreachable runner", () => {
+    const r = offer({ status: "unreachable", canCreateAgents: true });
+    expect("blocker" in r && r.blocker).toContain("isn't reachable");
+  });
+});
+
 describe("AgentCard", () => {
   const card = (m: FleetModel) =>
     wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} />);
@@ -312,6 +337,20 @@ describe("runner guides", () => {
   it("shows where the guide is in its steps", () => {
     const html = card(session({ view: { ...session().view, steps: { labels: ["Sign in", "Pick instance", "Set up"], current: 1 } } }));
     expect(html).toMatch(/<li class="current" aria-current="step">.*Pick instance/);
+  });
+
+  it("draws the set-up as a checklist with the current step in progress", () => {
+    const checklist = [
+      { label: "Connect to the instance", state: "done" as const },
+      { label: "Install the runner", state: "current" as const, detail: "Installing… (35s)" },
+      { label: "Verify Bedrock access", state: "pending" as const },
+    ];
+    const html = card(session({ status: "working", view: { title: "Setting up the runner", progress: "Installing… (35s)", fields: [], checklist } }));
+    expect([
+      /<li class="done">.*Connect to the instance.*\(done\)/.test(html),
+      /<li class="current" aria-current="step">.*lucide-loader-circle.*Install the runner.*Installing… \(35s\)/.test(html),
+      /<li class="pending">.*Verify Bedrock access/.test(html),
+    ]).toEqual([true, true, true]);
   });
 
   it("can always cancel the setup", () => {

@@ -1,7 +1,7 @@
 import { ClientFactory, ClientFactoryOptions, DefaultAgentCardResolver, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
 import { attempt, type Outcome } from "./outcome.js";
-import type { AgentInfo, Artifact, TaskSnapshot, TaskUpdate } from "./types.js";
+import type { AgentInfo, Artifact, NewAgentSpec, TaskSnapshot, TaskUpdate } from "./types.js";
 
 /** One agent behind a runner link, with its token already read from the vault. */
 export type AgentEndpoint = { url: string; token: string };
@@ -85,6 +85,8 @@ const auth = (endpoint: AgentEndpoint) => ({ Authorization: `Bearer ${endpoint.t
 
 type IndexJson = {
   location?: unknown;
+  canCreate?: unknown;
+  created?: unknown;
   available?: NonNullable<IndexJson["agents"]>;
   agents?: { id?: unknown; name?: unknown; description?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
 };
@@ -101,7 +103,7 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
       }
     : null;
 
-export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null };
+export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate: boolean };
 
 const infos = (list: IndexJson["agents"]): AgentInfo[] => (list ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null);
 
@@ -110,6 +112,7 @@ const toIndex = (index: IndexJson): RunnerIndex => ({
   agents: infos(index.agents),
   location: str(index.location) || null,
   available: Array.isArray(index.available) ? infos(index.available) : null,
+  canCreate: index.canCreate === true,
 });
 
 /** The runner's `GET /agents` is both discovery and its health check. */
@@ -118,6 +121,21 @@ export const checkRunner = (url: string): Promise<Outcome<RunnerIndex>> =>
     const res = await fetch(`${url}/agents`, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) throw new Error(`runner index: HTTP ${res.status}`);
     return toIndex((await res.json()) as IndexJson);
+  });
+
+/** Makes a prompt agent on the runner, which serves it right away; answers with the new index and its id. */
+export const createAgent = (url: string, token: string, agent: NewAgentSpec): Promise<Outcome<RunnerIndex & { created: string }>> =>
+  attempt(async () => {
+    const res = await fetch(`${url}/agents`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(agent),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
+    if (res.status === 405) throw new Error("this runner can't create agents; update the runner");
+    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
+    return { ...toIndex(body), created: str(body.created) };
   });
 
 /** Replaces the agents the runner serves; it answers with its new index. */

@@ -2109,6 +2109,37 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   border: 1px solid currentColor; border-radius: 50%; font-size: 11px;
 }
 .fleet-stepper li.current .fleet-stepper-n { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); }
+.fleet-checklist { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-direction: column; gap: 4px; }
+.fleet-checklist li { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; color: var(--dim); }
+.fleet-checklist li:not(:last-child)::after {
+  content: ""; position: absolute; left: 11px; top: 30px; bottom: -6px; width: 2px; border-radius: 1px; background: var(--border);
+}
+.fleet-checklist li.done:not(:last-child)::after { background: color-mix(in oklch, var(--ok) 55%, var(--border)); }
+.fleet-checklist-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px;
+  border-radius: 50%; border: 1.5px solid var(--border); background: var(--panel);
+}
+.fleet-checklist li.done .fleet-checklist-icon { background: var(--ok); border-color: var(--ok); color: var(--panel); }
+.fleet-checklist li.current .fleet-checklist-icon { border-color: var(--brand); color: var(--brand); }
+.fleet-checklist li.failed .fleet-checklist-icon { background: var(--bad); border-color: var(--bad); color: var(--panel); }
+.fleet-checklist li.skipped .fleet-checklist-icon { border-style: dashed; }
+.fleet-checklist-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 2px; }
+.fleet-checklist-label { font-size: 13px; }
+.fleet-checklist li.done .fleet-checklist-label, .fleet-checklist li.current .fleet-checklist-label { color: var(--text); }
+.fleet-checklist li.current .fleet-checklist-label { font-weight: 600; }
+.fleet-checklist li.failed .fleet-checklist-label { color: var(--bad); font-weight: 600; }
+.fleet-checklist li.skipped .fleet-checklist-label { text-decoration: line-through; text-decoration-color: var(--border); }
+.fleet-checklist-detail { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+.fleet-checklist li.current .fleet-checklist-detail { color: var(--info); }
+.fleet-segmented { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border); }
+.fleet-segmented button {
+  padding: 6px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--dim);
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s, color .15s;
+}
+.fleet-segmented button:hover { color: var(--text); }
+.fleet-segmented button.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
+.fleet-prompt { min-height: 120px; resize: vertical; line-height: 1.5; font-family: inherit; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .fleet-runner-change { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--info); }
 .fleet-runner-empty { margin: 0; font-size: 13px; }
 .fleet-guide-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }

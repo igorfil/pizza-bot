@@ -181,8 +181,13 @@ Listed in Add runner as "Coming soon" (`comingSoon` in the catalog); it can't be
 | target | Running instances across every enabled region (`DescribeRegions`, searched in parallel; a region that can't be searched is skipped and named), usable ones first, each with its region and SSM status; the picked instance's region becomes the transport's; only SSM-online ones are selectable. If none is, it says what an instance needs (a role with `AmazonSSMManagedInstanceCore`, outbound internet). Plus runner name and agents to serve. Launching new instances is out of scope for now. |
 | detect | Runs a check script over SSM RunCommand. If `/etc/fleet-runner.env` exists and the runner answers `GET /agents`, the guide stores its `RUNNER_TOKEN` in the vault, uses its `RUNNER_BIND` port and skips to check. The token passes through SSM command output. |
 | install | Only when detect found no running runner. Generates the runner token (vault) and runs the bootstrap script over SSM RunCommand: downloads the runner binary and the agents tarball from the GitHub release, installs uv, creates the `fleet-runner` user, env file and systemd unit, pre-warms agents, starts the service. |
-| check | Opens the `aws_ssm` transport and reads `GET /agents`. Shows the agents found. |
+| check | Opens the `aws_ssm` transport and reads `GET /agents`. |
+| bedrock | Over SSM RunCommand, calls each model in `AGENT_MODELS` once (1 token) with the instance role, the way agents will. Fails, with what to allow on the role, when no model answers. |
 | done | Saves the runner: `aws_ssm` transport, token ref, origin with teardown data. An adopted runner gets no teardown: the Controller never uninstalls what it didn't install. |
+
+The set-up steps (detect through bedrock, plus the local-build copy) show as a checklist
+(`StepView.checklist`): done steps are checked, the current one spins with its progress under it,
+a failed one is marked, and an adopted runner's install is shown as skipped.
 
 Release assets (`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`) come from
 `FLEET_RUNNER_RELEASE` (a GitHub release download base, e.g.

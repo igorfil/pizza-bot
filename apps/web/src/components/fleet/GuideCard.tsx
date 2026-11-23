@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Check, LoaderCircle, RotateCcw, X } from "lucide-react";
+import { Check, Circle, LoaderCircle, Minus, RotateCcw, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import type { FleetGuideSession, FleetModel, FleetRunner, FleetStepView } from "./fleet-types.js";
+import type { FleetChecklistItem, FleetGuideSession, FleetModel, FleetRunner, FleetStepView } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { initialDraft } from "./fleet-view-model.js";
 
@@ -124,6 +124,43 @@ export function ChoiceCard({
   );
 }
 
+const CHECK_ICONS: Record<FleetChecklistItem["state"], ReactNode> = {
+  done: <Check size={12} strokeWidth={3} />,
+  current: <LoaderCircle size={14} className="spin" />,
+  pending: <Circle size={8} />,
+  skipped: <Minus size={12} />,
+  failed: <X size={12} strokeWidth={3} />,
+};
+
+const CHECK_WORDS: Record<FleetChecklistItem["state"], string> = {
+  done: "done",
+  current: "in progress",
+  pending: "to do",
+  skipped: "skipped",
+  failed: "failed",
+};
+
+function Checklist({ items }: { items: FleetChecklistItem[] }) {
+  return (
+    <ol className="fleet-checklist" aria-label="Set-up steps">
+      {items.map((item) => (
+        <li key={item.label} className={item.state} aria-current={item.state === "current" ? "step" : undefined}>
+          <span className="fleet-checklist-icon" aria-hidden="true">
+            {CHECK_ICONS[item.state]}
+          </span>
+          <span className="fleet-checklist-text">
+            <span className="fleet-checklist-label">
+              {item.label}
+              <span className="sr-only"> ({CHECK_WORDS[item.state]})</span>
+            </span>
+            {item.detail && <span className="fleet-checklist-detail">{item.detail}</span>}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function StepFields({ view, draft, onChange }: { view: FleetStepView; draft: Record<string, string>; onChange: (id: string, value: string) => void }) {
   return (
     <>
@@ -190,8 +227,9 @@ export function GuideCard({ session, send }: { session: FleetGuideSession; send:
     <form className="fleet-guide" onSubmit={submit} aria-label={view.title}>
       {view.steps && <Stepper steps={view.steps} />}
       <h3 className="fleet-agent-name">{view.title}</h3>
-      {view.body && <p className="field-hint">{view.body}</p>}
-      {status === "working" && (
+      {view.body && !view.checklist && <p className="field-hint">{view.body}</p>}
+      {view.checklist && <Checklist items={view.checklist} />}
+      {status === "working" && !view.checklist && (
         <p className="fleet-guide-progress" role="status">
           <LoaderCircle size={14} className="spin" aria-hidden="true" /> {view.progress ?? "Working…"}
         </p>

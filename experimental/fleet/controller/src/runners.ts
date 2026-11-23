@@ -28,6 +28,7 @@ export const addRunner = (model: Model, spec: NewRunner): Model =>
       lastError: null,
       location: null,
       available: null,
+      canCreateAgents: false,
       agentsChange: null,
     }),
     "info",

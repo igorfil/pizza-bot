@@ -27,6 +27,7 @@ const model: Model = {
       lastError: null,
       location: null,
       available: null,
+      canCreateAgents: false,
       agentsChange: null,
     },
   },
@@ -151,6 +152,24 @@ describe("api", () => {
 
   it("refuses input for a guide session that doesn't exist", async () => {
     expect((await post({ msg_id: "m1", type: "GuideInput", payload: { sessionId: "nope", input: {} } })).status).toBe(400);
+  });
+});
+
+describe("creating agents", () => {
+  it("CreateAgent carries the name, model and system prompt", async () => {
+    const sent: Msg[] = [];
+    await post({ msg_id: "m1", type: "CreateAgent", payload: { runner: "laptop", name: " Poet ", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku." } }, sent);
+    expect(sent[0]).toEqual({ type: "CreateAgent", runner: "laptop", agent: { name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku." } });
+  });
+
+  it("refuses a model that isn't offered", async () => {
+    const body = (await (await post({ msg_id: "m1", type: "CreateAgent", payload: { runner: "laptop", name: "P", model: "nope", systemPrompt: "" } })).json()) as { error: string };
+    expect(body.error).toContain("model must be one of");
+  });
+
+  it("lists the models UIs can offer", async () => {
+    const body = (await (await api().request("/model", { headers: auth })).json()) as { model: { agentModels: { id: string }[] } };
+    expect(body.model.agentModels.map((m) => m.id)).toContain("us.anthropic.claude-haiku-5-5");
   });
 });
 

@@ -55,9 +55,14 @@ export type Runner = NewRunner & {
   location: string | null;
   /** Agents on the runner's disk it doesn't serve yet; null when the runner can't change its agents. */
   available: AgentInfo[] | null;
-  /** The last AddAgents for this runner, until it lands or a new one starts. */
+  /** The runner takes CreateAgent (`POST /agents`). */
+  canCreateAgents: boolean;
+  /** The last AddAgents or CreateAgent for this runner, until it lands or a new one starts. */
   agentsChange: AgentsChange | null;
 };
+
+/** The bare-minimum agent: a model and a system prompt, run by the runner's built-in harness. */
+export type NewAgentSpec = { name: string; model: string; systemPrompt: string };
 
 export type AgentsChange = { state: "adding"; agents: string[] } | { state: "failed"; agents: string[]; error: string };
 
@@ -133,8 +138,18 @@ export type StepField = {
   options?: { value: string; label: string; detail?: string; disabled?: boolean }[];
 };
 
-/** `steps` places the screen in the guide's overall flow, for a stepper. */
-export type StepView = { title: string; body?: string; progress?: string; fields: StepField[]; submit?: string; steps?: { labels: string[]; current: number } };
+export type ChecklistItem = { label: string; state: "done" | "current" | "pending" | "skipped" | "failed"; detail?: string };
+
+/** `steps` places the screen in the guide's overall flow, for a stepper; `checklist` lists a long step's parts. */
+export type StepView = {
+  title: string;
+  body?: string;
+  progress?: string;
+  fields: StepField[];
+  submit?: string;
+  steps?: { labels: string[]; current: number };
+  checklist?: ChecklistItem[];
+};
 
 /** A guide's own progress; plain JSON, logged, so it must never hold a secret (only vault keys). */
 export type GuideState = Record<string, unknown>;
@@ -196,6 +211,7 @@ export type IntentMsg =
   | { type: "UpdateRunner"; name: string; transport: TransportSpec | null; token: SecretRef | null }
   | { type: "RemoveRunner"; name: string; teardown: boolean }
   | { type: "AddAgents"; runner: string; agents: string[] }
+  | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
   | { type: "CreateTask"; taskId: string; agent: string; prompt: string }
   | { type: "CancelTask"; taskId: string }
   | { type: "AckInbox"; taskId: string }
@@ -216,8 +232,8 @@ export type WorldMsg =
   | { type: "Tick"; now: number; local?: LocalClock }
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
-  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null }
-  | { type: "AgentsSet"; runner: string; added: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null }
+  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
+  | { type: "AgentsSet"; runner: string; added: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
   | { type: "AgentsSetFailed"; runner: string; error: string }
   | { type: "RunnerFailed"; name: string; error: string }
   | { type: "RunnerRetired"; name: string; text: string; ok: boolean }
@@ -242,6 +258,7 @@ export type LlmTurn = { role: ChatRole; text: string };
 export type Effect =
   | { type: "CheckRunner"; runner: string; url: string }
   | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[] }
+  | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
   | { type: "Dispatch"; taskId: string; endpoint: Endpoint; prompt: string }
   | { type: "GetTask"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "Cancel"; taskId: string; endpoint: Endpoint; remoteId: string }
@@ -259,6 +276,7 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "UpdateRunner",
   "RemoveRunner",
   "AddAgents",
+  "CreateAgent",
   "CreateTask",
   "CancelTask",
   "AckInbox",

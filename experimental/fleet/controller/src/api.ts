@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { AGENT_MODELS } from "./agent-models.js";
 import { INTENT_TYPES, type GuideInput, type IntentMsg, type Model, type TransportSpec } from "./types.js";
 import type { Runtime } from "./runtime.js";
 import type { SecretStore } from "./vault.js";
@@ -10,6 +11,7 @@ const KEEPALIVE_MS = 15_000;
 /** Runner tokens and guide internals never leave the Controller. */
 export const publicModel = (model: Model) => ({
   ...model,
+  agentModels: AGENT_MODELS,
   runners: Object.fromEntries(Object.entries(model.runners).map(([k, { token: _t, transport, ...r }]) => [k, { ...r, transport: transport.kind }])),
   guideSessions: Object.fromEntries(Object.entries(model.guideSessions).map(([k, { state: _s, secretKeys: _k, ...g }]) => [k, g])),
 });
@@ -131,6 +133,16 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
       return str(p.runner) && Array.isArray(p.agents) && p.agents.length > 0 && p.agents.every(str)
         ? { type, runner: p.runner, agents: p.agents as string[] }
         : "AddAgents needs runner and agents (a non-empty list of agent ids)";
+    case "CreateAgent": {
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      const model = typeof p.model === "string" ? p.model : "";
+      const systemPrompt = typeof p.systemPrompt === "string" ? p.systemPrompt.trim() : "";
+      if (!str(p.runner) || !name) return "CreateAgent needs runner, name, model, systemPrompt";
+      if (name.length > 60) return "the agent name must be at most 60 characters";
+      if (!AGENT_MODELS.some((m) => m.id === model)) return `model must be one of ${AGENT_MODELS.map((m) => m.id).join(", ")}`;
+      if (systemPrompt.length > 20_000) return "the system prompt must be at most 20000 characters";
+      return { type, runner: p.runner, agent: { name, model, systemPrompt } };
+    }
     case "RemoveRunner":
       return str(p.name) ? { type, name: p.name, teardown: p.teardown === true || p.teardown === "true" } : "RemoveRunner needs name";
     case "StartGuide":
