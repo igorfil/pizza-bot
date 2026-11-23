@@ -3,8 +3,9 @@ mod exec;
 mod manifest;
 mod store;
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use a2a::*;
 use a2a_server::agent_card::agent_card_router;
@@ -12,7 +13,7 @@ use a2a_server::jsonrpc::jsonrpc_router;
 use a2a_server::{DefaultRequestHandler, StaticAgentCard};
 use axum::Json;
 use axum::extract::Request;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::get;
@@ -96,37 +97,95 @@ fn agent_card(cfg: &Config, spec: &AgentSpec) -> AgentCard {
     }
 }
 
-/// Discovery for the Controller; also its health check. Public, like agent cards.
-fn agents_index(cfg: &Config, specs: &[AgentSpec]) -> Value {
+type Served = Arc<RwLock<BTreeSet<String>>>;
+
+fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
     json!({
-        "runner": cfg.name,
-        "location": cfg.location,
-        "agents": specs.iter().map(|s| json!({
-            "id": s.id,
-            "name": s.name,
-            "description": s.description,
-            "input": s.input,
-            "url": agent_url(cfg, s),
-        })).collect::<Vec<_>>(),
+        "id": s.id,
+        "name": s.name,
+        "description": s.description,
+        "input": s.input,
+        "url": agent_url(cfg, s),
     })
 }
 
-async fn require_bearer(expected: Arc<String>, req: Request, next: Next) -> Result<Response, StatusCode> {
-    let ok = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == expected.as_str());
-    if ok { Ok(next.run(req).await) } else { Err(StatusCode::UNAUTHORIZED) }
+/// Discovery for the Controller; also its health check. Public, like agent cards.
+/// `available` lists agents on disk that the Controller can turn on with `PUT /agents`.
+fn agents_index(cfg: &Config, specs: &[AgentSpec], served: &BTreeSet<String>) -> Value {
+    let (on, off): (Vec<&AgentSpec>, Vec<&AgentSpec>) = specs.iter().partition(|s| served.contains(&s.id));
+    json!({
+        "runner": cfg.name,
+        "location": cfg.location,
+        "agents": on.iter().map(|s| agent_json(cfg, s)).collect::<Vec<_>>(),
+        "available": off.iter().map(|s| agent_json(cfg, s)).collect::<Vec<_>>(),
+    })
 }
 
-fn agent_router(cfg: &Config, spec: &AgentSpec, store: store::SharedStore, runs: exec::Runs, bearer: Arc<String>) -> axum::Router {
+fn authorized(headers: &HeaderMap, expected: &str) -> bool {
+    headers.get("authorization").and_then(|v| v.to_str().ok()).is_some_and(|v| v == expected)
+}
+
+async fn require_bearer(expected: Arc<String>, req: Request, next: Next) -> Result<Response, StatusCode> {
+    if authorized(req.headers(), &expected) { Ok(next.run(req).await) } else { Err(StatusCode::UNAUTHORIZED) }
+}
+
+/// Every agent on disk is mounted; one the runner doesn't serve answers 404, card included.
+async fn require_served(id: Arc<String>, served: Served, req: Request, next: Next) -> Result<Response, StatusCode> {
+    if served.read().unwrap().contains(id.as_str()) { Ok(next.run(req).await) } else { Err(StatusCode::NOT_FOUND) }
+}
+
+fn agent_router(cfg: &Config, spec: &AgentSpec, store: store::SharedStore, runs: exec::Runs, bearer: Arc<String>, served: Served) -> axum::Router {
     let executor = exec::ExecAgent { spec: Arc::new(spec.clone()), runs };
     let handler = Arc::new(DefaultRequestHandler::new(executor, store).with_capabilities(capabilities()));
     let rpc = jsonrpc_router(handler).layer(middleware::from_fn(move |req, next| require_bearer(bearer.clone(), req, next)));
+    let id = Arc::new(spec.id.clone());
     axum::Router::new()
         .nest("/jsonrpc", rpc)
         .merge(agent_card_router(Arc::new(StaticAgentCard::new(agent_card(cfg, spec)))))
+        .layer(middleware::from_fn(move |req, next| require_served(id.clone(), served.clone(), req, next)))
+}
+
+fn bad_request(error: String) -> (StatusCode, Json<Value>) {
+    (StatusCode::BAD_REQUEST, Json(json!({ "error": error })))
+}
+
+/// Replaces the served set and keeps it across restarts; answers with the new index.
+fn set_agents(
+    cfg: &Config,
+    specs: &[AgentSpec],
+    served: &Served,
+    store: &store::SqliteTaskStore,
+    body: &Value,
+) -> Result<Value, (StatusCode, Json<Value>)> {
+    let ids: Vec<String> = body
+        .get("agents")
+        .and_then(Value::as_array)
+        .and_then(|a| a.iter().map(|v| v.as_str().map(str::to_string)).collect())
+        .ok_or_else(|| bad_request("body must be {\"agents\": [\"<id>\", ...]}".to_string()))?;
+    if let Some(missing) = manifest::unknown(specs, &ids) {
+        return Err(bad_request(format!("no agent {missing:?} in {}", cfg.agents_dir.display())));
+    }
+    store
+        .set_served_agents(&ids)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
+    let next: BTreeSet<String> = ids.into_iter().collect();
+    tracing::info!(agents = ?next, "served agents changed");
+    *served.write().unwrap() = next;
+    Ok(agents_index(cfg, specs, &served.read().unwrap()))
+}
+
+/// Saved choice first, then RUNNER_AGENTS, else everything on disk.
+fn initial_served(cfg: &Config, specs: &[AgentSpec], saved: Option<Vec<String>>) -> Result<BTreeSet<String>, String> {
+    if let Some(saved) = saved {
+        return Ok(saved.into_iter().filter(|id| specs.iter().any(|s| &s.id == id)).collect());
+    }
+    if let Some(only) = &cfg.only {
+        if let Some(missing) = manifest::unknown(specs, only) {
+            return Err(format!("RUNNER_AGENTS lists {missing:?}, but {} has no such agent", cfg.agents_dir.display()));
+        }
+        return Ok(only.iter().cloned().collect());
+    }
+    Ok(specs.iter().map(|s| s.id.clone()).collect())
 }
 
 #[tokio::main]
@@ -137,29 +196,46 @@ async fn main() -> Result<(), String> {
         )
         .init();
 
-    let cfg = load_config()?;
-    let specs = manifest::load(&cfg.agents_dir, cfg.only.as_deref())?;
+    let cfg = Arc::new(load_config()?);
+    let specs = Arc::new(manifest::load(&cfg.agents_dir)?);
     if specs.is_empty() {
         return Err(format!("no agents found in {}", cfg.agents_dir.display()));
     }
 
-    let sqlite = store::SqliteTaskStore::open(&cfg.db).map_err(|e| e.to_string())?;
+    let sqlite = Arc::new(store::SqliteTaskStore::open(&cfg.db).map_err(|e| e.to_string())?);
     let orphans = sqlite.fail_orphans().map_err(|e| e.to_string())?;
     if orphans > 0 {
         tracing::warn!(orphans, "marked tasks interrupted by restart as failed");
     }
-    let store = store::SharedStore(Arc::new(sqlite));
+    let served: Served = Arc::new(RwLock::new(initial_served(&cfg, &specs, sqlite.served_agents().map_err(|e| e.to_string())?)?));
+    let store = store::SharedStore(sqlite.clone());
     let runs = exec::Runs::default();
     let bearer = Arc::new(format!("Bearer {}", cfg.token));
 
-    let index = Arc::new(agents_index(&cfg, &specs));
-    let app = specs.iter().fold(
-        axum::Router::new().route("/agents", get(move || { let index = index.clone(); async move { Json((*index).clone()) } })),
-        |app, spec| app.nest(&format!("/agents/{}", spec.id), agent_router(&cfg, spec, store.clone(), runs.clone(), bearer.clone())),
-    );
+    let index = {
+        let (cfg, specs, served) = (cfg.clone(), specs.clone(), served.clone());
+        move || {
+            let index = agents_index(&cfg, &specs, &served.read().unwrap());
+            async move { Json(index) }
+        }
+    };
+    let update = {
+        let (cfg, specs, served, sqlite, bearer) = (cfg.clone(), specs.clone(), served.clone(), sqlite.clone(), bearer.clone());
+        move |headers: HeaderMap, Json(body): Json<Value>| {
+            let result = if authorized(&headers, &bearer) {
+                set_agents(&cfg, &specs, &served, &sqlite, &body).map(Json)
+            } else {
+                Err((StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))))
+            };
+            async move { result }
+        }
+    };
+    let app = specs.iter().fold(axum::Router::new().route("/agents", get(index).put(update)), |app, spec| {
+        app.nest(&format!("/agents/{}", spec.id), agent_router(&cfg, spec, store.clone(), runs.clone(), bearer.clone(), served.clone()))
+    });
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await.map_err(|e| e.to_string())?;
-    let ids: Vec<&str> = specs.iter().map(|s| s.id.as_str()).collect();
+    let ids: Vec<String> = served.read().unwrap().iter().cloned().collect();
     tracing::info!(name = %cfg.name, agents = ?ids, bind = %cfg.bind, public_url = %cfg.public_url, "runner listening");
     axum::serve(listener, app).await.map_err(|e| e.to_string())
 }

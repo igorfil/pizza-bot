@@ -60,9 +60,8 @@ pub fn parse(id: &str, dir: &Path, toml_text: &str) -> Result<AgentSpec, String>
     })
 }
 
-/// Every `<dir>/<id>/agent.toml`, optionally limited to `only`. Unknown ids in `only` are an error
-/// so a typo in RUNNER_AGENTS doesn't silently serve nothing.
-pub fn load(dir: &Path, only: Option<&[String]>) -> Result<Vec<AgentSpec>, String> {
+/// Every `<dir>/<id>/agent.toml`, sorted by id.
+pub fn load(dir: &Path) -> Result<Vec<AgentSpec>, String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("cannot read agents dir {}: {e}", dir.display()))?;
     let mut specs: Vec<AgentSpec> = entries
         .filter_map(|e| e.ok())
@@ -74,14 +73,13 @@ pub fn load(dir: &Path, only: Option<&[String]>) -> Result<Vec<AgentSpec>, Strin
             parse(&id, &p, &text)
         })
         .collect::<Result<_, _>>()?;
-    if let Some(only) = only {
-        if let Some(missing) = only.iter().find(|id| !specs.iter().any(|s| &s.id == *id)) {
-            return Err(format!("RUNNER_AGENTS lists {missing:?}, but {} has no such agent", dir.display()));
-        }
-        specs.retain(|s| only.contains(&s.id));
-    }
     specs.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(specs)
+}
+
+/// The first id with no agent folder, so a typo never silently serves nothing.
+pub fn unknown<'a>(specs: &[AgentSpec], ids: &'a [String]) -> Option<&'a String> {
+    ids.iter().find(|id| !specs.iter().any(|s| &s.id == *id))
 }
 
 #[cfg(test)]
@@ -124,5 +122,12 @@ MODEL = "m"
     #[test]
     fn rejects_ids_unsafe_for_urls() {
         assert!(parse("My Agent", Path::new("/a"), "name = \"X\"\ncommand = \"true\"").is_err());
+    }
+
+    #[test]
+    fn names_the_first_id_without_a_folder() {
+        let specs = vec![parse("a", Path::new("/a"), "name = \"A\"\ncommand = \"true\"").unwrap()];
+        let ids = vec!["a".to_string(), "typo".to_string()];
+        assert_eq!(unknown(&specs, &ids), Some(&"typo".to_string()));
     }
 }
