@@ -3,7 +3,7 @@ import { Network, PlugZap } from "lucide-react";
 import { ModuleHeader } from "../ModuleHeader.js";
 import { ModuleTabs } from "../ModuleTabs.js";
 import { L } from "../../lexicon.js";
-import { DEFAULT_FLEET_URL, type FleetConnection, type FleetIntent } from "./fleet-client.js";
+import { DEFAULT_FLEET_URL, type FleetConnection, type FleetIntent, type FleetPayload } from "./fleet-client.js";
 import type { FleetModel } from "./fleet-types.js";
 import type { FleetLink } from "./use-fleet.js";
 import { inboxOf, runningCount } from "./fleet-view-model.js";
@@ -11,7 +11,7 @@ import { InboxView } from "./InboxView.js";
 import { ChatsView } from "./ChatsView.js";
 import { AgentsView } from "./AgentsView.js";
 
-export type FleetSend = (type: FleetIntent, payload: Record<string, string>) => Promise<string | null>;
+export type FleetSend = (type: FleetIntent, payload: FleetPayload) => Promise<string | null>;
 
 export type FleetTab = "inbox" | "chats" | "agents";
 

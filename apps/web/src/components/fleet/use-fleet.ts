@@ -7,6 +7,7 @@ import {
   FleetError,
   type FleetConnection,
   type FleetIntent,
+  type FleetPayload,
 } from "./fleet-client.js";
 import type { FleetModel } from "./fleet-types.js";
 
@@ -71,7 +72,7 @@ export function useFleet() {
   }, []);
 
   const send = useCallback(
-    async (type: FleetIntent, payload: Record<string, string>): Promise<string | null> => {
+    async (type: FleetIntent, payload: FleetPayload): Promise<string | null> => {
       if (!connection) throw new FleetError("Not connected to a Controller.");
       try {
         return await sendFleetIntent(connection, type, payload);

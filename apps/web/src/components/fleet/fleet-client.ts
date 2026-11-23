@@ -8,7 +8,7 @@ export interface FleetConnection {
 
 const STORAGE_KEY = "pizza.fleet.connection";
 export const DEFAULT_FLEET_URL = "http://127.0.0.1:7700";
-// Matches agent-fleet's dev.sh so a local test setup connects with no configuration.
+// Matches scripts/fleet-dev.mjs so a local test setup connects with no configuration.
 export const DEV_FLEET_CONNECTION: FleetConnection = { url: DEFAULT_FLEET_URL, token: "fleet-dev-token" };
 
 export function loadFleetConnection(): FleetConnection {
@@ -55,7 +55,13 @@ export type FleetIntent =
   | "AckAllInbox"
   | "CreateChat"
   | "SendChatMessage"
-  | "SetSchedule";
+  | "SetSchedule"
+  | "StartGuide"
+  | "GuideInput"
+  | "GuideRetry"
+  | "CancelGuide";
+
+export type FleetPayload = Record<string, string | boolean | Record<string, string>>;
 
 /**
  * @returns the id the Controller minted (new task or chat), if any
@@ -64,7 +70,7 @@ export type FleetIntent =
 export async function sendFleetIntent(
   connection: FleetConnection,
   type: FleetIntent,
-  payload: Record<string, string>,
+  payload: FleetPayload,
 ): Promise<string | null> {
   const res = await fetch(`${base(connection)}/msg`, {
     method: "POST",

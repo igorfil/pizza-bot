@@ -1,10 +1,21 @@
 // Mirrors the agent-fleet Controller's public Model (GET /model). Runner tokens never reach the UI.
 export type FleetRunnerStatus = "unknown" | "healthy" | "unreachable";
 
+/** Which guide made a runner, and what removing it can also undo. */
+export interface FleetRunnerOrigin {
+  guide: string;
+  summary: string;
+  teardown: { label: string } | null;
+}
+
+export type FleetLink = { state: "up"; url: string } | { state: "down"; error: string | null };
+
 /** A host process (one per machine). Health is per runner; it hosts many agents. */
 export interface FleetRunner {
   name: string;
-  url: string;
+  transport: "direct" | "aws-ssm";
+  origin: FleetRunnerOrigin | null;
+  link: FleetLink;
   status: FleetRunnerStatus;
   failures: number;
   nextCheckAt: number;
@@ -25,6 +36,7 @@ export interface FleetAgent {
 }
 
 export type FleetTaskState =
+  | "queued"
   | "dispatching"
   | "submitted"
   | "working"
@@ -79,11 +91,47 @@ export interface FleetChat {
   updatedAt: number;
 }
 
+export interface FleetStepField {
+  id: string;
+  label: string;
+  hint?: string;
+  kind: "text" | "secret" | "choice";
+  value?: string;
+  options?: { value: string; label: string; detail?: string; disabled?: boolean }[];
+}
+
+/** One screen of a runner guide, drawn generically: the guide logic lives in the Controller. */
+export interface FleetStepView {
+  title: string;
+  body?: string;
+  progress?: string;
+  fields: FleetStepField[];
+  submit?: string;
+}
+
+export interface FleetGuideSession {
+  id: string;
+  guide: string;
+  status: "ask" | "working" | "failed";
+  view: FleetStepView;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FleetGuideInfo {
+  id: string;
+  title: string;
+  description: string;
+}
+
 export interface FleetModel {
   now: number;
   runners: Record<string, FleetRunner>;
   agents: Record<string, FleetAgent>;
   tasks: Record<string, FleetTask>;
   chats?: Record<string, FleetChat>;
+  guideSessions?: Record<string, FleetGuideSession>;
+  guideCatalog?: FleetGuideInfo[];
   notifications: FleetNotification[];
 }

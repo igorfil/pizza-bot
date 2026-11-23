@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { FleetModel, FleetTask } from "./fleet-types.js";
-import { activeRun, ago, artifactsNewestFirst, defaultInput, duration, inboxOf, runnerHealth, runnerLocation, runsOf, runStrip, runTitle } from "./fleet-view-model.js";
+import {
+  activeRun,
+  ago,
+  artifactsNewestFirst,
+  defaultInput,
+  duration,
+  inboxOf,
+  initialDraft,
+  runnerHealth,
+  runnerLocation,
+  runsOf,
+  runStrip,
+  runTitle,
+} from "./fleet-view-model.js";
 
 const NOW = 1_000_000;
 
@@ -24,7 +37,9 @@ const model = (tasks: FleetTask[], example = "penguins"): FleetModel => ({
   runners: {
     ec2: {
       name: "ec2",
-      url: "http://127.0.0.1:9471",
+      transport: "direct",
+      origin: null,
+      link: { state: "up", url: "http://127.0.0.1:9471" },
       status: "healthy",
       failures: 0,
       nextCheckAt: NOW + 15_000,
@@ -172,3 +187,29 @@ describe("formatting", () => {
     expect(runnerHealth(m, runner)).toBe("retry in 8s");
   });
 });
+
+describe("runnerLocation for guide-made runners", () => {
+  it("falls back to how the runner was set up", () => {
+    const r = { ...model([]).runners.ec2!, location: null, origin: { guide: "aws", summary: "EC2 i-1 · us-west-2", teardown: null } };
+    expect(runnerLocation(r)).toBe("EC2 i-1 · us-west-2");
+  });
+
+  it("says when it isn't connected", () => {
+    expect(runnerLocation({ ...model([]).runners.ec2!, location: null, link: { state: "down", error: null } })).toBe("not connected");
+  });
+});
+
+describe("initialDraft", () => {
+  it("uses suggested values and the first selectable choice", () => {
+    const draft = initialDraft({
+      title: "x",
+      fields: [
+        { id: "name", label: "", kind: "text", value: "ec2" },
+        { id: "pick", label: "", kind: "choice", options: [{ value: "a", label: "", disabled: true }, { value: "b", label: "" }] },
+        { id: "token", label: "", kind: "secret" },
+      ],
+    });
+    expect(draft).toEqual({ name: "ec2", pick: "b", token: "" });
+  });
+});
+

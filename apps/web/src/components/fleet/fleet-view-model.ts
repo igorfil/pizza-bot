@@ -1,4 +1,4 @@
-import type { FleetAgent, FleetChat, FleetModel, FleetRunner, FleetTask, FleetTaskState } from "./fleet-types.js";
+import type { FleetAgent, FleetChat, FleetGuideSession, FleetModel, FleetRunner, FleetStepView, FleetTask, FleetTaskState } from "./fleet-types.js";
 
 const TERMINAL: ReadonlySet<FleetTaskState> = new Set(["completed", "failed", "canceled", "rejected", "lost"]);
 
@@ -91,13 +91,15 @@ export const runTitle = (model: FleetModel, task: FleetTask): string => {
   return `${inputLabel(agent)}: ${task.prompt}`;
 };
 
-/** Where a runner is; falls back to its host when it doesn't say. */
+/** Where a runner is: what it says, else how it was set up, else the host it's reached at. */
 export const runnerLocation = (r: FleetRunner): string => {
   if (r.location) return r.location;
+  if (r.origin?.summary) return r.origin.summary;
+  if (r.link.state !== "up") return r.transport === "aws-ssm" ? "AWS (tunnel)" : "not connected";
   try {
-    return new URL(r.url).host;
+    return new URL(r.link.url).host;
   } catch {
-    return r.url;
+    return r.link.url;
   }
 };
 
@@ -106,3 +108,13 @@ export const RUN_STRIP_LENGTH = 10;
 /** Oldest-to-newest outcomes of the last runs, for the agent card's history strip. */
 export const runStrip = (model: FleetModel, agentKey: string): FleetTask[] =>
   runsOf(model, agentKey).slice(0, RUN_STRIP_LENGTH).reverse();
+
+/** Guides in progress, oldest first; they stay on screen across reloads until done or canceled. */
+export const guideSessionsOf = (model: FleetModel): FleetGuideSession[] =>
+  Object.values(model.guideSessions ?? {}).sort((a, b) => a.createdAt - b.createdAt);
+
+/** Starting values for a step's form: what the guide suggests, else the first selectable choice. */
+export const initialDraft = (view: FleetStepView): Record<string, string> =>
+  Object.fromEntries(
+    view.fields.map((f) => [f.id, f.value ?? (f.kind === "choice" ? (f.options?.find((o) => !o.disabled)?.value ?? "") : "")]),
+  );

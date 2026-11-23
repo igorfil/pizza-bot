@@ -5,7 +5,8 @@ import { FleetConnectForm, FleetLinkBadge, FleetModule } from "./FleetModule.js"
 import { InboxCard, InboxView } from "./InboxView.js";
 import { ChatPane } from "./ChatsView.js";
 import { AgentCard, AgentsView } from "./AgentsView.js";
-import type { FleetChat, FleetModel, FleetTask } from "./fleet-types.js";
+import { GuideCard, GuidePicker } from "./GuideCard.js";
+import type { FleetChat, FleetGuideSession, FleetModel, FleetTask } from "./fleet-types.js";
 
 const NOW = 1_000_000;
 
@@ -41,7 +42,9 @@ const model: FleetModel = {
   runners: {
     ec2: {
       name: "ec2",
-      url: "http://127.0.0.1:9471",
+      transport: "direct",
+      origin: null,
+      link: { state: "up", url: "http://127.0.0.1:9471" },
       status: "healthy",
       failures: 0,
       nextCheckAt: NOW + 15_000,
@@ -227,3 +230,72 @@ describe("FleetConnectForm", () => {
     expect(html).toContain("The Controller rejected the token.");
   });
 });
+
+describe("runner guides", () => {
+  const catalog = [
+    { id: "aws", title: "AWS EC2", description: "Put a runner on an EC2 instance." },
+    { id: "manual", title: "By URL", description: "A runner you started yourself." },
+  ];
+  const session = (over: Partial<FleetGuideSession> = {}): FleetGuideSession => ({
+    id: "g1",
+    guide: "aws",
+    status: "ask",
+    view: {
+      title: "Where should the runner go?",
+      body: "Account 123.",
+      fields: [
+        {
+          id: "instance",
+          label: "Instance",
+          kind: "choice",
+          options: [
+            { value: "i-off", label: "i-off", detail: "SSM agent not online", disabled: true },
+            { value: "i-on", label: "box (i-on)" },
+          ],
+        },
+        { id: "token", label: "Token", kind: "secret" },
+      ],
+      submit: "Set up runner",
+    },
+    error: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...over,
+  });
+  const withGuides = (s?: FleetGuideSession): FleetModel => ({ ...model, guideCatalog: catalog, guideSessions: s ? { [s.id]: s } : {} });
+  const radio = (html: string, value: string) => html.match(/<input type="radio"[^>]*>/g)?.find((i) => i.includes(`value="${value}"`)) ?? "";
+  const card = (s: FleetGuideSession) => wrap(<GuideCard model={withGuides(s)} session={s} send={noop} />);
+
+  it("offers every guide the Controller lists", () => {
+    const html = wrap(<GuidePicker model={withGuides()} send={noop} onClose={() => {}} />);
+    expect([html.includes("AWS EC2"), html.includes("By URL")]).toEqual([true, true]);
+  });
+
+  it("shows a guide in progress on the Agents view", () => {
+    expect(wrap(<AgentsView model={withGuides(session())} send={noop} />)).toContain("Where should the runner go?");
+  });
+
+  it("renders a choice as radio buttons, disabling the options the guide disabled", () => {
+    const html = card(session());
+    expect([radio(html, "i-off").includes("disabled"), radio(html, "i-on").includes("disabled")]).toEqual([true, false]);
+  });
+
+  it("preselects the first option that can be picked", () => {
+    expect(radio(card(session()), "i-on")).toContain("checked");
+  });
+
+  it("masks secret fields", () => {
+    expect(card(session())).toContain('type="password"');
+  });
+
+  it("shows progress and no form while a step runs", () => {
+    const html = card(session({ status: "working", view: { title: "Installing", progress: "Downloading…", fields: [] } }));
+    expect([html.includes("Downloading…"), html.includes("Set up runner")]).toEqual([true, false]);
+  });
+
+  it("offers Retry with the reason when a step failed", () => {
+    const html = card(session({ status: "failed", error: "EC2 access denied", view: { title: "Checking EC2 access", fields: [] } }));
+    expect([html.includes("Retry"), html.includes("EC2 access denied")]).toEqual([true, true]);
+  });
+});
+

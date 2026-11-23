@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Play, Plus, Server, Square, Trash2, X } from "lucide-react";
 import { useAppToast } from "../AppToast.js";
-import { ConfirmationDialog } from "../ConfirmationDialog.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
+import { GuideCard, GuidePicker, RemoveRunnerDialog } from "./GuideCard.js";
 import {
   activeRun,
   agentsOf,
   ago,
+  guideSessionsOf,
   defaultInput,
   inputLabel,
   isFinished,
@@ -35,8 +36,11 @@ export function AgentsView({ model, send }: { model: FleetModel; send: FleetSend
         <RunnerGroup key={r.name} model={model} runner={r} agents={agents.filter((a) => a.runner === r.name)} send={send} />
       ))}
       <div className="fleet-agent-grid">
+        {guideSessionsOf(model).map((s) => (
+          <GuideCard key={`${s.id}:${s.updatedAt}`} model={model} session={s} send={send} />
+        ))}
         {adding ? (
-          <AddRunnerCard send={send} onDone={() => setAdding(false)} />
+          <GuidePicker model={model} send={send} onClose={() => setAdding(false)} />
         ) : (
           <button type="button" className="fleet-agent-card fleet-agent-add" onClick={() => setAdding(true)}>
             <Plus size={22} strokeWidth={1.5} />
@@ -95,15 +99,13 @@ export function RunnerGroup({
         )}
       </div>
       {confirmRemove && (
-        <ConfirmationDialog
-          title="Remove runner?"
-          message={`Stop tracking ${runner.name} and its ${agents.length} agent(s)? The runner keeps running; the Controller just forgets it.`}
-          confirmLabel="Remove"
-          destructive
+        <RemoveRunnerDialog
+          runner={runner}
+          agentCount={agents.length}
           onCancel={() => setConfirmRemove(false)}
-          onConfirm={() => {
+          onRemove={(teardown) => {
             setConfirmRemove(false);
-            void send("RemoveRunner", { name: runner.name }).catch((e: unknown) =>
+            void send("RemoveRunner", { name: runner.name, teardown }).catch((e: unknown) =>
               notify({ title: "Couldn't remove the runner", description: e instanceof Error ? e.message : undefined, tone: "error" }),
             );
           }}
@@ -321,60 +323,5 @@ function InlineRuns({ model, runs }: { model: FleetModel; runs: FleetTask[] }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-function AddRunnerCard({ send, onDone }: { send: FleetSend; onDone: () => void }) {
-  const notify = useAppToast();
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("http://127.0.0.1:");
-  const [token, setToken] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const canSave = name.trim() !== "" && /^https?:\/\/.+/.test(url.trim()) && token.trim() !== "" && !saving;
-
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!canSave) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await send("AddRunner", { name: name.trim(), url: url.trim(), token: token.trim() });
-      notify({ title: `Added runner ${name.trim()}`, description: "Its agents appear once it answers.", tone: "success" });
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't add the runner.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <form className="fleet-agent-card fleet-agent-form" onSubmit={(e) => void save(e)} aria-label="Add runner">
-      <h3 className="fleet-agent-name">Add runner</h3>
-      <p className="field-hint">A runner hosts the agents in its agents/ folder. Add it once; its agents show up here.</p>
-      <label className="field">
-        <span className="field-label">Name</span>
-        <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ec2" autoFocus />
-      </label>
-      <label className="field">
-        <span className="field-label">Runner URL</span>
-        <input className="field-input mono" value={url} onChange={(e) => setUrl(e.target.value)} />
-        <span className="field-hint">As the Controller sees it, e.g. the local end of an SSH tunnel.</span>
-      </label>
-      <label className="field">
-        <span className="field-label">Runner token</span>
-        <input className="field-input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
-      </label>
-      {error && <div className="schedule-editor-error" role="alert">{error}</div>}
-      <div className="fleet-agent-run-actions">
-        <button type="button" className="btn-secondary fleet-small-btn" onClick={onDone} disabled={saving}>
-          Cancel
-        </button>
-        <button type="submit" className="btn-primary fleet-small-btn" disabled={!canSave}>
-          {saving ? "Adding…" : "Add runner"}
-        </button>
-      </div>
-    </form>
   );
 }
