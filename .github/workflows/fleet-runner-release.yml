@@ -1,0 +1,57 @@
+name: Fleet runner release
+
+# Publishes what the AWS runner guide downloads onto an instance:
+# fleet-runner-<arch>-linux-musl and fleet-agents.tar.gz. Point the Controller at it with
+# FLEET_RUNNER_RELEASE=https://github.com/<owner>/<repo>/releases/download/<tag>.
+on:
+  push:
+    tags: ["fleet-runner-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  runner:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: fleet-runner-x86_64-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: fleet-runner-aarch64-linux-musl
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        working-directory: experimental/fleet/runner
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          rustup target add ${{ matrix.target }}
+          cargo build --release --locked --target ${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/fleet-runner "$GITHUB_WORKSPACE/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  publish:
+    needs: runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Pack agents
+        run: tar -czf assets/fleet-agents.tar.gz -C experimental/fleet/agents --exclude README.md .
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Fleet runner binaries and agents."
+          gh release upload "$GITHUB_REF_NAME" assets/* --clobber
