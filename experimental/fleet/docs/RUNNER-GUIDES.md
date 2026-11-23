@@ -189,6 +189,13 @@ Release assets (`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`) come fr
 `https://github.com/<owner>/<repo>/releases/download/<tag>`). `.github/workflows/fleet-runner-release.yml`
 builds and publishes them on a `fleet-runner-v*` tag.
 
+**Temporary, until a release is tested:** `FLEET_RUNNER_RELEASE=local` installs this checkout instead.
+Before installing, the guide runs `deploy/dev-push.sh`: `deploy/dev-build.sh` cross-compiles the
+static musl runner with `cargo zigbuild` (needs `brew install zig`, `cargo install cargo-zigbuild`,
+`rustup target add aarch64-unknown-linux-musl`) and packs the agents. Then it scp's both over SSM to
+`/tmp/fleet-local`, using a 60-second EC2 Instance Connect key, and the install script reads them
+through `file://`. Remove `local-build.ts`, the `push` step and both scripts once releases are in use.
+
 ## Testing
 
 | What | How |

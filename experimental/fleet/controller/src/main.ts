@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { serveApi } from "./api.js";
 import { sdkAwsPort } from "./guides/aws/ec2.js";
+import { pushLocalBuild } from "./guides/aws/local-build.js";
 import { GUIDES } from "./guides/registry.js";
 import { openLog } from "./log.js";
 import { startRuntime } from "./runtime.js";
@@ -36,6 +37,7 @@ const runtime = startRuntime(openLog(join(home, "controller.db")), {
   aws: sdkAwsPort(vault),
   guides: GUIDES,
   release: process.env.FLEET_RUNNER_RELEASE ?? "",
+  pushLocalBuild: pushLocalBuild(vault),
 });
 serveApi(runtime, { port, token, allowedOrigins, vault });
 console.log(`controller listening on http://127.0.0.1:${port} (home ${home}, browser origins: ${[...allowedOrigins].join(", ") || "none"})`);

@@ -1,5 +1,6 @@
 import * as a2a from "./a2a.js";
 import type { GuidePorts, RunnerGuide } from "./guides/guide.js";
+import type { PushLocalBuild } from "./guides/aws/local-build.js";
 import type { AwsPort } from "./guides/aws/port.js";
 import { catalog, guideById } from "./guides/registry.js";
 import * as llm from "./llm.js";
@@ -23,6 +24,7 @@ export type RuntimeDeps = {
   aws: AwsPort;
   guides: readonly RunnerGuide[];
   release: string;
+  pushLocalBuild?: PushLocalBuild;
 };
 
 const localClock = (date: Date): LocalClock => ({
@@ -80,6 +82,7 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
     fetch,
     sleep,
     release: deps.release,
+    ...(deps.pushLocalBuild ? { pushLocalBuild: deps.pushLocalBuild } : {}),
   });
 
   const effectResult = async (effect: Effect): Promise<Msg | null> => {

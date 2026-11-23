@@ -374,6 +374,40 @@ describe("aws guide: steps", () => {
   });
 });
 
+describe("aws guide: local build (temporary)", () => {
+  const pick = { instance: "i-online", name: "ec2" };
+
+  test("copies the local build to the picked instance, then installs it from there", async () => {
+    const pushes: string[][] = [];
+    const scripts: string[] = [];
+    const p = ports({
+      release: "local",
+      pushLocalBuild: async (id, region, arch) => (pushes.push([id, region, arch]), ok(undefined)),
+      aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")) })),
+    });
+    const r = await answer(stateOf(await toTarget(p)), pick, p);
+    expect([r.kind, pushes, installs(scripts)[0]?.includes("RELEASE='file:///tmp/fleet-local'")]).toEqual(["done", [["i-online", "eu-west-1", "arm64"]], true]);
+  });
+
+  test("a failed copy shows why and Retry copies again", async () => {
+    const p = ports({ release: "local", pushLocalBuild: async () => fail("Docker isn't running") });
+    const r = await answer(stateOf(await toTarget(p)), pick, p);
+    expect([r.kind, r.kind === "failed" && r.error, stateOf(r).step]).toEqual(["failed", "Docker isn't running", "push"]);
+  });
+
+  test("an instance that already runs a runner is adopted without copying anything", async () => {
+    const pushes: string[] = [];
+    const found = "FLEET_RUNNER=present\nFLEET_RUNNER_PORT=9000\nFLEET_RUNNER_TOKEN=abc\n";
+    const p = ports({
+      release: "local",
+      pushLocalBuild: async (id) => (pushes.push(id), ok(undefined)),
+      aws: fakeAws(fakeHost({ scriptResult: async () => ok({ done: true, ok: true, output: found }) })),
+    });
+    await answer(stateOf(await toTarget(p)), pick, p);
+    expect(pushes).toEqual([]);
+  });
+});
+
 describe("aws guide: teardown", () => {
   const runner = () => ({
     name: "ec2",

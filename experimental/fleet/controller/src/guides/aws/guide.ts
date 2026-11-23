@@ -4,6 +4,7 @@ import type { AwsCredentials, GuideInput, GuideResult, GuideState, NewRunner, St
 import { reveal } from "../../vault.js";
 import { nameProblem, type GuidePorts, type RunnerGuide } from "../guide.js";
 import { detectScript, installScript, parseDetect, uninstallScript } from "./install.js";
+import { LOCAL_RELEASE_DIR } from "./local-build.js";
 import type { Arch, Ec2Host, Instance } from "./port.js";
 
 const RUNNER_PORT = 9000;
@@ -14,7 +15,7 @@ const CHECK_TIMEOUT_MS = 45_000;
 /** Where account-wide calls go when the profile names no region. */
 const HOME_REGION = "us-east-1";
 
-type Step = "credentials" | "keys" | "target" | "detect" | "detecting" | "install" | "installing" | "check";
+type Step = "credentials" | "keys" | "target" | "detect" | "detecting" | "push" | "install" | "installing" | "check";
 
 /** Logged after every step: only ids, names and vault keys, never a secret. */
 type AwsState = {
@@ -215,7 +216,10 @@ const waitDetect = async (state: AwsState, ports: GuidePorts): Promise<GuideResu
   if (result.value.done) {
     if (!result.value.ok) return failed({ ...state, step: "detect" }, "Looking for a runner", result.value.output.trim().split("\n").slice(-5).join("\n") || "the check script failed");
     const found = parseDetect(result.value.output);
-    return found ? adopt(state, found.port, found.token, ports) : working({ ...state, step: "install" }, "Installing the runner", "Starting…");
+    if (found) return adopt(state, found.port, found.token, ports);
+    return ports.release === "local"
+      ? working({ ...state, step: "push" }, "Installing the runner", "Building this checkout's runner and copying it to the instance…")
+      : working({ ...state, step: "install" }, "Installing the runner", "Starting…");
   }
   const polls = (state.polls ?? 0) + 1;
   if (polls > MAX_DETECT_POLLS) return failed({ ...state, step: "detect" }, "Looking for a runner", `the check script did not finish in ${(MAX_DETECT_POLLS * POLL_MS) / 60_000} minutes`);
@@ -234,9 +238,20 @@ const runnerToken = async (state: AwsState, ports: GuidePorts): Promise<Outcome<
   return stored.ok ? ok({ key, token }) : stored;
 };
 
+// TEMPORARY: FLEET_RUNNER_RELEASE=local installs this checkout's build, copied over scp (local-build.ts).
+const push = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+  if (!ports.pushLocalBuild) return failed(state, "Installing the runner", "this Controller can't copy a local build");
+  const pushed = await ports.pushLocalBuild(state.instanceId!, state.region!, state.found?.[state.instanceId!]?.arch ?? "arm64", state.credentials!);
+  return pushed.ok ? working({ ...state, step: "install" }, "Installing the runner", "Starting…") : failed(state, "Installing the runner", pushed.error);
+};
+
+const releaseBase = (release: string): string | null =>
+  release === "local" ? LOCAL_RELEASE_DIR : /^https:\/\/\S+$/.test(release) ? release.replace(/\/+$/, "") : null;
+
 const install = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
-  if (!/^https:\/\/\S+$/.test(ports.release)) {
-    return failed(state, "Installing the runner", "Set FLEET_RUNNER_RELEASE to the GitHub release download URL with the runner binaries (docs/RUNNER-GUIDES.md).");
+  const release = releaseBase(ports.release);
+  if (!release) {
+    return failed(state, "Installing the runner", "Set FLEET_RUNNER_RELEASE to the GitHub release download URL with the runner binaries (docs/RUNNER-GUIDES.md), or to local to copy this checkout's build.");
   }
   const h = await host(state, ports);
   if (!h.ok) return failed(state, "Installing the runner", h.error);
@@ -244,7 +259,7 @@ const install = async (state: AwsState, ports: GuidePorts): Promise<GuideResult>
   if (!token.ok) return failed(state, "Installing the runner", token.error);
   const withToken: AwsState = { ...state, tokenKey: token.value.key };
   const script = installScript({
-    release: ports.release.replace(/\/+$/, ""),
+    release,
     arch: state.found?.[state.instanceId!]?.arch ?? "arm64",
     token: token.value.token,
     name: state.name!,
@@ -333,6 +348,8 @@ export const awsGuide: RunnerGuide = {
         return detect(state, ports);
       case "detecting":
         return waitDetect(state, ports);
+      case "push":
+        return push(state, ports);
       case "install":
         return install(state, ports);
       case "installing":
