@@ -28,7 +28,7 @@ installation document were running, so it was changed to `t4g.small`.
 | Path | What |
 |---|---|
 | `/usr/local/bin/fleet-runner` | static musl binary |
-| `/etc/fleet-runner.env` | root-only (0600) env file: `RUNNER_NAME=ec2`, `RUNNER_LOCATION=EC2 us-west-2`, `RUNNER_AGENTS_DIR=/opt/fleet-agents`, `RUNNER_AGENTS=dadjokes`, `AWS_REGION`, `RUNNER_TOKEN`, `RUNNER_BIND=127.0.0.1:9000`, `RUNNER_PUBLIC_URL=http://127.0.0.1:9471`, `RUNNER_DB` |
+| `/etc/fleet-runner.env` | root-only (0600) env file: `RUNNER_NAME=ec2`, `RUNNER_LOCATION=EC2 us-west-2`, `RUNNER_AGENTS_DIR=/opt/fleet-agents`, `RUNNER_AGENTS=` (none; agents are added from the Fleet page), `AWS_REGION`, `RUNNER_TOKEN`, `RUNNER_BIND=127.0.0.1:9000`, `RUNNER_PUBLIC_URL=http://127.0.0.1:9471`, `RUNNER_DB` |
 | `/opt/fleet-agents/dadjokes/` | the agent folder (`agent.toml`, `agent.py`), from `agents-ec2.tar.gz` |
 | `/usr/local/bin/uv` | runs the Python agents; its cache and downloaded Python live in the service user's home `/var/lib/fleet-runner` |
 | `/etc/systemd/system/fleet-runner.service` | `Restart=always`, runs as system user `fleet-runner` |

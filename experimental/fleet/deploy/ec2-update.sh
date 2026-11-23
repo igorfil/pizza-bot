@@ -19,11 +19,13 @@ rm -rf "$AGENTS_DIR" && mv "$AGENTS_DIR.new" "$AGENTS_DIR"
 
 ENV=/etc/fleet-runner.env
 sed -i '/^RUNNER_AGENT=/d; /^RUNNER_MODEL=/d; /^RUNNER_AGENTS_DIR=/d; /^RUNNER_AGENTS=/d' "$ENV"
-printf 'RUNNER_AGENTS_DIR=%s\nRUNNER_AGENTS=dadjokes\nAWS_REGION=us-west-2\n' "$AGENTS_DIR" >> "$ENV"
+printf 'RUNNER_AGENTS_DIR=%s\nRUNNER_AGENTS=\nAWS_REGION=us-west-2\n' "$AGENTS_DIR" >> "$ENV"
 grep -q '^AWS_REGION=' "$ENV" && awk '!seen[$0]++' "$ENV" > "$ENV.tmp" && mv "$ENV.tmp" "$ENV" && chmod 600 "$ENV"
 
 # First `uv run` downloads Python and boto3; do it now, as the service user, so the first real run is fast.
-sudo -u fleet-runner -H bash -c "cd $AGENTS_DIR/dadjokes && uv sync --script agent.py -q"
+for dir in "$AGENTS_DIR"/*/; do
+  grep -q '^# /// script' "$dir/agent.py" 2>/dev/null && sudo -u fleet-runner -H bash -c "cd '$dir' && uv sync --script agent.py -q"
+done
 
 systemctl restart fleet-runner
 sleep 2
