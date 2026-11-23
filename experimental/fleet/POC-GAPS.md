@@ -32,7 +32,7 @@ What the POC skips or does the simplest way. Each item needs a real decision bef
 - Runner auth: static bearer token over plain HTTP. EC2 runner listens on 127.0.0.1 only and is reached through SSH over SSM (no inbound ports); the local runner is localhost only. No TLS.
 - Runner tokens are stored in plain text in the Controller Msg log.
 - Controller API: bound to 127.0.0.1 with a token in `~/.agent-fleet/token` (0600). Browser origins are refused unless listed in `FLEET_ALLOWED_ORIGINS`.
-- `dev.sh` hardcodes the Controller token `fleet-dev-token` and the local runner token `localtoken`; the pizza-bot screen defaults to the same dev token. Fine for a laptop POC, not for anything shared.
+- `scripts/fleet-dev.mjs` (which `dev.sh` and `npm run dev` use) hardcodes the Controller token `fleet-dev-token` and the local runner token `localtoken`; the pizza-bot screen defaults to the same dev token. Fine for a laptop POC, not for anything shared.
 
 ## UI simplified
 - The Fleet page keeps its own copy of the Model types (`fleet-types.ts`); no shared package or generated client, by design of the import boundary.

@@ -488,15 +488,14 @@ agent). It needs Rust and uv on PATH.
   `laptop` runner.
 - `npm run dev:both`: the browser-only variant.
 - `PIZZA_FLEET=0` skips the fleet, and a missing Rust toolchain skips it with a warning.
-- `experimental/fleet/dev.sh` still exists: fleet only, with the EC2 tunnel.
+- `experimental/fleet/dev.sh` is the one command from a fresh clone: it checks prerequisites, runs
+  `npm install` and `npm run build`, frees the ports, then runs `npm run dev:both`.
 
 **Open questions.**
 - Q-INT-1 **CI.** CI runs `npm run build` on Ubuntu and Windows. It now needs `uv` (not installed by
   the workflow) and Rust. On Windows the runner probably doesn't compile anyway (Q-RUN-1). Add
   `setup-uv` and skip the runner on Windows, make `fleet:build` optional in CI, or keep the fleet
   out of CI?
-- Q-INT-2 **Two launchers.** `dev.sh` (with the tunnel) and `scripts/fleet-dev.mjs` (without it)
-  overlap. Keep both, or fold the tunnel into `fleet-dev.mjs` behind an env var and delete `dev.sh`?
 - Q-INT-3 **Packaging.** The desktop app ships the api-server as a sidecar. Would the packaged app
   ship the Controller and a local runner too (a Rust binary per platform, plus uv), or does the fleet
   stay dev-only?

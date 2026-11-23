@@ -16,9 +16,36 @@ it comes back.
 - The Fleet page: [docs/UI.md](docs/UI.md)
 - Verified facts and gotchas: [docs/LEARNINGS.md](docs/LEARNINGS.md)
 
-## Quick start
+## Getting started
 
-From the repo root:
+The experiment lives on the `experimental/distributed-backend` branch of the
+[igorfil/pizza-bot](https://github.com/igorfil/pizza-bot) fork.
+
+```bash
+git clone --branch experimental/distributed-backend https://github.com/igorfil/pizza-bot.git pizza-bot-experimental
+cd pizza-bot-experimental
+experimental/fleet/dev.sh
+```
+
+`dev.sh` goes from source to the running app in one go:
+
+1. **Checks prerequisites** and stops with install commands for anything missing: Node.js 24+, Rust
+   (`cargo`, `rustup`), `uv`, `lsof`, `zig`, the AWS CLI, `session-manager-plugin` and working AWS
+   credentials (the Controller reaches EC2 over SSM; agents call Bedrock). It installs what it can
+   without asking: `zig` (with Homebrew), `cargo-zigbuild`, and the `aarch64`/`x86_64-unknown-linux-musl`
+   Rust targets.
+2. Runs **`npm install`**.
+3. Runs **`npm run build`**: pizza-bot, the fleet Controller, the runner, its **arm64 and x86_64 Linux
+   builds for EC2** and the agents' Python environments. It stops if either Linux build is missing.
+4. **Frees the ports** it needs (5173, 8080, 7700, 9301), stopping whatever listens on them.
+5. Starts **`npm run dev:both`**: the web app at <http://localhost:5173> (open **Fleet** in the left rail),
+   pizza-bot's api-server on :8080, the Controller on :7700 and the laptop runner on :9301, which is
+   registered on a fresh Controller. Ctrl-C stops everything.
+
+Then **Agents → Add runner → AWS EC2** puts a runner on one of your instances, and **Add agent** on a
+runner creates or turns on agents.
+
+Already-cloned and built, from the repo root:
 
 ```bash
 npm install && npm run build      # once
@@ -34,7 +61,6 @@ without a Rust toolchain it is skipped with a warning. On a fresh Controller it 
 `laptop` runner. The EC2 runner isn't started; run `deploy/tunnel.sh <instance-id>` and add it by hand.
 Ctrl-C stops everything.
 
-Fleet only, without pizza-bot: `experimental/fleet/dev.sh`.
 
 First run only: register the runners (the Controller remembers them in its Msg log). On the Fleet
 page use **Agents → Add runner**, or:
@@ -135,7 +161,7 @@ comes back it re-checks runners and re-fetches open runs.
 ```
 experimental/fleet/
 ├── SPEC.md · POC-GAPS.md · README.md
-├── dev.sh                 fleet only: Controller + laptop runner + tunnel with the dev token
+├── dev.sh                 from a fresh clone to the running app: prerequisites, install, build, run
 ├── agents/                one folder per agent: agent.toml + code (README.md = the contract)
 ├── docs/                  DEPLOY.md · LEARNINGS.md · UI.md
 ├── controller/            Node 24 + TypeScript, npm workspace @pizza-bot/fleet-controller

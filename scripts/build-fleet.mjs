@@ -24,6 +24,8 @@ const canCrossBuild = () =>
 // TEMPORARY: the AWS guide copies these builds to an instance (deploy/dev-push.sh) until runner releases are published.
 if (canCrossBuild()) {
   ["arm64", "x86_64"].forEach((arch) => run("bash", [path.join(fleet, "deploy", "dev-build.sh"), arch], fleet));
+} else if (process.env.FLEET_REQUIRE_LINUX_RUNNER === "1") {
+  throw new Error("the Linux runner builds for EC2 need zig and cargo-zigbuild (see experimental/fleet/docs/RUNNER-GUIDES.md)");
 } else {
   console.warn("[fleet] skipping the Linux runner builds for EC2: they need zig and cargo-zigbuild (see experimental/fleet/docs/RUNNER-GUIDES.md)");
 }
