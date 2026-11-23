@@ -2118,7 +2118,12 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   transition: border-color .15s, background .15s;
 }
 .fleet-guide-pick:hover:not(:disabled) { border-color: var(--brand); background: color-mix(in oklch, var(--brand) 6%, var(--panel-2)); }
-.fleet-guide-pick-title { font-weight: 600; }
+.fleet-guide-pick-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.fleet-guide-pick.soon { cursor: default; opacity: .6; }
+.fleet-soon {
+  padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px;
+  font-size: 11px; font-weight: 500; color: var(--dim);
+}
 .fleet-choice-field { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .fleet-choice-legend { padding: 0; margin-bottom: 8px; }
 .fleet-choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }

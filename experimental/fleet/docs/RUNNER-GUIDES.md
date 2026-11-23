@@ -169,7 +169,7 @@ interface Ec2Host {
 
 ### manual
 
-One step: name, URL, token (secret). Produces a `direct` transport. Replaces the old add-runner form.
+Listed in Add runner as "Coming soon" (`comingSoon` in the catalog); it can't be started yet. Scripts add a runner by URL with the `AddRunner` intent.
 
 ### aws (EC2)
 

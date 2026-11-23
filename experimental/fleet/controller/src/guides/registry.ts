@@ -7,4 +7,5 @@ export const GUIDES: readonly RunnerGuide[] = [awsGuide, manualGuide];
 
 export const guideById = (id: string, guides: readonly RunnerGuide[] = GUIDES): RunnerGuide | undefined => guides.find((g) => g.id === id);
 
-export const catalog = (guides: readonly RunnerGuide[] = GUIDES) => guides.map(({ id, title, description }) => ({ id, title, description }));
+export const catalog = (guides: readonly RunnerGuide[] = GUIDES) =>
+  guides.map(({ id, title, description, comingSoon }) => ({ id, title, description, ...(comingSoon ? { comingSoon } : {}) }));

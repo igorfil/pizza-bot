@@ -53,9 +53,16 @@ export function GuidePicker({ model, send, onStarted }: { model: FleetModel; sen
       {guides.length === 0 && <p className="fleet-muted">This Controller offers no guides.</p>}
       <div className="fleet-guide-options">
         {guides.map((g) => (
-          <button key={g.id} type="button" className="fleet-guide-pick" disabled={starting !== null} onClick={() => void start(g.id)}>
+          <button
+            key={g.id}
+            type="button"
+            className={`fleet-guide-pick${g.comingSoon ? " soon" : ""}`}
+            disabled={starting !== null || g.comingSoon === true}
+            onClick={() => void start(g.id)}
+          >
             <span className="fleet-guide-pick-title">
               {starting === g.id && <LoaderCircle size={13} className="spin" aria-hidden="true" />} {g.title}
+              {g.comingSoon && <span className="fleet-soon">Coming soon</span>}
             </span>
             <span className="fleet-muted">{g.description}</span>
           </button>

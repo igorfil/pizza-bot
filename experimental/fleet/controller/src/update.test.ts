@@ -446,6 +446,12 @@ describe("guide sessions", () => {
   const view = { title: "Add", fields: [{ id: "name", label: "Name", kind: "text" as const }, { id: "token", label: "Token", kind: "secret" as const }] };
   const asked: GuideResult = { kind: "ask", state: { step: "form" }, view };
   const started: Msg[] = [catalogue, { type: "StartGuide", sessionId: "g1", guide: "manual" }];
+
+  test("a guide that is coming soon can't be started", () => {
+    const soon: Msg = { type: "Booted", now: 1_000, guides: [{ id: "manual", title: "By URL", description: "", comingSoon: true }] };
+    const [model, effects] = run([soon, { type: "StartGuide", sessionId: "g1", guide: "manual" }]);
+    expect([model.guideSessions, effects, model.notifications.at(-1)?.text]).toEqual([{}, [], "By URL isn't available yet"]);
+  });
   const atForm: Msg[] = [...started, { type: "GuideStepped", sessionId: "g1", result: asked }];
   const newRunner = { name: "home", transport: { kind: "direct" as const, url: "http://h" }, token: { kind: "vault" as const, key: "guide/g1/token/a" }, origin: null };
 

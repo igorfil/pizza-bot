@@ -33,6 +33,7 @@ const withSession = (model: Model, id: string, f: (s: GuideSession) => Result): 
 export const startGuide = (model: Model, sessionId: string, guide: string): Result => {
   const info = model.guideCatalog.find((g) => g.id === guide);
   if (!info) return [notify(model, "error", `unknown guide ${guide}`), []];
+  if (info.comingSoon) return [notify(model, "error", `${info.title} isn't available yet`), []];
   if (model.guideSessions[sessionId]) return [model, []];
   const session: GuideSession = {
     id: sessionId,

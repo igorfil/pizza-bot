@@ -7,6 +7,7 @@ import { awsGuide } from "./aws/guide.js";
 import type { AwsPort, Ec2Host, Instance } from "./aws/port.js";
 import type { GuidePorts } from "./guide.js";
 import { manualGuide } from "./manual.js";
+import { catalog } from "./registry.js";
 
 const instances: Instance[] = [
   { id: "i-online", name: "box", type: "t4g.small", arch: "arm64", ssmOnline: true },
@@ -68,33 +69,13 @@ const failingInstall = (result: { done: boolean; ok: boolean; output: string }, 
 const toTarget = async (p: GuidePorts) => answer(stateOf(await awsGuide.step(awsGuide.start(), null, p)), { source: "profile:default" }, p);
 
 describe("manual guide", () => {
-  test("asks for name, URL and token", async () => {
+  test("is listed as coming soon", () => {
+    expect(catalog([manualGuide])).toEqual([{ id: "manual", title: "By URL", description: manualGuide.description, comingSoon: true }]);
+  });
+
+  test("has no workflow yet", async () => {
     const r = await manualGuide.step({}, null, ports());
-    expect(r.kind === "ask" && r.view.fields.map((f) => [f.id, f.kind])).toEqual([
-      ["name", "text"],
-      ["url", "text"],
-      ["token", "secret"],
-    ]);
-  });
-
-  test("a valid answer becomes a direct runner holding the vault key", async () => {
-    const r = await manualGuide.step({}, { name: "home", url: "http://h:9301/", token: "guide/s1/token/k" }, ports());
-    expect(r.kind === "done" && r.runner).toEqual({
-      name: "home",
-      transport: { kind: "direct", url: "http://h:9301" },
-      token: { kind: "vault", key: "guide/s1/token/k" },
-      origin: { guide: "manual", summary: "http://h:9301", teardown: null },
-    });
-  });
-
-  test("a taken name asks again and keeps what was typed", async () => {
-    const r = await manualGuide.step({}, { name: "laptop", url: "http://h", token: "k" }, ports());
-    expect([r.kind, r.kind === "ask" && r.error, r.kind === "ask" && r.view.fields[1]?.value]).toEqual(["ask", "A runner named laptop already exists.", "http://h"]);
-  });
-
-  test("a URL without a scheme is refused", async () => {
-    const r = await manualGuide.step({}, { name: "home", url: "h:9301", token: "k" }, ports());
-    expect(r.kind === "ask" && r.error).toBe("The URL must start with http:// or https://.");
+    expect([r.kind, r.kind === "failed" && r.error]).toEqual(["failed", "Adding a runner by URL isn't available yet."]);
   });
 });
 

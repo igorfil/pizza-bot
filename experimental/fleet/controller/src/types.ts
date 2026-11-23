@@ -148,7 +148,8 @@ export type GuideResult =
   | { kind: "done"; runner: NewRunner }
   | { kind: "failed"; state: GuideState; view: StepView; error: string };
 
-export type GuideInfo = { id: string; title: string; description: string };
+/** `comingSoon` guides are listed but can't be started. */
+export type GuideInfo = { id: string; title: string; description: string; comingSoon?: boolean };
 
 export type GuideSession = {
   id: string;

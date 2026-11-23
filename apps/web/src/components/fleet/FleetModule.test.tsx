@@ -294,6 +294,12 @@ describe("runner guides", () => {
   const radio = (html: string, value: string) => html.match(/<input[^>]*type="radio"[^>]*>/g)?.find((i) => i.includes(`value="${value}"`)) ?? "";
   const card = (s: FleetGuideSession) => wrap(<GuideCard session={s} send={noop} />);
 
+  it("shows a coming-soon guide but doesn't let it start", () => {
+    const soon = { ...withGuides(), guideCatalog: [{ id: "manual", title: "By URL", description: "", comingSoon: true }] };
+    const html = wrap(<GuidePicker model={soon} send={noop} onStarted={() => {}} />);
+    expect([html.includes("Coming soon"), /<button[^>]*disabled=""[^>]*>.*By URL/.test(html)]).toEqual([true, true]);
+  });
+
   it("offers every guide the Controller lists", () => {
     const html = wrap(<GuidePicker model={withGuides()} send={noop} onStarted={() => {}} />);
     expect([html.includes("AWS EC2"), html.includes("By URL")]).toEqual([true, true]);

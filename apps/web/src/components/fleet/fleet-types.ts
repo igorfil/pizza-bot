@@ -135,6 +135,8 @@ export interface FleetGuideInfo {
   id: string;
   title: string;
   description: string;
+  /** Listed in Add runner but not startable yet. */
+  comingSoon?: boolean;
 }
 
 export interface FleetModel {

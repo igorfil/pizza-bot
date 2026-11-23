@@ -28,6 +28,8 @@ export interface RunnerGuide {
   id: string;
   title: string;
   description: string;
+  /** Shown in Add runner but not startable yet. */
+  comingSoon?: boolean;
   start(): GuideState;
   step(state: GuideState, input: GuideInput | null, ports: GuidePorts): Promise<GuideResult>;
   teardown?(runner: NewRunner, ports: GuidePorts): Promise<Outcome<string>>;
