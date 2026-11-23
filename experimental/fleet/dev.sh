@@ -6,7 +6,7 @@ set -u
 cd "$(dirname "$0")"
 
 export FLEET_ALLOWED_ORIGINS="http://localhost:5173,http://localhost:5273"
-EC2_INSTANCE="${EC2_INSTANCE:-<instance-id>}"
+EC2_INSTANCE="${EC2_INSTANCE:-}"
 DEV_TOKEN="fleet-dev-token"
 
 mkdir -p "$HOME/.agent-fleet"
@@ -26,7 +26,7 @@ PATH="$HOME/.toolbox/bin:$PATH" RUNNER_NAME=laptop RUNNER_TOKEN=localtoken RUNNE
   RUNNER_DB="$HOME/.agent-fleet/laptop-runner.db" RUNNER_BIND=127.0.0.1:9301 AWS_REGION=us-west-2 \
   ./runner/target/debug/fleet-runner &
 
-./deploy/tunnel.sh "$EC2_INSTANCE" &
+[ -n "$EC2_INSTANCE" ] && ./deploy/tunnel.sh "$EC2_INSTANCE" &
 
 (cd controller && npx tsx src/main.ts) &
 
