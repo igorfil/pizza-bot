@@ -3,8 +3,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { serveApi } from "./api.js";
+import { sdkAwsPort } from "./guides/aws/ec2.js";
+import { GUIDES } from "./guides/registry.js";
 import { openLog } from "./log.js";
 import { startRuntime } from "./runtime.js";
+import { transportFor } from "./transport.js";
+import { vaultFromEnv } from "./vault.js";
 
 const home = process.env.FLEET_HOME ?? join(homedir(), ".agent-fleet");
 const port = Number(process.env.FLEET_PORT ?? 7700);
@@ -25,6 +29,13 @@ const loadToken = (path: string): string => {
 
 mkdirSync(home, { recursive: true });
 const token = loadToken(join(home, "token"));
-const runtime = startRuntime(openLog(join(home, "controller.db")));
-serveApi(runtime, { port, token, allowedOrigins });
+const vault = vaultFromEnv();
+const runtime = startRuntime(openLog(join(home, "controller.db")), {
+  vault,
+  transports: (spec) => transportFor(spec, { vault }),
+  aws: sdkAwsPort(vault),
+  guides: GUIDES,
+  release: process.env.FLEET_RUNNER_RELEASE ?? "",
+});
+serveApi(runtime, { port, token, allowedOrigins, vault });
 console.log(`controller listening on http://127.0.0.1:${port} (home ${home}, browser origins: ${[...allowedOrigins].join(", ") || "none"})`);

@@ -1,4 +1,6 @@
 import { chatFailed, chatReplied, createChat, failInterruptedChats, sendChatMessage } from "./chat.js";
+import { cancelGuide, guideInput, guideRetry, guideStepped, interruptGuides, startGuide } from "./guide-session.js";
+import { addRunner, notify, runnerSpec, setRunner } from "./runners.js";
 import type {
   Agent,
   AgentInfo,
@@ -7,9 +9,7 @@ import type {
   LocalClock,
   Model,
   Msg,
-  Notification,
   Runner,
-  RunnerRef,
   Sub,
   Task,
   TaskSnapshot,
@@ -22,11 +22,20 @@ export const HEALTH_INTERVAL_MS = 15_000;
 export const RESYNC_MS = 30_000;
 export const WAKE_GAP_MS = 10_000;
 const MAX_BACKOFF_MS = 30_000;
-const MAX_NOTIFICATIONS = 20;
 
 export type Result = [Model, Effect[]];
 
-export const initialModel = (): Model => ({ now: 0, runners: {}, agents: {}, tasks: {}, chats: {}, notifications: [], local: null });
+export const initialModel = (): Model => ({
+  now: 0,
+  runners: {},
+  agents: {},
+  tasks: {},
+  chats: {},
+  guideSessions: {},
+  guideCatalog: [],
+  notifications: [],
+  local: null,
+});
 
 export const agentKey = (runner: string, id: string): string => `${runner}/${id}`;
 
@@ -43,23 +52,13 @@ export const isTerminal = (task: Task): boolean => TERMINAL.has(task.state);
 export const backoffMs = (failures: number): number =>
   Math.min(1000 * 2 ** Math.max(failures - 1, 0), MAX_BACKOFF_MS);
 
-const ref = (r: Runner): RunnerRef => ({ name: r.name, url: r.url, token: r.token });
-
-const endpoint = (r: Runner, agentId: string): Endpoint => ({ url: `${r.url}/agents/${agentId}`, token: r.token });
-
-const notify = (model: Model, level: Notification["level"], text: string): Model => ({
-  ...model,
-  notifications: [...model.notifications, { at: model.now, level, text }].slice(-MAX_NOTIFICATIONS),
-});
+/** Agents are reached only through their runner's live link, never via the URL in an agent card. */
+const endpoint = (r: Runner, agentId: string): Endpoint | null =>
+  r.link.state === "up" ? { url: `${r.link.url}/agents/${agentId}`, token: r.token } : null;
 
 const setTask = (model: Model, task: Task): Model => ({
   ...model,
   tasks: { ...model.tasks, [task.id]: { ...task, updatedAt: model.now } },
-});
-
-const setRunner = (model: Model, runner: Runner): Model => ({
-  ...model,
-  runners: { ...model.runners, [runner.name]: runner },
 });
 
 const setAgent = (model: Model, agent: Agent): Model => ({
@@ -72,7 +71,8 @@ const isSyncable = (task: Task): task is Task & { remoteId: string } =>
 
 const getTaskEffect = (model: Model, task: Task & { remoteId: string }): Effect[] => {
   const runner = model.runners[task.runner];
-  return runner ? [{ type: "GetTask", taskId: task.id, endpoint: endpoint(runner, task.agent), remoteId: task.remoteId }] : [];
+  const ep = runner ? endpoint(runner, task.agent) : null;
+  return ep ? [{ type: "GetTask", taskId: task.id, endpoint: ep, remoteId: task.remoteId }] : [];
 };
 
 const applySnapshot = (task: Task, snapshot: TaskSnapshot, now: number): Task => ({
@@ -98,14 +98,14 @@ const applyUpdate = (task: Task, update: TaskUpdate): Task => ({
 });
 
 /**
- * Used on boot and on wake. Runners drop to `unknown`, which closes every stream; the
- * health check that follows brings them back via `RunnerOk`, which re-fetches their tasks.
+ * Used on boot and on wake. Every link reopens (tunnels often hang silently after sleep) and
+ * runners drop to `unknown`, closing every stream; `LinkUp` → health check → `RunnerOk` re-fetches tasks.
  */
-const resyncAll = (model: Model): Result => {
+const resyncAll = (model: Model): Model => {
   const runners = Object.fromEntries(
-    Object.values(model.runners).map((r) => [
+    Object.values(model.runners).map((r): [string, Runner] => [
       r.name,
-      { ...r, status: "unknown" as const, nextCheckAt: model.now + HEALTH_INTERVAL_MS },
+      { ...r, status: "unknown", link: { state: "down", error: null }, linkEpoch: r.linkEpoch + 1, linkFailures: 0, linkRetryAt: 0 },
     ]),
   );
   const tasks = Object.fromEntries(
@@ -114,8 +114,7 @@ const resyncAll = (model: Model): Result => {
       isSyncable(t) ? { ...t, streamEpoch: t.streamEpoch + 1, streamFailures: 0, streamRetryAt: 0 } : t,
     ]),
   );
-  const effects = Object.values(model.runners).map((r): Effect => ({ type: "CheckRunner", runner: ref(r) }));
-  return [{ ...model, runners, tasks }, effects];
+  return { ...model, runners, tasks };
 };
 
 const markLostDispatches = (model: Model): Model =>
@@ -126,10 +125,12 @@ const markLostDispatches = (model: Model): Model =>
       model,
     );
 
+const checkRunner = (r: Runner): Effect[] => (r.link.state === "up" ? [{ type: "CheckRunner", runner: r.name, url: r.link.url }] : []);
+
 const dueRunnerChecks = (model: Model): Result => {
-  const due = Object.values(model.runners).filter((r) => r.nextCheckAt <= model.now);
+  const due = Object.values(model.runners).filter((r) => r.link.state === "up" && r.nextCheckAt <= model.now);
   const next = due.reduce((m, r) => setRunner(m, { ...r, nextCheckAt: m.now + HEALTH_INTERVAL_MS }), model);
-  return [next, due.map((r): Effect => ({ type: "CheckRunner", runner: ref(r) }))];
+  return [next, due.flatMap(checkRunner)];
 };
 
 const dueResyncs = (model: Model): Result => {
@@ -145,14 +146,15 @@ const createTask = (model: Model, taskId: string, key: string, prompt: string, t
   const runner = agent ? model.runners[agent.runner] : undefined;
   if (!agent || !runner) return [notify(model, "error", `unknown agent ${key}`), []];
   if (model.tasks[taskId]) return [model, []];
+  const ep = runner.status === "healthy" ? endpoint(runner, agent.id) : null;
   const task: Task = {
     id: taskId,
     runner: agent.runner,
     agent: agent.id,
     prompt,
     remoteId: null,
-    state: "dispatching",
-    statusText: null,
+    state: ep ? "dispatching" : "queued",
+    statusText: ep ? null : `waiting for runner ${runner.name}`,
     artifacts: [],
     createdAt: model.now,
     updatedAt: model.now,
@@ -163,8 +165,21 @@ const createTask = (model: Model, taskId: string, key: string, prompt: string, t
     streamFailures: 0,
     streamRetryAt: 0,
   };
-  return [setTask(model, task), [{ type: "Dispatch", taskId, endpoint: endpoint(runner, agent.id), prompt }]];
+  return [setTask(model, task), ep ? [{ type: "Dispatch", taskId, endpoint: ep, prompt }] : []];
 };
+
+/** Runs created while the runner was away go out once it answers again. */
+const dispatchQueued = (model: Model, runner: Runner): Result =>
+  Object.values(model.tasks)
+    .filter((t) => t.runner === runner.name && t.state === "queued")
+    .reduce<Result>(
+      ([m, effects], t) => {
+        const ep = endpoint(runner, t.agent);
+        if (!ep) return [m, effects];
+        return [setTask(m, { ...t, state: "dispatching", statusText: null }), [...effects, { type: "Dispatch", taskId: t.id, endpoint: ep, prompt: t.prompt }]];
+      },
+      [model, []],
+    );
 
 /** One run per agent per local day, on the first tick at or after its time (so a sleeping laptop catches up on wake). */
 const dueSchedules = (model: Model): Result => {
@@ -187,11 +202,11 @@ const dueSchedules = (model: Model): Result => {
 const tick = (model: Model, now: number, local: LocalClock | undefined): Result => {
   const woke = model.now !== 0 && now - model.now > WAKE_GAP_MS;
   const ticked = { ...model, now, local: local ?? model.local };
-  const [afterWake, wakeEffects] = woke ? resyncAll(notify(ticked, "info", "wake detected, resyncing")) : [ticked, []];
+  const afterWake = woke ? resyncAll(notify(ticked, "info", "wake detected, resyncing")) : ticked;
   const [afterChecks, checkEffects] = dueRunnerChecks(afterWake);
   const [afterResync, resyncEffects] = dueResyncs(afterChecks);
   const [afterSchedules, scheduleEffects] = dueSchedules(afterResync);
-  return [afterSchedules, [...wakeEffects, ...checkEffects, ...resyncEffects, ...scheduleEffects]];
+  return [afterSchedules, [...checkEffects, ...resyncEffects, ...scheduleEffects]];
 };
 
 const setSchedule = (model: Model, key: string, at: string | null, prompt: string): Result => {
@@ -262,7 +277,43 @@ const runnerOk = (model: Model, name: string, agents: AgentInfo[], location: str
         .filter((t) => t.runner === name)
         .flatMap((t) => getTaskEffect(updated, t))
     : [];
-  return [recovered ? notify(updated, "info", `runner ${name} healthy`) : updated, catchUp];
+  const [dispatched, dispatches] = dispatchQueued(updated, updated.runners[name]!);
+  return [recovered ? notify(dispatched, "info", `runner ${name} healthy`) : dispatched, [...catchUp, ...dispatches]];
+};
+
+const linkUp = (model: Model, name: string, epoch: number, url: string): Result => {
+  const runner = model.runners[name];
+  if (!runner || runner.linkEpoch !== epoch) return [model, []];
+  const up: Runner = { ...runner, link: { state: "up", url }, linkFailures: 0, nextCheckAt: model.now + HEALTH_INTERVAL_MS };
+  return [setRunner(model, up), checkRunner(up)];
+};
+
+/** Like a task stream: bump the epoch, back off, and let the subscription reopen it. */
+const linkDown = (model: Model, name: string, epoch: number, error: string | null): Model => {
+  const runner = model.runners[name];
+  if (!runner || runner.linkEpoch !== epoch) return model;
+  const failures = runner.linkFailures + 1;
+  const reason = error ?? "connection closed";
+  const updated = setRunner(model, {
+    ...runner,
+    link: { state: "down", error: reason },
+    linkEpoch: epoch + 1,
+    linkFailures: failures,
+    linkRetryAt: model.now + backoffMs(failures),
+    status: "unreachable",
+    lastError: reason,
+  });
+  return runner.status === "unreachable" ? updated : notify(updated, "error", `runner ${name} disconnected: ${reason}`);
+};
+
+const removeRunner = (model: Model, name: string, teardown: boolean): Result => {
+  const runner = model.runners[name];
+  if (!runner) return [model, []];
+  const { [name]: _removed, ...runners } = model.runners;
+  const agents = Object.fromEntries(Object.entries(model.agents).filter(([, a]) => a.runner !== name));
+  const orphaned = Object.values(model.tasks).filter((t) => t.runner === name && !isTerminal(t));
+  const lost = orphaned.reduce((m, t) => setTask(m, { ...t, state: "lost", statusText: `runner ${name} was removed` }), { ...model, runners, agents });
+  return [lost, [{ type: "RetireRunner", runner: runnerSpec(runner), teardown: teardown && runner.origin?.teardown != null }]];
 };
 
 const withTask = (model: Model, taskId: string, f: (task: Task) => Result): Result => {
@@ -274,38 +325,36 @@ export const update = (model: Model, msg: Msg): Result => {
   switch (msg.type) {
     case "AddRunner": {
       if (model.runners[msg.name]) return [notify(model, "error", `runner ${msg.name} already exists`), []];
-      const runner: Runner = {
-        name: msg.name,
-        url: msg.url.replace(/\/+$/, ""),
-        token: msg.token,
-        status: "unknown",
-        failures: 0,
-        nextCheckAt: model.now + HEALTH_INTERVAL_MS,
-        lastSeenAt: null,
-        lastError: null,
-        location: null,
-      };
-      return [notify(setRunner(model, runner), "info", `runner ${msg.name} added`), [{ type: "CheckRunner", runner: ref(runner) }]];
+      const { type: _type, ...spec } = msg;
+      return [addRunner(model, spec), []];
     }
 
-    case "RemoveRunner": {
-      const { [msg.name]: _removed, ...runners } = model.runners;
-      const agents = Object.fromEntries(Object.entries(model.agents).filter(([, a]) => a.runner !== msg.name));
-      return [{ ...model, runners, agents }, []];
-    }
+    case "RemoveRunner":
+      return removeRunner(model, msg.name, msg.teardown);
+
+    case "RunnerRetired":
+      return [notify(model, msg.ok ? "info" : "error", msg.text), []];
+
+    case "LinkUp":
+      return linkUp(model, msg.runner, msg.epoch, msg.url);
+
+    case "LinkDown":
+      return [linkDown(model, msg.runner, msg.epoch, msg.error), []];
 
     case "CreateTask":
       return createTask(model, msg.taskId, msg.agent, msg.prompt, "manual");
 
     case "CancelTask":
       return withTask(model, msg.taskId, (task) => {
+        if (task.state === "queued") return [setTask(model, { ...task, state: "canceled", statusText: "canceled before it was sent" }), []];
         const runner = model.runners[task.runner];
-        if (!isSyncable(task) || !runner) return [notify(model, "error", `task ${task.id} cannot be canceled`), []];
-        return [model, [{ type: "Cancel", taskId: task.id, endpoint: endpoint(runner, task.agent), remoteId: task.remoteId }]];
+        const ep = runner ? endpoint(runner, task.agent) : null;
+        if (!isSyncable(task) || !ep) return [notify(model, "error", `task ${task.id} cannot be canceled`), []];
+        return [model, [{ type: "Cancel", taskId: task.id, endpoint: ep, remoteId: task.remoteId }]];
       });
 
     case "Booted":
-      return resyncAll(failInterruptedChats(markLostDispatches({ ...model, now: msg.now })));
+      return [resyncAll(interruptGuides(failInterruptedChats(markLostDispatches({ ...model, now: msg.now, guideCatalog: msg.guides })))), []];
 
     case "Tick":
       return tick(model, msg.now, msg.local);
@@ -378,6 +427,21 @@ export const update = (model: Model, msg: Msg): Result => {
 
     case "SetSchedule":
       return setSchedule(model, msg.agent, msg.at, msg.prompt);
+
+    case "StartGuide":
+      return startGuide(model, msg.sessionId, msg.guide);
+
+    case "GuideInput":
+      return guideInput(model, msg.sessionId, msg.input);
+
+    case "GuideRetry":
+      return guideRetry(model, msg.sessionId);
+
+    case "CancelGuide":
+      return cancelGuide(model, msg.sessionId);
+
+    case "GuideStepped":
+      return guideStepped(model, msg.sessionId, msg.result);
   }
 };
 
@@ -387,13 +451,20 @@ export const inboxOf = (model: Model): Task[] =>
     .filter((t) => isTerminal(t) && !t.ackedAt)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
-export const subscriptions = (model: Model): Sub[] =>
+const taskStreams = (model: Model): Sub[] =>
   Object.values(model.tasks)
     .filter(isSyncable)
     .filter((t) => model.now >= t.streamRetryAt)
     .flatMap((t): Sub[] => {
       const runner = model.runners[t.runner];
-      return runner?.status === "healthy"
-        ? [{ type: "TaskStream", key: `${t.id}#${t.streamEpoch}`, taskId: t.id, epoch: t.streamEpoch, endpoint: endpoint(runner, t.agent), remoteId: t.remoteId }]
-        : [];
+      const ep = runner?.status === "healthy" ? endpoint(runner, t.agent) : null;
+      return ep ? [{ type: "TaskStream", key: `${t.id}#${t.streamEpoch}`, taskId: t.id, epoch: t.streamEpoch, endpoint: ep, remoteId: t.remoteId }] : [];
     });
+
+/** Every runner wants its link open; reconnects after restart, wake or a drop come from here. */
+const links = (model: Model): Sub[] =>
+  Object.values(model.runners)
+    .filter((r) => model.now >= r.linkRetryAt)
+    .map((r): Sub => ({ type: "Link", key: `link:${r.name}#${r.linkEpoch}`, runner: r.name, epoch: r.linkEpoch, transport: r.transport }));
+
+export const subscriptions = (model: Model): Sub[] => [...links(model), ...taskStreams(model)];

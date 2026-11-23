@@ -1,0 +1,67 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`install script > matches the expected bootstrap 1`] = `
+"#!/bin/bash
+set -euo pipefail
+RELEASE='https://github.com/o/r/releases/download/fleet-runner-v1'
+AGENTS_DIR=/opt/fleet-agents
+
+curl -fsSL "$RELEASE/fleet-runner-x86_64-linux-musl" -o /usr/local/bin/fleet-runner.new
+install -m 755 /usr/local/bin/fleet-runner.new /usr/local/bin/fleet-runner
+rm -f /usr/local/bin/fleet-runner.new
+
+command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+
+curl -fsSL "$RELEASE/fleet-agents.tar.gz" -o /tmp/fleet-agents.tar.gz
+rm -rf "$AGENTS_DIR.new" && mkdir -p "$AGENTS_DIR.new"
+tar -xzf /tmp/fleet-agents.tar.gz -C "$AGENTS_DIR.new"
+rm -rf "$AGENTS_DIR" && mv "$AGENTS_DIR.new" "$AGENTS_DIR"
+
+id fleet-runner >/dev/null 2>&1 || useradd --system --home-dir /var/lib/fleet-runner --create-home fleet-runner
+
+umask 077
+cat > /etc/fleet-runner.env <<'EOF'
+RUNNER_NAME=ec2
+RUNNER_LOCATION=EC2 eu-west-1
+RUNNER_AGENTS_DIR=/opt/fleet-agents
+RUNNER_AGENTS=dadjokes,slow
+AWS_REGION=eu-west-1
+RUNNER_TOKEN=abc123
+RUNNER_BIND=127.0.0.1:9000
+RUNNER_DB=/var/lib/fleet-runner/runner.db
+EOF
+umask 022
+
+cat > /etc/systemd/system/fleet-runner.service <<'EOF'
+[Unit]
+Description=agent-fleet runner
+After=network-online.target
+
+[Service]
+User=fleet-runner
+EnvironmentFile=/etc/fleet-runner.env
+ExecStart=/usr/local/bin/fleet-runner
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+for agent in $(echo 'dadjokes,slow' | tr ',' ' '); do
+  if grep -q '^# /// script' "$AGENTS_DIR/$agent/agent.py" 2>/dev/null; then
+    sudo -u fleet-runner -H bash -c "cd $AGENTS_DIR/$agent && uv sync --script agent.py -q"
+  fi
+done
+
+systemctl daemon-reload
+systemctl enable fleet-runner
+systemctl restart fleet-runner
+for _ in $(seq 1 30); do
+  curl -fs "http://127.0.0.1:9000/agents" && exit 0
+  sleep 1
+done
+echo "the runner did not answer on port 9000" >&2
+journalctl -u fleet-runner -n 20 --no-pager >&2
+exit 1
+"
+`;

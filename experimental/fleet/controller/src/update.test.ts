@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { Model, Msg, TaskSnapshot } from "./types.js";
+import type { GuideResult, Model, Msg, Sub, TaskSnapshot } from "./types.js";
 import { inboxOf, initialModel, subscriptions, update, WAKE_GAP_MS } from "./update.js";
 
 const run = (msgs: Msg[], start: Model = initialModel()) =>
@@ -9,11 +9,18 @@ const working: TaskSnapshot = { remoteId: "r1", state: "working", statusText: "s
 
 const sys = { id: "sys", name: "System report", description: "", input: null };
 const healthy = (agents = [sys]): Msg => ({ type: "RunnerOk", name: "local", agents, location: "laptop" });
-const ep = { url: "http://x/agents/sys", token: "t" };
+const token = { kind: "vault", key: "runner/local/k" } as const;
+const ep = { url: "http://x/agents/sys", token };
+const addLocal: Msg = { type: "AddRunner", name: "local", transport: { kind: "direct", url: "http://x" }, token, origin: null };
+const linkUp = (epoch = 0, url = "http://x"): Msg => ({ type: "LinkUp", runner: "local", epoch, url });
+const booted: Msg = { type: "Booted", now: 50_000, guides: [] };
+const streams = (model: Model): Sub[] => subscriptions(model).filter((s) => s.type === "TaskStream");
+const linkKeys = (model: Model): string[] => subscriptions(model).filter((s) => s.type === "Link").map((s) => s.key);
 
 const withRunningTask: Msg[] = [
   { type: "Tick", now: 1_000 },
-  { type: "AddRunner", name: "local", url: "http://x/", token: "t" },
+  addLocal,
+  linkUp(),
   healthy(),
   { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "steps=3 hi" },
   { type: "Dispatched", taskId: "t1", snapshot: working },
@@ -21,7 +28,7 @@ const withRunningTask: Msg[] = [
 
 describe("update", () => {
   test("CreateTask emits a Dispatch effect for the runner", () => {
-    const [, effects] = run(withRunningTask.slice(0, 4));
+    const [, effects] = run(withRunningTask.slice(0, 5));
     expect(effects).toEqual([
       { type: "Dispatch", taskId: "t1", endpoint: ep, prompt: "steps=3 hi" },
     ]);
@@ -33,28 +40,28 @@ describe("update", () => {
   });
 
   test("RunnerOk registers the runner's agents under runner/id keys", () => {
-    const [model] = run(withRunningTask.slice(0, 3));
+    const [model] = run(withRunningTask.slice(0, 4));
     expect(Object.keys(model.agents)).toEqual(["local/sys"]);
   });
 
   test("an agent the runner stops serving disappears", () => {
-    const [model] = run([...withRunningTask.slice(0, 3), healthy([])]);
+    const [model] = run([...withRunningTask.slice(0, 4), healthy([])]);
     expect(model.agents).toEqual({});
   });
 
   test("RemoveRunner removes its agents", () => {
-    const [model] = run([...withRunningTask.slice(0, 3), { type: "RemoveRunner", name: "local" }]);
+    const [model] = run([...withRunningTask.slice(0, 4), { type: "RemoveRunner", name: "local", teardown: false }]);
     expect(model.agents).toEqual({});
   });
 
   test("a running task on a healthy runner has one stream subscription", () => {
     const [model] = run(withRunningTask);
-    expect(subscriptions(model).map((s) => s.key)).toEqual(["t1#0"]);
+    expect(streams(model).map((s) => s.key)).toEqual(["t1#0"]);
   });
 
   test("StreamDropped bumps the epoch, backs off, and re-fetches the task", () => {
     const [model, effects] = run([...withRunningTask, { type: "StreamDropped", taskId: "t1", epoch: 0, error: "reset" }]);
-    expect([model.tasks.t1?.streamEpoch, subscriptions(model), effects.map((e) => e.type)]).toEqual([1, [], ["GetTask"]]);
+    expect([model.tasks.t1?.streamEpoch, streams(model), effects.map((e) => e.type)]).toEqual([1, [], ["GetTask"]]);
   });
 
   test("a stale StreamDropped from an old epoch is ignored", () => {
@@ -63,25 +70,23 @@ describe("update", () => {
     expect([after.tasks.t1?.streamEpoch, effects]).toEqual([1, []]);
   });
 
-  test("a Tick after a long gap drops runners to unknown and re-checks them", () => {
-    const [, effects] = run([...withRunningTask, { type: "Tick", now: 1_000 + WAKE_GAP_MS + 1 }]);
-    expect(effects.map((e) => e.type)).toContain("CheckRunner");
+  test("a Tick after a long gap reopens every link", () => {
+    const [model] = run([...withRunningTask, { type: "Tick", now: 1_000 + WAKE_GAP_MS + 1 }]);
+    expect(linkKeys(model)).toEqual(["link:local#1"]);
   });
 
   test("after wake there are no streams until the runner answers", () => {
     const [model] = run([...withRunningTask, { type: "Tick", now: 1_000 + WAKE_GAP_MS + 1 }]);
-    expect(subscriptions(model)).toEqual([]);
+    expect(streams(model)).toEqual([]);
   });
 
-  test("RunnerOk after being unknown re-fetches that runner's open tasks", () => {
-    const [, effects] = run([...withRunningTask, { type: "Booted", now: 50_000 }, healthy()]);
-    expect(effects).toEqual([
-      { type: "GetTask", taskId: "t1", endpoint: ep, remoteId: "r1" },
-    ]);
+  test("RunnerOk after a restart re-fetches that runner's open tasks", () => {
+    const [, effects] = run([...withRunningTask, booted, linkUp(1), healthy()]);
+    expect(effects).toEqual([{ type: "GetTask", taskId: "t1", endpoint: ep, remoteId: "r1" }]);
   });
 
   test("Booted marks in-flight dispatches as lost", () => {
-    const [model] = run([...withRunningTask.slice(0, 4), { type: "Booted", now: 50_000 }]);
+    const [model] = run([...withRunningTask.slice(0, 5), booted]);
     expect(model.tasks.t1?.state).toBe("lost");
   });
 
@@ -146,7 +151,8 @@ describe("schedule", () => {
   const at = (day: string, minute: number): Msg => ({ type: "Tick", now: 1_000 + minute * 60_000, local: { day, minute } });
   const brief = { id: "morningbrief", name: "Morning brief", description: "", input: null };
   const laptop: Msg[] = [
-    { type: "AddRunner", name: "laptop", url: "http://m", token: "t" },
+    { type: "AddRunner", name: "laptop", transport: { kind: "direct", url: "http://m" }, token, origin: null },
+    { type: "LinkUp", runner: "laptop", epoch: 0, url: "http://m" },
     { type: "RunnerOk", name: "laptop", agents: [brief], location: null },
   ];
   const scheduled: Msg[] = [
@@ -154,16 +160,16 @@ describe("schedule", () => {
     ...laptop,
     { type: "SetSchedule", agent: "laptop/morningbrief", at: "07:30", prompt: "" },
   ];
-  const dispatches = (effects: ReturnType<typeof update>[1]) => effects.filter((e) => e.type === "Dispatch").length;
+  const scheduledRuns = (model: Model) => Object.values(model.tasks).filter((t) => t.trigger === "schedule").length;
 
   test("does not run before the scheduled time", () => {
-    const [, effects] = run([...scheduled, at("2026-11-20", 7 * 60 + 29)]);
-    expect(dispatches(effects)).toBe(0);
+    const [model] = run([...scheduled, at("2026-11-20", 7 * 60 + 29)]);
+    expect(scheduledRuns(model)).toBe(0);
   });
 
   test("runs on the first tick at or after the time", () => {
-    const [model, effects] = run([...scheduled, at("2026-11-20", 7 * 60 + 30)]);
-    expect([dispatches(effects), Object.values(model.tasks)[0]?.trigger]).toEqual([1, "schedule"]);
+    const [model] = run([...scheduled, at("2026-11-20", 7 * 60 + 30)]);
+    expect(scheduledRuns(model)).toBe(1);
   });
 
   test("runs only once per day", () => {
@@ -172,8 +178,8 @@ describe("schedule", () => {
   });
 
   test("catches up after the laptop slept through the slot", () => {
-    const [, effects] = run([...scheduled, at("2026-11-20", 11 * 60)]);
-    expect(dispatches(effects)).toBe(1);
+    const [model] = run([...scheduled, at("2026-11-20", 11 * 60)]);
+    expect(scheduledRuns(model)).toBe(1);
   });
 
   test("a schedule survives the runner re-reporting its agents", () => {
@@ -187,13 +193,13 @@ describe("schedule", () => {
   });
 
   test("setting a time that already passed today waits for tomorrow", () => {
-    const [, effects] = run([
+    const [model] = run([
       at("2026-11-20", 15 * 60),
       ...laptop,
       { type: "SetSchedule", agent: "laptop/morningbrief", at: "07:30", prompt: "" },
       at("2026-11-20", 15 * 60 + 1),
     ]);
-    expect(dispatches(effects)).toBe(0);
+    expect(scheduledRuns(model)).toBe(0);
   });
 
   test("an invalid time is rejected with a notification", () => {
@@ -202,8 +208,8 @@ describe("schedule", () => {
   });
 
   test("turning the schedule off stops runs", () => {
-    const [, effects] = run([...scheduled, { type: "SetSchedule", agent: "laptop/morningbrief", at: null, prompt: "" }, at("2026-11-20", 8 * 60)]);
-    expect(dispatches(effects)).toBe(0);
+    const [model] = run([...scheduled, { type: "SetSchedule", agent: "laptop/morningbrief", at: null, prompt: "" }, at("2026-11-20", 8 * 60)]);
+    expect(scheduledRuns(model)).toBe(0);
   });
 });
 
@@ -250,7 +256,185 @@ describe("chat", () => {
   });
 
   test("Booted fails a reply that was in flight", () => {
-    const [model] = run([{ type: "CreateChat", chatId: "c1", fromTaskId: null, text: "hello" }, { type: "Booted", now: 9_000 }]);
+    const [model] = run([{ type: "CreateChat", chatId: "c1", fromTaskId: null, text: "hello" }, { ...booted, now: 9_000 }]);
     expect([model.chats.c1?.pending, model.chats.c1?.error !== null]).toEqual([false, true]);
+  });
+});
+
+describe("links", () => {
+  test("a new runner wants its link open and is not checked before it is up", () => {
+    const [model, effects] = run([{ type: "Tick", now: 1_000 }, addLocal]);
+    expect([linkKeys(model), effects]).toEqual([["link:local#0"], []]);
+  });
+
+  test("LinkUp checks the runner at the link's URL", () => {
+    const [model, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(0, "http://127.0.0.1:5555")]);
+    expect([model.runners.local?.link, effects]).toEqual([
+      { state: "up", url: "http://127.0.0.1:5555" },
+      [{ type: "CheckRunner", runner: "local", url: "http://127.0.0.1:5555" }],
+    ]);
+  });
+
+  test("agents are called through the link URL, not the runner's configured URL", () => {
+    const [, effects] = run([
+      { type: "Tick", now: 1_000 },
+      addLocal,
+      linkUp(0, "http://127.0.0.1:5555"),
+      healthy(),
+      { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "" },
+    ]);
+    expect(effects[0]?.type === "Dispatch" && effects[0].endpoint.url).toBe("http://127.0.0.1:5555/agents/sys");
+  });
+
+  test("LinkDown marks the runner unreachable, closes its streams and backs off", () => {
+    const [model] = run([...withRunningTask, { type: "LinkDown", runner: "local", epoch: 0, error: "tunnel exited" }]);
+    expect([model.runners.local?.status, streams(model), linkKeys(model)]).toEqual(["unreachable", [], []]);
+  });
+
+  test("after the backoff the link is wanted again with a new epoch", () => {
+    const [model] = run([...withRunningTask, { type: "LinkDown", runner: "local", epoch: 0, error: "x" }, { type: "Tick", now: 3_000 }]);
+    expect(linkKeys(model)).toEqual(["link:local#1"]);
+  });
+
+  test("a LinkUp from an old epoch is ignored", () => {
+    const [model] = run([...withRunningTask, { type: "LinkDown", runner: "local", epoch: 0, error: "x" }, linkUp(0)]);
+    expect(model.runners.local?.link.state).toBe("down");
+  });
+
+  test("Booted reopens links", () => {
+    const [model] = run([...withRunningTask, booted]);
+    expect(linkKeys(model)).toEqual(["link:local#1"]);
+  });
+});
+
+describe("queued runs", () => {
+  const offline: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy(), booted];
+
+  test("a run created while the runner is away waits instead of failing", () => {
+    const [model, effects] = run([...offline, { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "x" }]);
+    expect([model.tasks.t1?.state, effects]).toEqual(["queued", []]);
+  });
+
+  test("a queued run is sent once the runner answers", () => {
+    const [model, effects] = run([...offline, { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "x" }, linkUp(1), healthy()]);
+    expect([model.tasks.t1?.state, effects.map((e) => e.type)]).toEqual(["dispatching", ["Dispatch"]]);
+  });
+
+  test("Booted leaves a queued run queued", () => {
+    const [model] = run([...offline, { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "x" }, booted]);
+    expect(model.tasks.t1?.state).toBe("queued");
+  });
+
+  test("canceling a queued run needs no runner", () => {
+    const [model] = run([...offline, { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "x" }, { type: "CancelTask", taskId: "t1" }]);
+    expect(model.tasks.t1?.state).toBe("canceled");
+  });
+});
+
+describe("removing a runner", () => {
+  const origin = { guide: "aws", summary: "EC2 i-1", teardown: { label: "terminate i-1", data: { instanceId: "i-1" } } };
+  const awsRunner: Msg = { ...addLocal, origin } as Msg;
+
+  test("its open runs become lost", () => {
+    const [model] = run([...withRunningTask, { type: "RemoveRunner", name: "local", teardown: false }]);
+    expect(model.tasks.t1?.state).toBe("lost");
+  });
+
+  test("retires the runner without teardown unless asked", () => {
+    const [, effects] = run([{ type: "Tick", now: 1_000 }, awsRunner, { type: "RemoveRunner", name: "local", teardown: false }]);
+    expect(effects).toEqual([{ type: "RetireRunner", runner: { name: "local", transport: { kind: "direct", url: "http://x" }, token, origin }, teardown: false }]);
+  });
+
+  test("asks for teardown when the user chose it and the guide offers one", () => {
+    const [, effects] = run([{ type: "Tick", now: 1_000 }, awsRunner, { type: "RemoveRunner", name: "local", teardown: true }]);
+    expect(effects[0]?.type === "RetireRunner" && effects[0].teardown).toBe(true);
+  });
+
+  test("never tears down a runner that has nothing to tear down", () => {
+    const [, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, { type: "RemoveRunner", name: "local", teardown: true }]);
+    expect(effects[0]?.type === "RetireRunner" && effects[0].teardown).toBe(false);
+  });
+});
+
+describe("guide sessions", () => {
+  const catalogue: Msg = { type: "Booted", now: 1_000, guides: [{ id: "manual", title: "By URL", description: "" }] };
+  const view = { title: "Add", fields: [{ id: "name", label: "Name", kind: "text" as const }, { id: "token", label: "Token", kind: "secret" as const }] };
+  const asked: GuideResult = { kind: "ask", state: { step: "form" }, view };
+  const started: Msg[] = [catalogue, { type: "StartGuide", sessionId: "g1", guide: "manual" }];
+  const atForm: Msg[] = [...started, { type: "GuideStepped", sessionId: "g1", result: asked }];
+  const newRunner = { name: "home", transport: { kind: "direct" as const, url: "http://h" }, token: { kind: "vault" as const, key: "guide/g1/token/a" }, origin: null };
+
+  test("StartGuide runs the guide's first step", () => {
+    const [model, effects] = run(started);
+    expect([model.guideSessions.g1?.status, effects]).toEqual(["working", [{ type: "RunGuideStep", sessionId: "g1", guide: "manual", state: null, input: null }]]);
+  });
+
+  test("an unknown guide is refused", () => {
+    const [model] = run([catalogue, { type: "StartGuide", sessionId: "g1", guide: "nope" }]);
+    expect([model.guideSessions, model.notifications.at(-1)?.text]).toEqual([{}, "unknown guide nope"]);
+  });
+
+  test("an ask result waits for the user", () => {
+    const [model, effects] = run(atForm);
+    expect([model.guideSessions.g1?.status, model.guideSessions.g1?.view, effects]).toEqual(["ask", view, []]);
+  });
+
+  test("the user's answer runs the next step and remembers secret keys", () => {
+    const [model, effects] = run([...atForm, { type: "GuideInput", sessionId: "g1", input: { name: "home", token: "guide/g1/token/a" } }]);
+    expect([model.guideSessions.g1?.secretKeys, effects.map((e) => e.type)]).toEqual([["guide/g1/token/a"], ["RunGuideStep"]]);
+  });
+
+  test("a working result asks for the next step right away", () => {
+    const [, effects] = run([...started, { type: "GuideStepped", sessionId: "g1", result: { kind: "working", state: { n: 1 }, view } }]);
+    expect(effects).toEqual([{ type: "RunGuideStep", sessionId: "g1", guide: "manual", state: { n: 1 }, input: null }]);
+  });
+
+  test("done adds the runner and ends the session", () => {
+    const [model] = run([...atForm, { type: "GuideStepped", sessionId: "g1", result: { kind: "done", runner: newRunner } }]);
+    expect([Object.keys(model.runners), model.guideSessions]).toEqual([["home"], {}]);
+  });
+
+  test("done deletes the secrets the runner doesn't use", () => {
+    const [, effects] = run([
+      ...atForm,
+      { type: "GuideInput", sessionId: "g1", input: { token: "guide/g1/token/a" } },
+      { type: "GuideStepped", sessionId: "g1", result: asked },
+      { type: "GuideInput", sessionId: "g1", input: { token: "guide/g1/token/b" } },
+      { type: "GuideStepped", sessionId: "g1", result: { kind: "done", runner: newRunner } },
+    ]);
+    expect(effects).toEqual([{ type: "DeleteSecrets", keys: ["guide/g1/token/b"] }]);
+  });
+
+  test("done with a taken name fails instead of replacing the runner", () => {
+    const [model] = run([...atForm, { ...addLocal, name: "home" } as Msg, { type: "GuideStepped", sessionId: "g1", result: { kind: "done", runner: newRunner } }]);
+    expect(model.guideSessions.g1?.status).toBe("failed");
+  });
+
+  test("input is ignored while a step is running", () => {
+    const [, effects] = run([...started, { type: "GuideInput", sessionId: "g1", input: {} }]);
+    expect(effects).toEqual([]);
+  });
+
+  test("Retry re-runs a failed step from its state", () => {
+    const [, effects] = run([
+      ...started,
+      { type: "GuideStepped", sessionId: "g1", result: { kind: "failed", state: { step: "verify" }, view, error: "denied" } },
+      { type: "GuideRetry", sessionId: "g1" },
+    ]);
+    expect(effects).toEqual([{ type: "RunGuideStep", sessionId: "g1", guide: "manual", state: { step: "verify" }, input: null }]);
+  });
+
+  test("a step running when the Controller died can be retried", () => {
+    const [model] = run([...started, { ...catalogue, now: 9_000 }]);
+    expect(model.guideSessions.g1?.status).toBe("failed");
+  });
+
+  test("Cancel drops the session and its secrets", () => {
+    const [model, effects] = run([
+      ...atForm,
+      { type: "GuideInput", sessionId: "g1", input: { token: "guide/g1/token/a" } },
+      { type: "CancelGuide", sessionId: "g1" },
+    ]);
+    expect([model.guideSessions, effects]).toEqual([{}, [{ type: "DeleteSecrets", keys: ["guide/g1/token/a"] }]]);
   });
 });

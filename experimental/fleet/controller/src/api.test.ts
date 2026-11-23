@@ -3,6 +3,7 @@ import { createApi } from "./api.js";
 import type { Runtime } from "./runtime.js";
 import type { Model, Msg } from "./types.js";
 import { initialModel } from "./update.js";
+import { memoryVault, type SecretStore } from "./vault.js";
 
 const TOKEN = "secret";
 const ORIGIN = "http://localhost:5173";
@@ -12,14 +13,32 @@ const model: Model = {
   runners: {
     laptop: {
       name: "laptop",
-      url: "http://r",
-      token: "runner-token",
+      transport: { kind: "direct", url: "http://r" },
+      token: { kind: "inline", value: "runner-token" },
+      origin: null,
+      link: { state: "up", url: "http://r" },
+      linkEpoch: 0,
+      linkFailures: 0,
+      linkRetryAt: 0,
       status: "healthy",
       failures: 0,
       nextCheckAt: 0,
       lastSeenAt: 0,
       lastError: null,
       location: null,
+    },
+  },
+  guideSessions: {
+    g1: {
+      id: "g1",
+      guide: "manual",
+      status: "ask",
+      state: { step: "form" },
+      view: { title: "Add", fields: [{ id: "name", label: "Name", kind: "text" }, { id: "token", label: "Token", kind: "secret" }] },
+      error: null,
+      secretKeys: [],
+      createdAt: 0,
+      updatedAt: 0,
     },
   },
 };
@@ -33,11 +52,11 @@ const fakeRuntime = (sent: Msg[] = []): Runtime => ({
   onChange: () => () => {},
 });
 
-const api = (sent?: Msg[]) => createApi(fakeRuntime(sent), { token: TOKEN, allowedOrigins: new Set([ORIGIN]) });
+const api = (sent?: Msg[], vault: SecretStore = memoryVault()) => createApi(fakeRuntime(sent), { token: TOKEN, allowedOrigins: new Set([ORIGIN]), vault });
 const auth = { authorization: `Bearer ${TOKEN}` };
 
-const post = (body: unknown, sent?: Msg[]) =>
-  api(sent).request("/msg", { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
+const post = (body: unknown, sent?: Msg[], vault?: SecretStore) =>
+  api(sent, vault).request("/msg", { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("api", () => {
   it("rejects requests without the token", async () => {
@@ -93,5 +112,42 @@ describe("api", () => {
       true,
       7,
     ]);
+  });
+
+  it("never sends guide state or secret keys to UIs", async () => {
+    const body = (await (await api().request("/model", { headers: auth })).json()) as { model: Model };
+    expect(["state" in body.model.guideSessions.g1!, "secretKeys" in body.model.guideSessions.g1!]).toEqual([false, false]);
+  });
+
+  it("AddRunner stores the token in the vault and logs only its key", async () => {
+    const sent: Msg[] = [];
+    const vault = memoryVault();
+    await post({ msg_id: "m1", type: "AddRunner", payload: { name: "home", url: "http://h/", token: "s3cret" } }, sent, vault);
+    const msg = sent[0];
+    const key = msg?.type === "AddRunner" && msg.token.kind === "vault" ? msg.token.key : "";
+    expect([JSON.stringify(sent).includes("s3cret"), (await vault.get(key)).ok && (await vault.get(key))]).toEqual([false, { ok: true, value: "s3cret" }]);
+  });
+
+  it("a secret guide field goes to the vault; the logged input holds its key", async () => {
+    const sent: Msg[] = [];
+    const vault = memoryVault();
+    await post({ msg_id: "m1", type: "GuideInput", payload: { sessionId: "g1", input: { name: "home", token: "s3cret" } } }, sent, vault);
+    const msg = sent[0];
+    const key = msg?.type === "GuideInput" ? (msg.input.token ?? "") : "";
+    expect([JSON.stringify(sent).includes("s3cret"), msg?.type === "GuideInput" && msg.input.name, await vault.get(key)]).toEqual([
+      false,
+      "home",
+      { ok: true, value: "s3cret" },
+    ]);
+  });
+
+  it("returns the session id it minted for StartGuide", async () => {
+    const sent: Msg[] = [];
+    const body = (await (await post({ msg_id: "m1", type: "StartGuide", payload: { guide: "aws" } }, sent)).json()) as { id: string };
+    expect(body.id).toBe(sent[0]?.type === "StartGuide" ? sent[0].sessionId : "missing");
+  });
+
+  it("refuses input for a guide session that doesn't exist", async () => {
+    expect((await post({ msg_id: "m1", type: "GuideInput", payload: { sessionId: "nope", input: {} } })).status).toBe(400);
   });
 });

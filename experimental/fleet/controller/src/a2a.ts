@@ -1,6 +1,10 @@
-import { ClientFactory, ClientFactoryOptions, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
+import { ClientFactory, ClientFactoryOptions, DefaultAgentCardResolver, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
-import type { AgentInfo, Artifact, Endpoint, RunnerRef, TaskSnapshot, TaskUpdate } from "./types.js";
+import { attempt, type Outcome } from "./outcome.js";
+import type { AgentInfo, Artifact, TaskSnapshot, TaskUpdate } from "./types.js";
+
+/** One agent behind a runner link, with its token already read from the vault. */
+export type AgentEndpoint = { url: string; token: string };
 
 const CALL_TIMEOUT_MS = 10_000;
 
@@ -56,31 +60,28 @@ const factory = new ClientFactory(
   ClientFactoryOptions.createFrom(ClientFactoryOptions.default, { transports: [new JsonRpcTransportFactory()] }),
 );
 
+const resolver = new DefaultAgentCardResolver();
+
+/** Keyed by URL, which includes a tunnel's local port: a reopened link gets a fresh client. */
 const clients = new Map<string, Client>();
 
-/** @throws when the agent card cannot be fetched */
-const clientFor = async (endpoint: Endpoint): Promise<Client> => {
+/**
+ * The card says what the agent is; where to call it is always `<runner link>/agents/<id>/jsonrpc`.
+ * The card's own interface URL can't know a tunnel's local port.
+ * @throws when the agent card cannot be fetched
+ */
+const clientFor = async (endpoint: AgentEndpoint): Promise<Client> => {
   const cached = clients.get(endpoint.url);
   if (cached) return cached;
   // A relative card path keeps the `/agents/<id>` prefix; the SDK's default is absolute and would drop it.
-  const client = await factory.createFromUrl(`${endpoint.url}/`, ".well-known/agent-card.json");
+  const card = await resolver.resolve(`${endpoint.url}/`, ".well-known/agent-card.json");
+  const pinned = { ...card, supportedInterfaces: card.supportedInterfaces.map((i) => ({ ...i, url: `${endpoint.url}/jsonrpc` })) };
+  const client = await factory.createFromAgentCard(pinned);
   clients.set(endpoint.url, client);
   return client;
 };
 
-const auth = (endpoint: Endpoint) => ({ Authorization: `Bearer ${endpoint.token}` });
-
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
-export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
-
-const attempt = async <T>(f: () => Promise<T>): Promise<Outcome<T>> => {
-  try {
-    return { ok: true, value: await f() };
-  } catch (e) {
-    return { ok: false, error: errorText(e) };
-  }
-};
+const auth = (endpoint: AgentEndpoint) => ({ Authorization: `Bearer ${endpoint.token}` });
 
 type IndexJson = {
   location?: unknown;
@@ -102,9 +103,9 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
 export type RunnerIndex = { agents: AgentInfo[]; location: string | null };
 
 /** The runner's `GET /agents` is both discovery and its health check. */
-export const checkRunner = (runner: RunnerRef): Promise<Outcome<RunnerIndex>> =>
+export const checkRunner = (url: string): Promise<Outcome<RunnerIndex>> =>
   attempt(async () => {
-    const res = await fetch(`${runner.url}/agents`, { signal: AbortSignal.timeout(5_000) });
+    const res = await fetch(`${url}/agents`, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) throw new Error(`runner index: HTTP ${res.status}`);
     const index = (await res.json()) as IndexJson;
     return {
@@ -118,7 +119,7 @@ const asTask = (result: unknown): A2ATask => {
   throw new Error("agent replied with a message, not a task");
 };
 
-export const dispatch = (endpoint: Endpoint, prompt: string): Promise<Outcome<TaskSnapshot>> =>
+export const dispatch = (endpoint: AgentEndpoint, prompt: string): Promise<Outcome<TaskSnapshot>> =>
   attempt(async () => {
     const client = await clientFor(endpoint);
     const result = await client.sendMessage(
@@ -146,7 +147,7 @@ export const dispatch = (endpoint: Endpoint, prompt: string): Promise<Outcome<Ta
     return toSnapshot(asTask(result));
   });
 
-export const getTask = (endpoint: Endpoint, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
+export const getTask = (endpoint: AgentEndpoint, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
   attempt(async () => {
     const client = await clientFor(endpoint);
     const task = await client.getTask(
@@ -156,7 +157,7 @@ export const getTask = (endpoint: Endpoint, remoteId: string): Promise<Outcome<T
     return toSnapshot(task);
   });
 
-export const cancel = (endpoint: Endpoint, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
+export const cancel = (endpoint: AgentEndpoint, remoteId: string): Promise<Outcome<TaskSnapshot>> =>
   attempt(async () => {
     const client = await clientFor(endpoint);
     const task = await client.cancelTask(
@@ -168,7 +169,7 @@ export const cancel = (endpoint: Endpoint, remoteId: string): Promise<Outcome<Ta
 
 /** Resolves when the stream ends; `null` for a clean end, otherwise the error text. */
 export const stream = async (
-  endpoint: Endpoint,
+  endpoint: AgentEndpoint,
   remoteId: string,
   signal: AbortSignal,
   onEvent: (event: StreamEvent) => void,
