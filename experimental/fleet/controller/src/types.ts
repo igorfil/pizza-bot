@@ -11,7 +11,18 @@ export type AwsCredentials =
 /** How the Controller reaches a runner; `transport.ts` turns it into a live Transport. */
 export type TransportSpec =
   | { kind: "direct"; url: string }
-  | { kind: "aws-ssm"; region: string; instanceId: string; remotePort: number; credentials: AwsCredentials };
+  | { kind: "aws_ssm"; region: string; instanceId: string; remotePort: number; credentials: AwsCredentials }
+  | SshTransport;
+
+/** Auth is the system ssh's: ~/.ssh/config, ssh-agent, known_hosts; null fields defer to them. */
+export type SshTransport = {
+  kind: "ssh";
+  host: string;
+  user: string | null;
+  port: number | null;
+  identityFile: string | null;
+  remotePort: number;
+};
 
 /** Which guide made the runner, and what removing it can also undo. */
 export type RunnerOrigin = {
@@ -42,7 +53,13 @@ export type Runner = NewRunner & {
   lastSeenAt: number | null;
   lastError: string | null;
   location: string | null;
+  /** Agents on the runner's disk it doesn't serve yet; null when the runner can't change its agents. */
+  available: AgentInfo[] | null;
+  /** The last AddAgents for this runner, until it lands or a new one starts. */
+  agentsChange: AgentsChange | null;
 };
+
+export type AgentsChange = { state: "adding"; agents: string[] } | { state: "failed"; agents: string[]; error: string };
 
 /** An agent hosted by a runner; the unit users run, schedule and see. Key: `<runner>/<id>`. */
 export type Agent = AgentInfo & {
@@ -116,7 +133,8 @@ export type StepField = {
   options?: { value: string; label: string; detail?: string; disabled?: boolean }[];
 };
 
-export type StepView = { title: string; body?: string; progress?: string; fields: StepField[]; submit?: string };
+/** `steps` places the screen in the guide's overall flow, for a stepper. */
+export type StepView = { title: string; body?: string; progress?: string; fields: StepField[]; submit?: string; steps?: { labels: string[]; current: number } };
 
 /** A guide's own progress; plain JSON, logged, so it must never hold a secret (only vault keys). */
 export type GuideState = Record<string, unknown>;
@@ -174,7 +192,9 @@ export type TaskUpdate = {
 
 export type IntentMsg =
   | ({ type: "AddRunner" } & NewRunner)
+  | { type: "UpdateRunner"; name: string; transport: TransportSpec | null; token: SecretRef | null }
   | { type: "RemoveRunner"; name: string; teardown: boolean }
+  | { type: "AddAgents"; runner: string; agents: string[] }
   | { type: "CreateTask"; taskId: string; agent: string; prompt: string }
   | { type: "CancelTask"; taskId: string }
   | { type: "AckInbox"; taskId: string }
@@ -195,7 +215,9 @@ export type WorldMsg =
   | { type: "Tick"; now: number; local?: LocalClock }
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
-  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null }
+  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null }
+  | { type: "AgentsSet"; runner: string; added: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null }
+  | { type: "AgentsSetFailed"; runner: string; error: string }
   | { type: "RunnerFailed"; name: string; error: string }
   | { type: "RunnerRetired"; name: string; text: string; ok: boolean }
   | { type: "Dispatched"; taskId: string; snapshot: TaskSnapshot }
@@ -218,6 +240,7 @@ export type LlmTurn = { role: ChatRole; text: string };
 
 export type Effect =
   | { type: "CheckRunner"; runner: string; url: string }
+  | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[] }
   | { type: "Dispatch"; taskId: string; endpoint: Endpoint; prompt: string }
   | { type: "GetTask"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "Cancel"; taskId: string; endpoint: Endpoint; remoteId: string }
@@ -232,7 +255,9 @@ export type Sub =
 
 export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "AddRunner",
+  "UpdateRunner",
   "RemoveRunner",
+  "AddAgents",
   "CreateTask",
   "CancelTask",
   "AckInbox",

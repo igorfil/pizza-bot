@@ -73,6 +73,33 @@ export const runnerHealth = (model: FleetModel, r: FleetRunner): string => {
   return `seen ${ago(model.now, r.lastSeenAt)}`;
 };
 
+/** The runner's state in words, so the status dot never carries meaning alone. */
+export const runnerStatusText = (model: FleetModel, r: FleetRunner): string => {
+  if (r.status === "unreachable") return `unreachable · ${runnerHealth(model, r)}`;
+  if (r.status === "unknown" || r.lastSeenAt === null) return "checking…";
+  return `online · ${runnerHealth(model, r)}`;
+};
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export const agentsSummary = (model: FleetModel): string =>
+  `${plural(Object.keys(model.agents).length, "agent", "agents")} on ${plural(Object.keys(model.runners).length, "runner", "runners")}`;
+
+/** Names for agent ids a runner offers or serves, falling back to the id. */
+export const agentNames = (model: FleetModel, r: FleetRunner, ids: string[]): string =>
+  ids.map((id) => model.agents[`${r.name}/${id}`]?.name ?? r.available?.find((a) => a.id === id)?.name ?? id).join(", ");
+
+/** One line for a guide that is still open, shown on the page while its dialog is closed. */
+export const guideStatusText = (s: FleetGuideSession): string =>
+  s.status === "working" ? (s.view.progress ?? s.view.title) : s.status === "failed" ? `Stopped: ${s.error ?? s.view.title}` : `Waiting for you: ${s.view.title}`;
+
+/** The history strip in words, for screen readers. */
+export const stripSummary = (tasks: FleetTask[]): string => {
+  if (tasks.length === 0) return "No runs yet";
+  const counts = tasks.reduce<Record<string, number>>((acc, t) => ({ ...acc, [t.state]: (acc[t.state] ?? 0) + 1 }), {});
+  return `Last ${plural(tasks.length, "run", "runs")}: ${Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)).map(([state, n]) => `${n} ${state}`).join(", ")}`;
+};
+
 /** Finished runs nobody has dealt with yet, newest first (same rule as the Controller). */
 export const inboxOf = (model: FleetModel): FleetTask[] =>
   Object.values(model.tasks)
@@ -95,7 +122,7 @@ export const runTitle = (model: FleetModel, task: FleetTask): string => {
 export const runnerLocation = (r: FleetRunner): string => {
   if (r.location) return r.location;
   if (r.origin?.summary) return r.origin.summary;
-  if (r.link.state !== "up") return r.transport === "aws-ssm" ? "AWS (tunnel)" : "not connected";
+  if (r.link.state !== "up") return r.transport === "aws_ssm" ? "AWS (tunnel)" : r.transport === "ssh" ? "SSH (tunnel)" : "not connected";
   try {
     return new URL(r.link.url).host;
   } catch {

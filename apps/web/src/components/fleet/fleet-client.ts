@@ -49,6 +49,7 @@ const failure = async (res: Response): Promise<FleetError> => {
 export type FleetIntent =
   | "AddRunner"
   | "RemoveRunner"
+  | "AddAgents"
   | "CreateTask"
   | "CancelTask"
   | "AckInbox"
@@ -61,7 +62,7 @@ export type FleetIntent =
   | "GuideRetry"
   | "CancelGuide";
 
-export type FleetPayload = Record<string, string | boolean | Record<string, string>>;
+export type FleetPayload = Record<string, string | boolean | string[] | Record<string, string>>;
 
 /**
  * @returns the id the Controller minted (new task or chat), if any

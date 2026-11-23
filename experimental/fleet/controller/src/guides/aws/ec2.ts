@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DescribeInstancesCommand, EC2Client, type Instance as Ec2Instance } from "@aws-sdk/client-ec2";
+import { DescribeInstancesCommand, DescribeRegionsCommand, EC2Client, type Instance as Ec2Instance } from "@aws-sdk/client-ec2";
 import { DescribeInstanceInformationCommand, GetCommandInvocationCommand, SendCommandCommand, SSMClient } from "@aws-sdk/client-ssm";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import { fromIni, fromNodeProviderChain } from "@aws-sdk/credential-providers";
@@ -68,6 +68,12 @@ const sdkHost = (region: string, credentials: AwsCredentialIdentityProvider): Ec
         return errorName(e) === "DryRunOperation" ? ok(undefined) : fail(`EC2 access denied: ${errorText(e)}`);
       }
     },
+
+    regions: () =>
+      attempt(async () => {
+        const res = await ec2.send(new DescribeRegionsCommand({}));
+        return (res.Regions ?? []).map((r) => r.RegionName ?? "").filter((r) => r !== "").sort();
+      }),
 
     instances: () =>
       attempt(async () => {

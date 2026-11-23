@@ -13,7 +13,7 @@ export type FleetLink = { state: "up"; url: string } | { state: "down"; error: s
 /** A host process (one per machine). Health is per runner; it hosts many agents. */
 export interface FleetRunner {
   name: string;
-  transport: "direct" | "aws-ssm";
+  transport: "direct" | "aws_ssm" | "ssh";
   origin: FleetRunnerOrigin | null;
   link: FleetLink;
   status: FleetRunnerStatus;
@@ -22,7 +22,18 @@ export interface FleetRunner {
   lastSeenAt: number | null;
   lastError: string | null;
   location: string | null;
+  /** Agents the runner could serve but doesn't; null when it can't change its agents. */
+  available?: FleetAgentInfo[] | null;
+  agentsChange?: FleetAgentsChange | null;
 }
+
+export interface FleetAgentInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export type FleetAgentsChange = { state: "adding"; agents: string[] } | { state: "failed"; agents: string[]; error: string };
 
 /** What users run, schedule and see. Key: `<runner>/<id>`. */
 export interface FleetAgent {
@@ -107,6 +118,7 @@ export interface FleetStepView {
   progress?: string;
   fields: FleetStepField[];
   submit?: string;
+  steps?: { labels: string[]; current: number };
 }
 
 export interface FleetGuideSession {

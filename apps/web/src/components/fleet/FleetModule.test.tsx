@@ -170,11 +170,38 @@ describe("AgentsView", () => {
 
   it("marks agents of an unreachable runner", () => {
     const down = { ...model, runners: { ec2: { ...model.runners.ec2!, status: "unreachable" as const } } };
-    expect(view(down)).toContain("UNREACHABLE");
+    expect(view(down)).toContain("Runner unreachable");
   });
 
-  it("says so when a runner serves no agents", () => {
-    expect(view({ ...model, agents: {} })).toContain("This runner serves no agents.");
+  it("invites adding the first agent when a runner serves none", () => {
+    expect(view({ ...model, agents: {} })).toContain("Choose what ec2 runs.");
+  });
+
+  it("ends every runner's grid with an Add agent tile", () => {
+    expect(view(model)).toContain('aria-label="Add agent to ec2"');
+  });
+
+  it("offers Add runner in the page header and Add agent on every runner", () => {
+    const html = view(model);
+    expect([html.match(/>\s*Add runner/g)?.length, html.match(/>\s*Add agent/g)?.length]).toEqual([1, 1]);
+  });
+
+  it("says how many agents run on how many runners", () => {
+    expect(view(model)).toContain("1 agent on 1 runner");
+  });
+
+  it("names the runner's state in words next to its dot", () => {
+    expect(view(model)).toMatch(/online · seen/);
+  });
+
+  it("shows agents being added to a runner", () => {
+    const ec2 = { ...model.runners.ec2!, available: [{ id: "slow", name: "Slow", description: "" }], agentsChange: { state: "adding" as const, agents: ["slow"] } };
+    expect(view({ ...model, runners: { ec2 } })).toContain("Adding Slow…");
+  });
+
+  it("explains why adding agents failed", () => {
+    const ec2 = { ...model.runners.ec2!, agentsChange: { state: "failed" as const, agents: ["slow"], error: "HTTP 500" } };
+    expect(view({ ...model, runners: { ec2 } })).toContain("Couldn&#x27;t add slow: HTTP 500");
   });
 });
 
@@ -182,8 +209,8 @@ describe("AgentCard", () => {
   const card = (m: FleetModel) =>
     wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} />);
 
-  it("shows the agent's key", () => {
-    expect(card(model)).toContain("ec2/dadjokes");
+  it("keeps the agent's key out of the card text", () => {
+    expect(card(model)).not.toContain(">ec2/dadjokes<");
   });
 
   it("draws one history cell per run", () => {
@@ -191,8 +218,9 @@ describe("AgentCard", () => {
     expect(card(three).match(/fleet-strip-cell/g)?.length).toBe(3);
   });
 
-  it("shows evals as not available yet", () => {
-    expect(card(model)).toMatch(/<button[^>]*disabled=""[^>]*>\[evals\]/);
+  it("describes the run history in words", () => {
+    const two = { ...model, tasks: { a: { ...jokes, id: "a" }, b: { ...jokes, id: "b", state: "failed" as const } } };
+    expect(card(two)).toContain('aria-label="Last 2 runs: 1 completed, 1 failed"');
   });
 
   it("shows the daily schedule", () => {
@@ -263,16 +291,25 @@ describe("runner guides", () => {
     ...over,
   });
   const withGuides = (s?: FleetGuideSession): FleetModel => ({ ...model, guideCatalog: catalog, guideSessions: s ? { [s.id]: s } : {} });
-  const radio = (html: string, value: string) => html.match(/<input type="radio"[^>]*>/g)?.find((i) => i.includes(`value="${value}"`)) ?? "";
-  const card = (s: FleetGuideSession) => wrap(<GuideCard model={withGuides(s)} session={s} send={noop} />);
+  const radio = (html: string, value: string) => html.match(/<input[^>]*type="radio"[^>]*>/g)?.find((i) => i.includes(`value="${value}"`)) ?? "";
+  const card = (s: FleetGuideSession) => wrap(<GuideCard session={s} send={noop} />);
 
   it("offers every guide the Controller lists", () => {
-    const html = wrap(<GuidePicker model={withGuides()} send={noop} onClose={() => {}} />);
+    const html = wrap(<GuidePicker model={withGuides()} send={noop} onStarted={() => {}} />);
     expect([html.includes("AWS EC2"), html.includes("By URL")]).toEqual([true, true]);
   });
 
-  it("shows a guide in progress on the Agents view", () => {
-    expect(wrap(<AgentsView model={withGuides(session())} send={noop} />)).toContain("Where should the runner go?");
+  it("lists a guide in progress on the Agents view with what it waits for", () => {
+    expect(wrap(<AgentsView model={withGuides(session())} send={noop} />)).toContain("Waiting for you: Where should the runner go?");
+  });
+
+  it("shows where the guide is in its steps", () => {
+    const html = card(session({ view: { ...session().view, steps: { labels: ["Sign in", "Pick instance", "Set up"], current: 1 } } }));
+    expect(html).toMatch(/<li class="current" aria-current="step">.*Pick instance/);
+  });
+
+  it("can always cancel the setup", () => {
+    expect(card(session({ status: "working", view: { title: "Installing", fields: [] } }))).toContain("Cancel setup");
   });
 
   it("renders a choice as radio buttons, disabling the options the guide disabled", () => {

@@ -52,6 +52,20 @@ describe("replaying old Msg logs", () => {
     expect(upcast({ type: "RemoveRunner", name: "x" } as unknown as Msg)).toEqual({ type: "RemoveRunner", name: "x", teardown: false });
   });
 
+  const oldSsm = { kind: "aws-ssm", region: "eu-west-1", instanceId: "i-1", remotePort: 9000, credentials: { kind: "default" } };
+  const ssm = { ...oldSsm, kind: "aws_ssm" };
+
+  test("an AddRunner with the aws-ssm kind replays as aws_ssm", () => {
+    const old = { type: "AddRunner", name: "ec2", transport: oldSsm, token: { kind: "vault", key: "k" }, origin: null } as unknown as Msg;
+    expect(upcast(old)).toEqual({ type: "AddRunner", name: "ec2", transport: ssm, token: { kind: "vault", key: "k" }, origin: null });
+  });
+
+  test("a guide that finished with an aws-ssm runner replays as aws_ssm", () => {
+    const runner = { name: "ec2", transport: oldSsm, token: { kind: "vault", key: "k" }, origin: null };
+    const old = { type: "GuideStepped", sessionId: "s", result: { kind: "done", runner } } as unknown as Msg;
+    expect(upcast(old)).toEqual({ type: "GuideStepped", sessionId: "s", result: { kind: "done", runner: { ...runner, transport: ssm } } });
+  });
+
   test("current Msgs pass through unchanged", () => {
     const msg: Msg = { type: "Tick", now: 1 };
     expect(upcast(msg)).toBe(msg);

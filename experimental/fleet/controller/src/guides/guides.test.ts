@@ -16,15 +16,21 @@ const instances: Instance[] = [
 const fakeHost = (over: Partial<Ec2Host> = {}): Ec2Host => ({
   whoAmI: async () => ok({ account: "123", arn: "arn:aws:iam::123:user/me" }),
   canUseEc2: async () => ok(undefined),
+  regions: async () => ok(["eu-west-1"]),
   instances: async () => ok(instances),
   sendScript: async () => ok("cmd-1"),
   scriptResult: async () => ok({ done: true, ok: true, output: "" }),
   ...over,
 });
 
-const fakeAws = (host: Ec2Host = fakeHost(), profiles = [{ name: "default", region: "eu-west-1" }]): AwsPort => ({
+/** One host for every region, or one per region; `calls` records the region of every host asked for. */
+const fakeAws = (
+  host: Ec2Host | ((region: string) => Ec2Host) = fakeHost(),
+  profiles: { name: string; region: string | null }[] = [{ name: "default", region: "eu-west-1" }],
+  calls: string[] = [],
+): AwsPort => ({
   profiles: async () => profiles,
-  host: async () => ok(host),
+  host: async (_creds, region) => (calls.push(region), ok(typeof host === "function" ? host(region) : host)),
 });
 
 const upTransport: Transport = { open: async () => ok({ url: "http://127.0.0.1:5555", closed: new Promise(() => {}) }) };
@@ -49,7 +55,17 @@ const answer = async (state: GuideState, input: Record<string, string>, p: Guide
 
 const stateOf = (r: GuideResult): GuideState => ("state" in r ? r.state : {});
 
-const toTarget = async (p: GuidePorts) => answer(stateOf(await awsGuide.step(awsGuide.start(), null, p)), { source: "profile:default", region: "eu-west-1" }, p);
+const isInstall = (script: string) => script.includes("fleet-runner.service");
+const installs = (scripts: string[]) => scripts.filter(isInstall);
+
+/** A host where only the install script ends with `result`; the runner check finds nothing. */
+const failingInstall = (result: { done: boolean; ok: boolean; output: string }, scripts: string[] = []) =>
+  fakeHost({
+    sendScript: async (_id, s) => (scripts.push(s), ok(isInstall(s) ? "install" : "detect")),
+    scriptResult: async (_id, cmd) => ok(cmd === "install" ? result : { done: true, ok: true, output: "FLEET_RUNNER=absent" }),
+  });
+
+const toTarget = async (p: GuidePorts) => answer(stateOf(await awsGuide.step(awsGuide.start(), null, p)), { source: "profile:default" }, p);
 
 describe("manual guide", () => {
   test("asks for name, URL and token", async () => {
@@ -89,23 +105,31 @@ describe("aws guide: credentials", () => {
     expect(source?.options?.map((o) => o.value)).toEqual(["profile:default", "default", "keys"]);
   });
 
-  test("the region defaults to the profile's", async () => {
+  test("asks only how to sign in, not for a region", async () => {
     const r = await awsGuide.step(awsGuide.start(), null, ports());
-    expect(r.kind === "ask" && r.view.fields.find((f) => f.id === "region")?.value).toBe("eu-west-1");
+    expect(r.kind === "ask" && r.view.fields.map((f) => f.id)).toEqual(["source"]);
   });
 
-  test("a bad region asks again", async () => {
-    const r = await awsGuide.step(awsGuide.start(), { source: "default", region: "mars" }, ports());
-    expect(r.kind === "ask" && r.error).toBe("Enter a region like us-west-2.");
+  test("account-wide calls go to the profile's region", async () => {
+    const calls: string[] = [];
+    const multi = fakeHost({ regions: async () => ok(["ap-south-1", "eu-west-1"]) });
+    await toTarget(ports({ aws: fakeAws(multi, [{ name: "default", region: "eu-west-1" }], calls) }));
+    expect(calls[0]).toBe("eu-west-1");
+  });
+
+  test("account-wide calls go to us-east-1 when the profile names no region", async () => {
+    const calls: string[] = [];
+    await toTarget(ports({ aws: fakeAws(fakeHost(), [{ name: "default", region: null }], calls) }));
+    expect(calls[0]).toBe("us-east-1");
   });
 
   test("choosing access keys asks for them as secrets", async () => {
-    const r = await awsGuide.step(awsGuide.start(), { source: "keys", region: "us-west-2" }, ports());
+    const r = await awsGuide.step(awsGuide.start(), { source: "keys" }, ports());
     expect(r.kind === "ask" && r.view.fields.map((f) => f.kind)).toEqual(["secret", "secret"]);
   });
 
   test("entered keys are kept only as vault references", async () => {
-    const keys = await awsGuide.step(awsGuide.start(), { source: "keys", region: "us-west-2" }, ports());
+    const keys = await awsGuide.step(awsGuide.start(), { source: "keys" }, ports());
     const r = await awsGuide.step(stateOf(keys), { accessKeyId: "guide/s1/a/1", secretAccessKey: "guide/s1/b/2" }, ports());
     expect(stateOf(r).credentials).toEqual({
       kind: "keys",
@@ -144,7 +168,7 @@ describe("aws guide: target", () => {
 
   test("an instance that can't be used is refused", async () => {
     const p = ports();
-    const r = await answer(stateOf(await toTarget(p)), { instance: "i-unknown", name: "ec2", agents: "dadjokes" }, p);
+    const r = await answer(stateOf(await toTarget(p)), { instance: "i-unknown", name: "ec2" }, p);
     expect(r.kind === "ask" && r.error).toBe("Pick an instance.");
   });
 
@@ -153,22 +177,65 @@ describe("aws guide: target", () => {
     expect(r.kind === "ask" && r.view.body).toContain("Account 123");
   });
 
+  test("an instance is titled by its name, with its id in the details", async () => {
+    const r = await toTarget(ports());
+    const option = r.kind === "ask" ? r.view.fields.find((f) => f.id === "instance")?.options?.[0] : undefined;
+    expect([option?.label, option?.detail?.startsWith("i-online · ")]).toEqual(["box", true]);
+  });
+
   test("an invalid runner name asks again", async () => {
     const p = ports();
-    const r = await answer(stateOf(await toTarget(p)), { instance: "i-online", name: "Bad Name", agents: "dadjokes" }, p);
+    const r = await answer(stateOf(await toTarget(p)), { instance: "i-online", name: "Bad Name" }, p);
     expect(r.kind === "ask" && r.error).toBe("Use lowercase letters, digits and dashes, starting with a letter.");
   });
 });
 
-describe("aws guide: existing instance", () => {
-  const pick = { instance: "i-online", name: "ec2", agents: "dadjokes" };
+describe("aws guide: searching every region", () => {
+  const box = (id: string, ssmOnline: boolean): Instance => ({ id, name: "", type: "t4g.small", arch: "arm64", ssmOnline });
+  const perRegion: Record<string, Instance[]> = { "eu-west-1": [box("i-eu", false)], "us-east-2": [], "us-west-2": [box("i-us", true)] };
+  const world = (fails: string[] = []) =>
+    fakeAws((region) =>
+      fakeHost({
+        regions: async () => ok(Object.keys(perRegion)),
+        instances: async () => (fails.includes(region) ? fail(`denied in ${region}`) : ok(perRegion[region] ?? [])),
+      }),
+    );
 
-  test("installs over SSM, checks through the tunnel, and finishes with an aws-ssm runner", async () => {
+  test("lists instances from every region, usable ones first, each with its region", async () => {
+    const r = await toTarget(ports({ aws: world() }));
+    const field = r.kind === "ask" ? r.view.fields.find((f) => f.id === "instance") : undefined;
+    expect(field?.options?.map((o) => [o.value, o.detail?.split(" · ")[0]])).toEqual([
+      ["i-us", "us-west-2"],
+      ["i-eu", "eu-west-1"],
+    ]);
+  });
+
+  test("the runner is reached in the region of the instance picked", async () => {
+    const p = ports({ aws: world() });
+    const r = await answer(stateOf(await toTarget(p)), { instance: "i-us", name: "ec2" }, p);
+    expect(r.kind === "done" && r.runner.transport.kind === "aws_ssm" && r.runner.transport.region).toBe("us-west-2");
+  });
+
+  test("a region that can't be searched is skipped and named", async () => {
+    const r = await toTarget(ports({ aws: world(["eu-west-1"]) }));
+    expect([r.kind, r.kind === "ask" && r.view.body?.includes("2 regions searched (could not search eu-west-1)")]).toEqual(["ask", true]);
+  });
+
+  test("fails when no region can be searched", async () => {
+    const r = await toTarget(ports({ aws: world(Object.keys(perRegion)) }));
+    expect(r.kind === "failed" && r.error).toBe("no region could be searched (eu-west-1, us-east-2, us-west-2)");
+  });
+});
+
+describe("aws guide: existing instance", () => {
+  const pick = { instance: "i-online", name: "ec2" };
+
+  test("installs over SSM, checks through the tunnel, and finishes with an aws_ssm runner", async () => {
     const p = ports();
     const r = await answer(stateOf(await toTarget(p)), pick, p);
     expect(r.kind === "done" && { ...r.runner, token: r.runner.token.kind }).toEqual({
       name: "ec2",
-      transport: { kind: "aws-ssm", region: "eu-west-1", instanceId: "i-online", remotePort: 9000, credentials: { kind: "profile", profile: "default" } },
+      transport: { kind: "aws_ssm", region: "eu-west-1", instanceId: "i-online", remotePort: 9000, credentials: { kind: "profile", profile: "default" } },
       token: "vault",
       origin: {
         guide: "aws",
@@ -185,25 +252,29 @@ describe("aws guide: existing instance", () => {
     const r = await answer(stateOf(await toTarget(p)), pick, p);
     const token = r.kind === "done" && r.runner.token.kind === "vault" ? await vault.get(r.runner.token.key) : null;
     const value = token?.ok ? (token.value ?? "?") : "?";
-    expect([/^[0-9a-f]{48}$/.test(value), scripts[0]?.includes(`RUNNER_TOKEN=${value}`)]).toEqual([true, true]);
+    expect([/^[0-9a-f]{48}$/.test(value), installs(scripts)[0]?.includes(`RUNNER_TOKEN=${value}`)]).toEqual([true, true]);
   });
 
   test("the install script downloads the binary for the instance's architecture", async () => {
     const scripts: string[] = [];
     const p = ports({ aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")) })) });
     await answer(stateOf(await toTarget(p)), pick, p);
-    expect(scripts[0]).toContain('"$RELEASE/fleet-runner-aarch64-linux-musl"');
+    expect(installs(scripts)[0]).toContain('"$RELEASE/fleet-runner-aarch64-linux-musl"');
   });
 
   test("waits while the install script runs", async () => {
     let polls = 0;
-    const p = ports({ aws: fakeAws(fakeHost({ scriptResult: async () => ok({ done: ++polls > 2, ok: true, output: "" }) })) });
+    const host = fakeHost({
+      sendScript: async (_id, s) => ok(s.includes("fleet-runner.service") ? "install" : "detect"),
+      scriptResult: async (_id, cmd) => ok({ done: cmd === "detect" || ++polls > 2, ok: true, output: "" }),
+    });
+    const p = ports({ aws: fakeAws(host) });
     const r = await answer(stateOf(await toTarget(p)), pick, p);
     expect([r.kind, polls]).toEqual(["done", 3]);
   });
 
   test("a failed install shows the end of its output and retries from install", async () => {
-    const p = ports({ aws: fakeAws(fakeHost({ scriptResult: async () => ok({ done: true, ok: false, output: "a\nb\ncurl: (22) 404" }) })) });
+    const p = ports({ aws: fakeAws(failingInstall({ done: true, ok: false, output: "a\nb\ncurl: (22) 404" })) });
     const r = await answer(stateOf(await toTarget(p)), pick, p);
     expect([r.kind, r.kind === "failed" && r.error.endsWith("curl: (22) 404"), stateOf(r).step]).toEqual(["failed", true, "install"]);
   });
@@ -211,12 +282,11 @@ describe("aws guide: existing instance", () => {
   test("retrying an install reuses the runner token", async () => {
     const vault = memoryVault();
     const scripts: string[] = [];
-    const host = fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")), scriptResult: async () => ok({ done: true, ok: false, output: "x" }) });
-    const p = ports({ vault, aws: fakeAws(host) });
+    const p = ports({ vault, aws: fakeAws(failingInstall({ done: true, ok: false, output: "x" }, scripts)) });
     const firstTry = await answer(stateOf(await toTarget(p)), pick, p);
     await settle(await awsGuide.step(stateOf(firstTry), null, p), p);
     const token = (s: string) => /RUNNER_TOKEN=(\w+)/.exec(s)?.[1];
-    expect(token(scripts[0]!)).toBe(token(scripts[1]!));
+    expect(token(installs(scripts)[0]!)).toBe(token(installs(scripts)[1]!));
   });
 
   test("no release configured fails with what to set", async () => {
@@ -233,10 +303,81 @@ describe("aws guide: existing instance", () => {
   });
 });
 
+describe("aws guide: instance that already runs a runner", () => {
+  const pick = { instance: "i-online", name: "ec2" };
+  const found = "FLEET_RUNNER=present\nFLEET_RUNNER_PORT=9100\nFLEET_RUNNER_TOKEN=abc123\n";
+  const existing = (scripts: string[] = [], output = found) =>
+    fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")), scriptResult: async () => ok({ done: true, ok: true, output }) });
+
+  test("adopts it without installing, through a tunnel to its port", async () => {
+    const scripts: string[] = [];
+    const p = ports({ aws: fakeAws(existing(scripts)) });
+    const r = await answer(stateOf(await toTarget(p)), pick, p);
+    expect([r.kind, r.kind === "done" && r.runner.transport, installs(scripts).length]).toEqual([
+      "done",
+      { kind: "aws_ssm", region: "eu-west-1", instanceId: "i-online", remotePort: 9100, credentials: { kind: "profile", profile: "default" } },
+      0,
+    ]);
+  });
+
+  test("keeps the runner's own token in the vault and out of the guide state", async () => {
+    const vault = memoryVault();
+    const p = ports({ vault, aws: fakeAws(existing()) });
+    const r = await answer(stateOf(await toTarget(p)), pick, p);
+    const token = r.kind === "done" && r.runner.token.kind === "vault" ? await vault.get(r.runner.token.key) : null;
+    expect([token, JSON.stringify(stateOf(r)).includes("abc123")]).toEqual([{ ok: true, value: "abc123" }, false]);
+  });
+
+  test("an adopted runner is never uninstalled on removal", async () => {
+    const p = ports({ aws: fakeAws(existing()) });
+    const r = await answer(stateOf(await toTarget(p)), pick, p);
+    expect(r.kind === "done" && r.runner.origin).toEqual({ guide: "aws", summary: "EC2 i-online · eu-west-1 · existing runner", teardown: null });
+  });
+
+  test("installs when the check finds no runner", async () => {
+    const scripts: string[] = [];
+    const p = ports({ aws: fakeAws(existing(scripts, "FLEET_RUNNER=absent\n")) });
+    await answer(stateOf(await toTarget(p)), pick, p);
+    expect(installs(scripts).length).toBe(1);
+  });
+
+  test("a check script that fails is reported, and Retry checks again", async () => {
+    const host = fakeHost({ scriptResult: async () => ok({ done: true, ok: false, output: "bash: curl: command not found" }) });
+    const p = ports({ aws: fakeAws(host) });
+    const r = await answer(stateOf(await toTarget(p)), pick, p);
+    expect([r.kind, r.kind === "failed" && r.error, stateOf(r).step]).toEqual(["failed", "bash: curl: command not found", "detect"]);
+  });
+});
+
+describe("aws guide: steps", () => {
+  test("credentials are step 1 of Sign in, Pick instance, Set up", async () => {
+    const r = await awsGuide.step(awsGuide.start(), null, ports());
+    expect(r.kind === "ask" && r.view.steps).toEqual({ labels: ["Sign in", "Pick instance", "Set up"], current: 0 });
+  });
+
+  test("the instance list is step 2 and asks only for the instance and a name", async () => {
+    const r = await toTarget(ports());
+    expect([r.kind === "ask" && r.view.steps?.current, r.kind === "ask" && r.view.fields.map((f) => f.id)]).toEqual([1, ["instance", "name"]]);
+  });
+
+  test("installing is step 3", async () => {
+    const p = ports();
+    const r = await awsGuide.step(stateOf(await toTarget(p)), { instance: "i-online", name: "ec2" }, p);
+    expect(r.kind === "working" && r.view.steps?.current).toBe(2);
+  });
+
+  test("a new runner serves no agents until some are added", async () => {
+    const scripts: string[] = [];
+    const p = ports({ aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")) })) });
+    await answer(stateOf(await toTarget(p)), { instance: "i-online", name: "ec2" }, p);
+    expect(installs(scripts)[0]).toMatch(/^RUNNER_AGENTS=$/m);
+  });
+});
+
 describe("aws guide: teardown", () => {
   const runner = () => ({
     name: "ec2",
-    transport: { kind: "aws-ssm" as const, region: "eu-west-1", instanceId: "i-1", remotePort: 9000, credentials: { kind: "default" as const } },
+    transport: { kind: "aws_ssm" as const, region: "eu-west-1", instanceId: "i-1", remotePort: 9000, credentials: { kind: "default" as const } },
     token: { kind: "vault" as const, key: "k" },
     origin: { guide: "aws", summary: "", teardown: { label: "", data: { instanceId: "i-1", region: "eu-west-1" } } },
   });

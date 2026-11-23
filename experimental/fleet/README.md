@@ -45,6 +45,16 @@ curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r1","type":"AddRunner","p
 curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r2","type":"AddRunner","payload":{"name":"ec2","url":"http://127.0.0.1:9471","token":"<EC2 runner token>"}}'
 ```
 
+`transport` is `{kind: "direct", url}`, `{kind: "ssh", host, user?, port?, identityFile?, remotePort?}`
+or `{kind: "aws_ssm", region, instanceId, remotePort?, credentials?}` (`remotePort` defaults to 9000;
+`credentials` is `{kind: "default"}` or `{kind: "profile", profile}`). `ssh` runs the system `ssh -N -L`
+in batch mode, so auth comes from `~/.ssh/config`, ssh-agent and `known_hosts`; the host key must
+already be known. Tokens go to the OS vault; the Msg log keeps only the key.
+
+```bash
+curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r3","type":"AddRunner","payload":{"name":"homelab","token":"<token>","transport":{"kind":"ssh","host":"homelab","user":"me"}}}'
+```
+
 ## Boundary with pizza-bot
 
 - Nothing under `apps/` or `packages/` imports `experimental/`, and the Controller imports no
@@ -163,7 +173,9 @@ Intents (only these are accepted over the API; world Msgs are rejected):
 
 | type | payload |
 |---|---|
-| `AddRunner` | `name, url, token` |
+| `AddRunner` | `name, token`, and `url` (direct) or `transport` (below) |
+| `AddAgents` | `runner`, `agents` (ids from the runner's `available`); the runner starts serving them |
+| `UpdateRunner` | `name`, plus any of `url`/`transport`, `token`; the link reopens with the new config |
 | `RemoveRunner` | `name` |
 | `CreateTask` | `agent` (`<runner>/<id>`), `prompt` (may be empty) |
 | `CancelTask` | `taskId` |
@@ -230,7 +242,7 @@ at 30s, resync of open runs every 30s, a tick gap over 10s counts as wake.
 
 ## Runner
 
-A generic host: one process per machine, serving every agent folder in `RUNNER_AGENTS_DIR`. It knows
+A generic host: one process per machine, serving agent folders from `RUNNER_AGENTS_DIR`. It knows
 nothing about what agents do. Agents are separate programs (any language, or Docker); the contract
 is in [agents/README.md](agents/README.md): JSON on stdin, JSON-line events on stdout, exit code.
 
@@ -238,7 +250,7 @@ is in [agents/README.md](agents/README.md): JSON on stdin, JSON-line events on s
 |---|---|---|
 | `RUNNER_TOKEN` | required | bearer token the Controller must send |
 | `RUNNER_AGENTS_DIR` | `agents` | folder of agent folders |
-| `RUNNER_AGENTS` | all | comma list of agent ids to serve (an unknown id is a startup error) |
+| `RUNNER_AGENTS` | all | comma list of agent ids to serve at first start (an unknown id is a startup error); once the Controller sets them with `PUT /agents`, that saved list wins |
 | `RUNNER_BIND` | `127.0.0.1:9000` | |
 | `RUNNER_PUBLIC_URL` | `http://$RUNNER_BIND` | base URL agent cards advertise; must be the URL the Controller uses |
 | `RUNNER_DB` | `runner.db` | SQLite task store, shared by all its agents |
@@ -248,8 +260,11 @@ is in [agents/README.md](agents/README.md): JSON on stdin, JSON-line events on s
 Agents inherit the runner's environment (so `PATH`, AWS credentials), plus their manifest's `[env]`.
 
 Endpoints:
-- `GET /agents`: public; `{runner, location, agents: [{id, name, description, input, url}]}`. The
+- `GET /agents`: public; `{runner, location, agents: [...], available: [...]}`, each entry
+  `{id, name, description, input, url}`. `agents` are served; `available` are on disk but off. The
   Controller uses it for discovery and as the runner health check.
+- `PUT /agents`: bearer token required; `{agents: [ids]}` replaces the served set, saves it in
+  `RUNNER_DB` so it survives restarts, and answers with the new index. Unserved agents answer 404.
 - `/agents/<id>/.well-known/agent-card.json`: public A2A agent card per agent. Its one skill carries
   the input label (`name`), hint (`description`) and default input (`examples[0]`).
 - `/agents/<id>/jsonrpc`: A2A v1.0 JSON-RPC, bearer token required.

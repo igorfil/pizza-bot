@@ -11,6 +11,8 @@ export type Instance = { id: string; name: string; type: string; arch: Arch; ssm
 export interface Ec2Host {
   whoAmI(): Promise<Outcome<{ account: string; arn: string }>>;
   canUseEc2(): Promise<Outcome<void>>;
+  /** Regions enabled for the account; opt-in regions not turned on are left out. */
+  regions(): Promise<Outcome<string[]>>;
   instances(): Promise<Outcome<Instance[]>>;
   sendScript(instanceId: string, script: string): Promise<Outcome<string>>;
   scriptResult(instanceId: string, commandId: string): Promise<Outcome<{ done: boolean; ok: boolean; output: string }>>;

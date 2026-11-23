@@ -32,11 +32,19 @@ const localClock = (date: Date): LocalClock => ({
 
 type Legacy = Record<string, unknown> & { type: string };
 
-/** Msgs logged before transports and the vault replay as their current shape. */
+const withSsmKind = (transport: TransportSpec): TransportSpec =>
+  (transport.kind as string) === "aws-ssm" ? ({ ...transport, kind: "aws_ssm" } as TransportSpec) : transport;
+
+/** Msgs logged before transports, the vault and the `aws_ssm` kind replay as their current shape. */
 export const upcast = (msg: Msg): Msg => {
   const m = msg as unknown as Legacy;
   if (m.type === "AddRunner" && typeof m.token === "string" && typeof m.url === "string") {
     return { type: "AddRunner", name: String(m.name), transport: { kind: "direct", url: m.url.replace(/\/+$/, "") }, token: { kind: "inline", value: m.token }, origin: null };
+  }
+  if (msg.type === "AddRunner") return { ...msg, transport: withSsmKind(msg.transport) };
+  if (msg.type === "UpdateRunner" && msg.transport) return { ...msg, transport: withSsmKind(msg.transport) };
+  if (msg.type === "GuideStepped" && msg.result.kind === "done") {
+    return { ...msg, result: { ...msg.result, runner: { ...msg.result.runner, transport: withSsmKind(msg.result.runner.transport) } } };
   }
   if (m.type === "RemoveRunner" && typeof m.teardown !== "boolean") return { type: "RemoveRunner", name: String(m.name), teardown: false };
   if (m.type === "Booted" && !Array.isArray(m.guides)) return { type: "Booted", now: Number(m.now), guides: [] };
@@ -79,7 +87,7 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
       case "CheckRunner": {
         const r = await a2a.checkRunner(effect.url);
         return r.ok
-          ? { type: "RunnerOk", name: effect.runner, agents: r.value.agents, location: r.value.location }
+          ? { type: "RunnerOk", name: effect.runner, agents: r.value.agents, location: r.value.location, available: r.value.available }
           : { type: "RunnerFailed", name: effect.runner, error: r.error };
       }
       case "ChatComplete": {
@@ -114,6 +122,13 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
       case "DeleteSecrets":
         await Promise.all(effect.keys.map((k) => deps.vault.delete(k)));
         return null;
+      case "SetRunnerAgents": {
+        const ep = await withToken(effect.endpoint);
+        const r = ep.ok ? await a2a.setAgents(ep.value.url, ep.value.token, effect.agents) : ep;
+        return r.ok
+          ? { type: "AgentsSet", runner: effect.runner, added: effect.added, agents: r.value.agents, location: r.value.location, available: r.value.available }
+          : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
+      }
       case "RetireRunner": {
         const { runner } = effect;
         const guide = runner.origin ? guideById(runner.origin.guide, deps.guides) : undefined;

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { fail, ok, type Outcome } from "./outcome.js";
-import type { AwsCredentials, TransportSpec } from "./types.js";
+import type { AwsCredentials, SshTransport, TransportSpec } from "./types.js";
 import { reveal, type SecretStore } from "./vault.js";
 
 export type OpenLink = { url: string; closed: Promise<string | null> };
@@ -15,6 +15,7 @@ export type TransportDeps = {
   vault: SecretStore;
   /** The AWS CLI; it starts session-manager-plugin for the port forward. */
   awsCommand?: string;
+  sshCommand?: string;
   readyTimeoutMs?: number;
 };
 
@@ -51,7 +52,7 @@ export const awsEnv = async (vault: SecretStore, creds: AwsCredentials): Promise
   }
 };
 
-export const ssmArgs = (spec: Extract<TransportSpec, { kind: "aws-ssm" }>, localPort: number): string[] => [
+export const ssmArgs = (spec: Extract<TransportSpec, { kind: "aws_ssm" }>, localPort: number): string[] => [
   "ssm",
   "start-session",
   "--region",
@@ -67,7 +68,7 @@ export const ssmArgs = (spec: Extract<TransportSpec, { kind: "aws-ssm" }>, local
 const READY = "Waiting for connections";
 
 /** SSM port forwarding: no inbound ports and no SSH key on the instance. */
-export const awsSsm = (spec: Extract<TransportSpec, { kind: "aws-ssm" }>, deps: TransportDeps): Transport => ({
+export const awsSsm = (spec: Extract<TransportSpec, { kind: "aws_ssm" }>, deps: TransportDeps): Transport => ({
   open: async (signal) => {
     const env = await awsEnv(deps.vault, spec.credentials);
     if (!env.ok) return env;
@@ -111,5 +112,80 @@ export const awsSsm = (spec: Extract<TransportSpec, { kind: "aws-ssm" }>, deps: 
   },
 });
 
-export const transportFor = (spec: TransportSpec, deps: TransportDeps): Transport =>
-  spec.kind === "direct" ? direct(spec.url) : awsSsm(spec, deps);
+export const sshArgs = (spec: SshTransport, localPort: number): string[] => [
+  "-N",
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "ExitOnForwardFailure=yes",
+  "-o",
+  "ServerAliveInterval=15",
+  "-o",
+  "ServerAliveCountMax=3",
+  "-L",
+  `127.0.0.1:${localPort}:127.0.0.1:${spec.remotePort}`,
+  ...(spec.port ? ["-p", String(spec.port)] : []),
+  ...(spec.identityFile ? ["-i", spec.identityFile, "-o", "IdentitiesOnly=yes"] : []),
+  ...(spec.user ? ["-l", spec.user] : []),
+  "--",
+  spec.host,
+];
+
+const accepts = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    socket.once("connect", () => (socket.destroy(), resolve(true)));
+    socket.once("error", () => (socket.destroy(), resolve(false)));
+  });
+
+const PROBE_MS = 200;
+
+/** `ssh -N` prints nothing once up; the forward is ready when its local port accepts connections. */
+export const ssh = (spec: SshTransport, deps: TransportDeps): Transport => ({
+  open: async (signal) => {
+    const port = await freePort();
+    const child = spawn(deps.sshCommand ?? "ssh", sshArgs(spec, port), { stdio: ["ignore", "ignore", "pipe"] });
+    let lastLine = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      lastLine = chunk.toString().split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? lastLine;
+    });
+    let exitReason: string | null = null;
+    const exited = new Promise<string>((resolve) => {
+      child.once("error", (e) => resolve(e.message));
+      child.once("exit", (code) => resolve(lastLine || `ssh exited (${code ?? "signal"})`));
+    });
+    void exited.then((reason) => {
+      exitReason = reason;
+    });
+    const kill = () => child.kill("SIGTERM");
+    signal.addEventListener("abort", kill, { once: true });
+
+    const timeoutMs = deps.readyTimeoutMs ?? 30_000;
+    const deadline = Date.now() + timeoutMs;
+    const waitReady = async (): Promise<Outcome<void>> => {
+      if (exitReason !== null) return fail(exitReason);
+      if (signal.aborted) return fail("aborted");
+      if (await accepts(port)) return ok(undefined);
+      if (Date.now() >= deadline) return fail(`tunnel not ready after ${timeoutMs / 1000}s`);
+      await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
+      return waitReady();
+    };
+    const ready = await waitReady();
+    if (!ready.ok) {
+      kill();
+      return ready;
+    }
+    return ok({ url: `http://127.0.0.1:${port}`, closed: exited.then((reason) => (signal.aborted ? null : reason)) });
+  },
+});
+
+export const transportFor = (spec: TransportSpec, deps: TransportDeps): Transport => {
+  switch (spec.kind) {
+    case "direct":
+      return direct(spec.url);
+    case "aws_ssm":
+      return awsSsm(spec, deps);
+    case "ssh":
+      return ssh(spec, deps);
+  }
+};

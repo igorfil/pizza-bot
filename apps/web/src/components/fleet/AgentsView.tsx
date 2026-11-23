@@ -1,22 +1,27 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Play, Plus, Server, Square, Trash2, X } from "lucide-react";
+import { AddAgentDialog } from "./AddAgentDialog.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
-import { GuideCard, GuidePicker, RemoveRunnerDialog } from "./GuideCard.js";
+import { AddRunnerDialog, RemoveRunnerDialog } from "./GuideCard.js";
 import {
   activeRun,
+  agentNames,
   agentsOf,
+  agentsSummary,
   ago,
   guideSessionsOf,
+  guideStatusText,
   defaultInput,
   inputLabel,
   isFinished,
-  runnerHealth,
   runnerLocation,
+  runnerStatusText,
   runnerTone,
   runsOf,
   runStrip,
+  stripSummary,
   taskTone,
 } from "./fleet-view-model.js";
 
@@ -28,26 +33,77 @@ const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ?
 
 export function AgentsView({ model, send }: { model: FleetModel; send: FleetSend }) {
   const [adding, setAdding] = useState(false);
+  const [guide, setGuide] = useState<{ id: string; seen: boolean } | null>(null);
   const agents = agentsOf(model);
   const runners = Object.values(model.runners).sort((a, b) => a.name.localeCompare(b.name));
+  const sessions = guideSessionsOf(model);
+  const open = guide ? (sessions.find((s) => s.id === guide.id) ?? null) : null;
+
+  // A started guide shows up with the next model frame; once seen, its disappearance means done or canceled.
+  useEffect(() => {
+    if (!guide) return;
+    if (open && !guide.seen) setGuide({ id: guide.id, seen: true });
+    if (!open && guide.seen) setGuide(null);
+  }, [guide, open]);
+
+  const close = () => {
+    setAdding(false);
+    setGuide(null);
+  };
+
   return (
     <div className="fleet-agents">
+      <header className="fleet-agents-head">
+        <h2 className="fleet-agents-title">Agents</h2>
+        <span className="fleet-muted">{agentsSummary(model)}</span>
+        <span className="fleet-agent-links-spacer" />
+        <button type="button" className="btn-secondary fleet-small-btn" onClick={() => setAdding(true)}>
+          <Plus size={13} /> Add runner
+        </button>
+      </header>
+
+      {sessions.length > 0 && (
+        <ul className="fleet-guide-rows" aria-label="Runners being added">
+          {sessions.map((s) => (
+            <li key={s.id} className={`fleet-guide-row${s.status === "failed" ? " failed" : ""}`}>
+              {s.status === "working" ? <LoaderCircle size={14} className="spin" aria-hidden="true" /> : <Server size={14} aria-hidden="true" />}
+              <span>
+                Adding runner · {model.guideCatalog?.find((g) => g.id === s.guide)?.title ?? s.guide}
+              </span>
+              <span className="fleet-muted fleet-guide-row-status">{guideStatusText(s)}</span>
+              <span className="fleet-agent-links-spacer" />
+              <button type="button" className="fleet-link-btn" onClick={() => setGuide({ id: s.id, seen: true })}>
+                Open
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {runners.map((r) => (
         <RunnerGroup key={r.name} model={model} runner={r} agents={agents.filter((a) => a.runner === r.name)} send={send} />
       ))}
-      <div className="fleet-agent-grid">
-        {guideSessionsOf(model).map((s) => (
-          <GuideCard key={`${s.id}:${s.updatedAt}`} model={model} session={s} send={send} />
-        ))}
-        {adding ? (
-          <GuidePicker model={model} send={send} onClose={() => setAdding(false)} />
-        ) : (
-          <button type="button" className="fleet-agent-card fleet-agent-add" onClick={() => setAdding(true)}>
-            <Plus size={22} strokeWidth={1.5} />
-            Add runner
-          </button>
-        )}
-      </div>
+
+      {runners.length === 0 && sessions.length === 0 && (
+        <button type="button" className="fleet-agent-card fleet-agent-add" onClick={() => setAdding(true)}>
+          <Plus size={22} strokeWidth={1.5} />
+          Add your first runner
+          <span className="fleet-muted">A runner is a machine that hosts your agents.</span>
+        </button>
+      )}
+
+      {(adding || guide) && (
+        <AddRunnerDialog
+          model={model}
+          session={open}
+          send={send}
+          onStarted={(id) => {
+            setAdding(false);
+            if (id) setGuide({ id, seen: false });
+          }}
+          onClose={close}
+        />
+      )}
     </div>
   );
 }
@@ -65,19 +121,19 @@ export function RunnerGroup({
 }) {
   const notify = useAppToast();
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [addingAgent, setAddingAgent] = useState(false);
   const Where = placeIcon(runner);
   const down = runner.status === "unreachable";
+  const change = runner.agentsChange ?? null;
   return (
     <section className={`fleet-runner${down ? " down" : ""}`} aria-label={`Runner ${runner.name}`}>
       <header className="fleet-runner-head">
         <Server size={15} aria-hidden="true" />
         <h3 className="fleet-runner-name">{runner.name}</h3>
-        <span className={`dot dot-${runnerTone(runner.status)}`} title={runner.status} />
+        <span className={`dot dot-${runnerTone(runner.status)}`} aria-hidden="true" />
+        <span className={down ? "fleet-tone-bad" : undefined}>{runnerStatusText(model, runner)}</span>
         <span className="fleet-runner-where">
           <Where size={14} aria-hidden="true" /> {runnerLocation(runner)}
-        </span>
-        <span className={down ? "fleet-tone-bad" : "fleet-muted"}>
-          {down ? `unreachable · ${runnerHealth(model, runner)}` : runnerHealth(model, runner)}
         </span>
         {down && runner.lastError && <span className="fleet-runner-error">{runner.lastError}</span>}
         <span className="fleet-agent-links-spacer" />
@@ -91,13 +147,32 @@ export function RunnerGroup({
           <Trash2 size={13} />
         </button>
       </header>
-      <div className="fleet-agent-grid">
-        {agents.length === 0 ? (
-          <p className="fleet-muted">{runner.lastSeenAt === null ? "Waiting for the runner to list its agents…" : "This runner serves no agents."}</p>
-        ) : (
-          agents.map((a) => <AgentCard key={a.key} model={model} agent={a} runner={runner} send={send} />)
-        )}
-      </div>
+      {change?.state === "failed" && (
+        <p className="fleet-runner-change fleet-tone-bad" role="alert">
+          Couldn't add {agentNames(model, runner, change.agents)}: {change.error}
+        </p>
+      )}
+      {agents.length === 0 && runner.lastSeenAt === null ? (
+        <p className="fleet-muted fleet-runner-empty">Waiting for the runner to list its agents…</p>
+      ) : (
+        <div className="fleet-agent-grid">
+          {agents.map((a) => (
+            <AgentCard key={a.key} model={model} agent={a} runner={runner} send={send} />
+          ))}
+          <button
+            type="button"
+            className="fleet-agent-card fleet-agent-add"
+            onClick={() => setAddingAgent(true)}
+            disabled={change?.state === "adding"}
+            aria-label={change?.state === "adding" ? `Adding ${agentNames(model, runner, change.agents)} to ${runner.name}` : `Add agent to ${runner.name}`}
+          >
+            {change?.state === "adding" ? <LoaderCircle size={22} strokeWidth={1.5} className="spin" /> : <Plus size={22} strokeWidth={1.5} />}
+            {change?.state === "adding" ? `Adding ${agentNames(model, runner, change.agents)}…` : "Add agent"}
+            {agents.length === 0 && change?.state !== "adding" && <span className="fleet-muted">Choose what {runner.name} runs.</span>}
+          </button>
+        </div>
+      )}
+      {addingAgent && <AddAgentDialog runner={runner} send={send} onClose={() => setAddingAgent(false)} />}
       {confirmRemove && (
         <RemoveRunnerDialog
           runner={runner}
@@ -166,13 +241,14 @@ export function AgentCard({
   return (
     <article className={`fleet-agent-card${down ? " down" : ""}`} aria-label={agent.name}>
       <header className="fleet-agent-head">
-        <h3 className="fleet-agent-name">{agent.name}</h3>
-        <span className="fleet-agent-id">{agent.key}</span>
+        <h3 className="fleet-agent-name" title={agent.key}>
+          {agent.name}
+        </h3>
       </header>
       <p className="fleet-agent-desc">{agent.description}</p>
 
       {down ? (
-        <p className="fleet-agent-down">UNREACHABLE</p>
+        <p className="fleet-agent-down">Runner unreachable</p>
       ) : active ? (
         <p className="fleet-agent-live">
           <LoaderCircle size={13} className="spin" aria-hidden="true" /> {active.statusText ?? active.state}
@@ -182,7 +258,7 @@ export function AgentCard({
         </p>
       ) : null}
 
-      <div className="fleet-strip" aria-label={`Last ${strip.length} runs`}>
+      <div className="fleet-strip" role="img" aria-label={stripSummary(strip)}>
         {strip.length === 0 ? (
           <span className="fleet-muted">No runs yet</span>
         ) : (
@@ -190,6 +266,7 @@ export function AgentCard({
             <span
               key={t.id}
               className={`fleet-strip-cell fleet-strip-${stripTone(t)}`}
+              aria-hidden="true"
               title={`${t.state} · ${ago(model.now, t.createdAt)}${t.prompt ? ` · ${t.prompt}` : ""}`}
             />
           ))
@@ -224,10 +301,7 @@ export function AgentCard({
 
       <footer className="fleet-agent-links">
         <button type="button" className="fleet-link-btn" onClick={() => setShowRuns((v) => !v)} aria-expanded={showRuns}>
-          [runs] {showRuns ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </button>
-        <button type="button" className="fleet-link-btn" disabled title="Evals are coming soon">
-          [evals]
+          Runs {showRuns ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
         <span className="fleet-agent-links-spacer" />
         {!running && (

@@ -85,6 +85,7 @@ const auth = (endpoint: AgentEndpoint) => ({ Authorization: `Bearer ${endpoint.t
 
 type IndexJson = {
   location?: unknown;
+  available?: NonNullable<IndexJson["agents"]>;
   agents?: { id?: unknown; name?: unknown; description?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
 };
 
@@ -100,18 +101,38 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
       }
     : null;
 
-export type RunnerIndex = { agents: AgentInfo[]; location: string | null };
+export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null };
+
+const infos = (list: IndexJson["agents"]): AgentInfo[] => (list ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null);
+
+/** A runner without `available` predates `PUT /agents`, so its agents can't be changed from here. */
+const toIndex = (index: IndexJson): RunnerIndex => ({
+  agents: infos(index.agents),
+  location: str(index.location) || null,
+  available: Array.isArray(index.available) ? infos(index.available) : null,
+});
 
 /** The runner's `GET /agents` is both discovery and its health check. */
 export const checkRunner = (url: string): Promise<Outcome<RunnerIndex>> =>
   attempt(async () => {
     const res = await fetch(`${url}/agents`, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) throw new Error(`runner index: HTTP ${res.status}`);
-    const index = (await res.json()) as IndexJson;
-    return {
-      agents: (index.agents ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null),
-      location: str(index.location) || null,
-    };
+    return toIndex((await res.json()) as IndexJson);
+  });
+
+/** Replaces the agents the runner serves; it answers with its new index. */
+export const setAgents = (url: string, token: string, agents: string[]): Promise<Outcome<RunnerIndex>> =>
+  attempt(async () => {
+    const res = await fetch(`${url}/agents`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ agents }),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
+    if (res.status === 404 || res.status === 405) throw new Error("this runner can't change its agents; update the runner");
+    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
+    return toIndex(body);
   });
 
 const asTask = (result: unknown): A2ATask => {

@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { INTENT_TYPES, type GuideInput, type IntentMsg, type Model } from "./types.js";
+import { INTENT_TYPES, type GuideInput, type IntentMsg, type Model, type TransportSpec } from "./types.js";
 import type { Runtime } from "./runtime.js";
 import type { SecretStore } from "./vault.js";
 
@@ -45,15 +45,92 @@ const guideInput = async (sessionId: string, raw: Record<string, unknown>, ctx: 
   return { type: "GuideInput", sessionId, input };
 };
 
+const HOST = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
+const INSTANCE_ID = /^i-[0-9a-f]+$/;
+const REGION = /^[a-z]{2}(-[a-z]+)+-\d$/;
+const DEFAULT_RUNNER_PORT = 9000;
+
+const portOf = (v: unknown): number | null => {
+  const n = typeof v === "string" && v !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 && n < 65_536 ? n : null;
+};
+
+/** Optional fields may be absent or empty; anything given must be valid. */
+const optional = <T>(v: unknown, parse: (v: unknown) => T | null): T | null | undefined =>
+  v === undefined || v === null || v === "" ? null : (parse(v) ?? undefined);
+
+const matching = (re: RegExp) => (v: unknown): string | null => (typeof v === "string" && re.test(v) ? v : null);
+
+const pathOf = (v: unknown): string | null => (typeof v === "string" && !v.startsWith("-") && !/[\0\n]/.test(v) ? v : null);
+
+const sshOf = (t: Record<string, unknown>): TransportSpec | string => {
+  const user = optional(t.user, matching(HOST));
+  const port = optional(t.port, portOf);
+  const identityFile = optional(t.identityFile, pathOf);
+  const remotePort = optional(t.remotePort, portOf);
+  if (!matching(HOST)(t.host)) return "ssh transport needs a host (a name or address, or a ~/.ssh/config alias)";
+  if (user === undefined) return "ssh user may hold only letters, digits, '.', '_' and '-'";
+  if (port === undefined || remotePort === undefined) return "ssh ports must be 1-65535";
+  if (identityFile === undefined) return "ssh identityFile must be a file path";
+  return { kind: "ssh", host: t.host as string, user, port, identityFile, remotePort: remotePort ?? DEFAULT_RUNNER_PORT };
+};
+
+/** Only credentials that hold no secret: access keys go through the AWS guide, which vaults them. */
+const awsSsmOf = (t: Record<string, unknown>): TransportSpec | string => {
+  const remotePort = optional(t.remotePort, portOf);
+  const creds = (t.credentials ?? { kind: "default" }) as Record<string, unknown>;
+  const credentials = creds.kind === "default" ? ({ kind: "default" } as const) : creds.kind === "profile" && str(creds.profile) ? ({ kind: "profile", profile: creds.profile } as const) : null;
+  if (!matching(REGION)(t.region)) return "aws_ssm transport needs a region like us-west-2";
+  if (!matching(INSTANCE_ID)(t.instanceId)) return "aws_ssm transport needs an instanceId like i-0abc";
+  if (remotePort === undefined) return "aws_ssm remotePort must be 1-65535";
+  if (!credentials) return "aws_ssm credentials must be {kind: default} or {kind: profile, profile}";
+  return { kind: "aws_ssm", region: t.region as string, instanceId: t.instanceId as string, remotePort: remotePort ?? DEFAULT_RUNNER_PORT, credentials };
+};
+
+/** `url` is shorthand for a direct transport; null when neither is given. */
+export const transportOf = (p: Record<string, unknown>): TransportSpec | string | null => {
+  if (p.transport === undefined || p.transport === null) {
+    if (p.url === undefined) return null;
+    return typeof p.url === "string" && /^https?:\/\/[^\s/]+/.test(p.url) ? { kind: "direct", url: p.url.replace(/\/+$/, "") } : "url must start with http:// or https://";
+  }
+  const t = p.transport as Record<string, unknown>;
+  switch (t.kind) {
+    case "direct":
+      return transportOf({ url: t.url ?? "" });
+    case "ssh":
+      return sshOf(t);
+    case "aws_ssm":
+      return awsSsmOf(t);
+    default:
+      return "transport kind must be direct, ssh or aws_ssm";
+  }
+};
+
 /** Ids are minted here, not by UIs, so `update` stays pure and replayable. */
 export const toIntent = async (type: string, p: Record<string, unknown>, ctx: IntentContext): Promise<IntentMsg | string> => {
   switch (type) {
     case "AddRunner": {
-      if (!(str(p.name) && str(p.url) && str(p.token))) return "AddRunner needs name, url, token";
+      if (!(str(p.name) && str(p.token))) return "AddRunner needs name, token, and url or transport";
+      const transport = transportOf(p);
+      if (typeof transport === "string") return transport;
+      if (!transport) return "AddRunner needs url or transport";
       const key = `runner/${p.name}/${crypto.randomUUID()}`;
       const error = await storeSecret(ctx.vault, key, p.token);
-      return error ?? { type, name: p.name, transport: { kind: "direct", url: p.url.replace(/\/+$/, "") }, token: { kind: "vault", key }, origin: null };
+      return error ?? { type, name: p.name, transport, token: { kind: "vault", key }, origin: null };
     }
+    case "UpdateRunner": {
+      if (!str(p.name)) return "UpdateRunner needs name";
+      const transport = transportOf(p);
+      if (typeof transport === "string") return transport;
+      if (!transport && !str(p.token)) return "UpdateRunner needs url, transport or token";
+      const key = str(p.token) ? `runner/${p.name}/${crypto.randomUUID()}` : null;
+      const error = key && str(p.token) ? await storeSecret(ctx.vault, key, p.token) : null;
+      return error ?? { type, name: p.name, transport, token: key ? { kind: "vault", key } : null };
+    }
+    case "AddAgents":
+      return str(p.runner) && Array.isArray(p.agents) && p.agents.length > 0 && p.agents.every(str)
+        ? { type, runner: p.runner, agents: p.agents as string[] }
+        : "AddAgents needs runner and agents (a non-empty list of agent ids)";
     case "RemoveRunner":
       return str(p.name) ? { type, name: p.name, teardown: p.teardown === true || p.teardown === "true" } : "RemoveRunner needs name";
     case "StartGuide":

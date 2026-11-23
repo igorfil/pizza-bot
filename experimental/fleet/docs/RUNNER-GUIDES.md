@@ -19,7 +19,7 @@ config needs one) with no further user action.
    produces a `RunnerConfig`. Only the config is kept. Connecting is the job of the runner's
    **transport**.
 3. **A transport is an object.** `RunnerConfig.transport` is a serializable spec; a factory turns it
-   into a `Transport` instance (`direct`, `aws-ssm`, …) with one method, `open`. Every runner has
+   into a `Transport` instance (`direct`, `aws_ssm`, …) with one method, `open`. Every runner has
    one, including plain URLs, so there is a single connection path.
 4. **The connection is a TEA subscription.** `subscriptions(model)` asks for a `Link` per runner; the
    runtime opens and closes transports the way it already does task streams. Restart, laptop wake
@@ -42,7 +42,7 @@ config needs one) with no further user action.
 controller/src/
   vault.ts            SecretStore: OS keychain (macOS / Linux Secret Service / Windows Credential
                       Manager via @napi-rs/keyring) and in-memory
-  transport.ts        Transport interface, factory, direct + aws-ssm implementations
+  transport.ts        Transport interface, factory, direct + aws_ssm implementations
   guides/
     guide.ts          RunnerGuide interface, StepView schema, ports
     registry.ts       the list of guides (the extension point)
@@ -74,7 +74,8 @@ interface SecretStore {
 ```ts
 type TransportSpec =
   | { kind: "direct"; url: string }
-  | { kind: "aws-ssm"; region: string; instanceId: string; remotePort: number; credentials: AwsCredentials };
+  | { kind: "aws_ssm"; region: string; instanceId: string; remotePort: number; credentials: AwsCredentials }
+  | { kind: "ssh"; host: string; user: string | null; port: number | null; identityFile: string | null; remotePort: number };
 type AwsCredentials = { kind: "profile"; profile: string } | { kind: "default" } | { kind: "keys"; accessKeyId: SecretRef; secretAccessKey: SecretRef };
 
 type RunnerOrigin = { guide: string; summary: string; teardown: { label: string; data: Record<string, string> } | null };
@@ -86,9 +87,16 @@ interface Transport {
 ```
 
 - `direct`: returns its URL; `closed` resolves only on abort.
-- `aws-ssm`: picks a free local port, spawns `aws ssm start-session --document-name
+- `aws_ssm`: picks a free local port, spawns `aws ssm start-session --document-name
   AWS-StartPortForwardingSession` (needs the AWS CLI and `session-manager-plugin`; no SSH key, no
   inbound ports), waits for "Waiting for connections", and resolves `closed` when the process exits.
+- `ssh`: picks a free local port, spawns `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<remotePort>` with
+  `BatchMode` and `ExitOnForwardFailure` (null fields defer to `~/.ssh/config`), and is up once the
+  local port accepts connections; `closed` resolves when ssh exits.
+
+`UpdateRunner {name, transport?, token?}` replaces a runner's config: it bumps the link epoch so the
+link reopens with the new transport, drops the runner to `unknown` until it answers again, and
+deletes vault entries only the old config used.
 
 The `Runner` in the Model gains `transport`, `token: SecretRef`, `origin`, and the live link state
 `link: { state: "down" | "opening" } | { state: "up"; url }` with its own epoch/failures/retry, like
@@ -143,7 +151,7 @@ interface Ec2Host {
 
 | | |
 |---|---|
-| Intents | `StartGuide {guide}` (id minted) · `GuideInput {sessionId, input}` · `GuideRetry {sessionId}` · `CancelGuide {sessionId}` · `RemoveRunner {name, teardown}` · `AddRunner {name, url, token}` kept for scripts (token goes to the vault) |
+| Intents | `StartGuide {guide}` (id minted) · `GuideInput {sessionId, input}` · `GuideRetry {sessionId}` · `CancelGuide {sessionId}` · `RemoveRunner {name, teardown}` · `AddRunner {name, token, url \| transport}` and `UpdateRunner {name, transport?, token?}` for scripts (token goes to the vault) |
 | Effects | `RunGuideStep {sessionId, guide, state, input}` · `Teardown {runner, guide, data}` · existing ones carry the runner's link URL and token ref |
 | World | `GuideStepped {sessionId, result}` · `GuideStepFailed` · `LinkUp {runner, epoch, url}` · `LinkDown {runner, epoch, error}` · `TeardownDone {runner, text}` |
 | Sub | `Link {key: runner#epoch, runner, transport}` next to `TaskStream` |
@@ -167,13 +175,14 @@ One step: name, URL, token (secret). Produces a `direct` transport. Replaces the
 
 | Step | Asks / does |
 |---|---|
-| credentials | Lists profiles from `~/.aws/config` and `~/.aws/credentials`, plus "default chain" and "enter access keys"; region (default: the profile's). |
+| credentials | Lists profiles from `~/.aws/config` and `~/.aws/credentials`, plus "default chain" and "enter access keys". No region: account-wide calls use the profile's region, else `us-east-1`. |
 | keys | Only for "enter access keys": access key id + secret, both stored in the vault. |
 | verify | `whoAmI` and `canUseEc2`. Shows the account and ARN, or the exact error. |
-| target | Running instances in the region with their SSM status; only SSM-online ones are selectable. If none is, it says what an instance needs (a role with `AmazonSSMManagedInstanceCore`, outbound internet). Plus runner name and agents to serve. Launching new instances is out of scope for now. |
-| install | Generates the runner token (vault) and runs the bootstrap script over SSM RunCommand: downloads the runner binary and the agents tarball from the GitHub release, installs uv, creates the `fleet-runner` user, env file and systemd unit, pre-warms agents, starts the service. |
-| check | Opens the `aws-ssm` transport and reads `GET /agents`. Shows the agents found. |
-| done | Saves the runner: `aws-ssm` transport, token ref, origin with teardown data. |
+| target | Running instances across every enabled region (`DescribeRegions`, searched in parallel; a region that can't be searched is skipped and named), usable ones first, each with its region and SSM status; the picked instance's region becomes the transport's; only SSM-online ones are selectable. If none is, it says what an instance needs (a role with `AmazonSSMManagedInstanceCore`, outbound internet). Plus runner name and agents to serve. Launching new instances is out of scope for now. |
+| detect | Runs a check script over SSM RunCommand. If `/etc/fleet-runner.env` exists and the runner answers `GET /agents`, the guide stores its `RUNNER_TOKEN` in the vault, uses its `RUNNER_BIND` port and skips to check. The token passes through SSM command output. |
+| install | Only when detect found no running runner. Generates the runner token (vault) and runs the bootstrap script over SSM RunCommand: downloads the runner binary and the agents tarball from the GitHub release, installs uv, creates the `fleet-runner` user, env file and systemd unit, pre-warms agents, starts the service. |
+| check | Opens the `aws_ssm` transport and reads `GET /agents`. Shows the agents found. |
+| done | Saves the runner: `aws_ssm` transport, token ref, origin with teardown data. An adopted runner gets no teardown: the Controller never uninstalls what it didn't install. |
 
 Release assets (`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`) come from
 `FLEET_RUNNER_RELEASE` (a GitHub release download base, e.g.
@@ -188,7 +197,7 @@ builds and publishes them on a `fleet-runner-v*` tag.
 | Links | `update` tables: link sub per runner, health only while up, `LinkDown` backoff, wake bumps the epoch, remove closes it. |
 | Guide sessions | `update` tables: start → ask → input → working → done → runner added; restart mid-step; cancel. |
 | API | secret fields never reach the logged Msg; `AddRunner` stores its token in the vault. |
-| Transports | `aws-ssm` against a fake `aws` command (ready line, exit = drop); direct. Real tunnel to an existing instance by hand. |
+| Transports | `aws_ssm` against a fake `aws` command (ready line, exit = drop); direct. Real tunnel to an existing instance by hand. |
 | Bootstrap script | snapshot of `install.ts` output. |
 | Vault | memory in unit tests; the OS keychain in a test that runs only where the keychain is available. |
 
@@ -199,7 +208,7 @@ builds and publishes them on a `fleet-runner-v*` tag.
 - Q-GUIDE-2 No GitHub release exists yet: this checkout's `origin` is upstream pizza-bot with push
   disabled. Which repo publishes `fleet-runner-v*` releases?
 - Q-GUIDE-3 External guides (a folder of guide modules, like agents) once the interface settles?
-- Q-GUIDE-4 The aws-ssm transport needs the AWS CLI and session-manager-plugin on the Controller's
+- Q-GUIDE-4 The aws_ssm transport needs the AWS CLI and session-manager-plugin on the Controller's
   machine. Check for them in the guide's first step, or implement the SSM data channel in Node?
 - Q-GUIDE-5 Launching a new instance (IAM role and instance profile, a no-inbound security group,
   AMI lookup) was left out on purpose. Add it as a step of this guide, or as a separate guide?

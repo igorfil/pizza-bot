@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { GuideResult, Model, Msg, Sub, TaskSnapshot } from "./types.js";
+import type { AgentInfo, GuideResult, Model, Msg, Sub, TaskSnapshot } from "./types.js";
 import { inboxOf, initialModel, subscriptions, update, WAKE_GAP_MS } from "./update.js";
 
 const run = (msgs: Msg[], start: Model = initialModel()) =>
@@ -8,7 +8,7 @@ const run = (msgs: Msg[], start: Model = initialModel()) =>
 const working: TaskSnapshot = { remoteId: "r1", state: "working", statusText: "step 1/3", artifacts: [] };
 
 const sys = { id: "sys", name: "System report", description: "", input: null };
-const healthy = (agents = [sys]): Msg => ({ type: "RunnerOk", name: "local", agents, location: "laptop" });
+const healthy = (agents = [sys], available: AgentInfo[] | null = null): Msg => ({ type: "RunnerOk", name: "local", agents, location: "laptop", available });
 const token = { kind: "vault", key: "runner/local/k" } as const;
 const ep = { url: "http://x/agents/sys", token };
 const addLocal: Msg = { type: "AddRunner", name: "local", transport: { kind: "direct", url: "http://x" }, token, origin: null };
@@ -153,7 +153,7 @@ describe("schedule", () => {
   const laptop: Msg[] = [
     { type: "AddRunner", name: "laptop", transport: { kind: "direct", url: "http://m" }, token, origin: null },
     { type: "LinkUp", runner: "laptop", epoch: 0, url: "http://m" },
-    { type: "RunnerOk", name: "laptop", agents: [brief], location: null },
+    { type: "RunnerOk", name: "laptop", agents: [brief], location: null, available: null },
   ];
   const scheduled: Msg[] = [
     at("2026-11-20", 6 * 60),
@@ -183,7 +183,7 @@ describe("schedule", () => {
   });
 
   test("a schedule survives the runner re-reporting its agents", () => {
-    const [model] = run([...scheduled, { type: "RunnerOk", name: "laptop", agents: [brief], location: null }]);
+    const [model] = run([...scheduled, { type: "RunnerOk", name: "laptop", agents: [brief], location: null, available: null }]);
     expect(model.agents["laptop/morningbrief"]?.schedule?.at).toBe("07:30");
   });
 
@@ -328,6 +328,91 @@ describe("queued runs", () => {
   test("canceling a queued run needs no runner", () => {
     const [model] = run([...offline, { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "x" }, { type: "CancelTask", taskId: "t1" }]);
     expect(model.tasks.t1?.state).toBe("canceled");
+  });
+});
+
+describe("adding agents", () => {
+  const jokes = { id: "dadjokes", name: "Dad jokes", description: "", input: null };
+  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy([sys], [jokes])];
+  const added: Msg = { type: "AgentsSet", runner: "local", added: ["dadjokes"], agents: [jokes, sys], location: "laptop", available: [] };
+
+  test("asks the runner to serve its current agents plus the new ones", () => {
+    const [, effects] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
+    expect(effects).toEqual([{ type: "SetRunnerAgents", runner: "local", endpoint: { url: "http://x", token }, agents: ["dadjokes", "sys"], added: ["dadjokes"] }]);
+  });
+
+  test("shows the agents being added until the runner answers", () => {
+    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
+    expect(model.runners.local?.agentsChange).toEqual({ state: "adding", agents: ["dadjokes"] });
+  });
+
+  test("the runner's answer lists the new agent and clears the change", () => {
+    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }, added]);
+    expect([Object.keys(model.agents), model.runners.local?.agentsChange, model.runners.local?.available]).toEqual([["local/dadjokes", "local/sys"], null, []]);
+  });
+
+  test("a refusal from the runner stays on the runner with its reason", () => {
+    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }, { type: "AgentsSetFailed", runner: "local", error: "HTTP 500" }]);
+    expect(model.runners.local?.agentsChange).toEqual({ state: "failed", agents: ["dadjokes"], error: "HTTP 500" });
+  });
+
+  test("an agent the runner doesn't offer is refused without calling it", () => {
+    const [model, effects] = run([...ready, { type: "AddAgents", runner: "local", agents: ["nope"] }]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([{ state: "failed", agents: ["nope"], error: "local has no agent nope to add" }, []]);
+  });
+
+  test("a runner that can't change its agents is refused without calling it", () => {
+    const [model, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy(), { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
+    expect([model.runners.local?.agentsChange?.state === "failed" && model.runners.local.agentsChange.error, effects]).toEqual([
+      "local can't change its agents; update the runner",
+      [],
+    ]);
+  });
+
+  test("a runner that is down is refused without calling it", () => {
+    const [, effects] = run([...ready, booted, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
+    expect(effects).toEqual([]);
+  });
+
+  test("a restart forgets a change that never reported back", () => {
+    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }, booted]);
+    expect(model.runners.local?.agentsChange).toBeNull();
+  });
+
+  test("RunnerOk logged before runners reported availability means the runner can't change its agents", () => {
+    const old = { type: "RunnerOk", name: "local", agents: [sys], location: null } as unknown as Msg;
+    const [model] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), old]);
+    expect(model.runners.local?.available).toBeNull();
+  });
+});
+
+describe("updating a runner", () => {
+  const ssh = { kind: "ssh", host: "box", user: null, port: null, identityFile: null, remotePort: 9000 } as const;
+  const newToken = { kind: "vault", key: "runner/local/k2" } as const;
+
+  test("a new transport is stored and reached through a fresh link", () => {
+    const [model] = run([...withRunningTask, { type: "UpdateRunner", name: "local", transport: ssh, token: null }]);
+    expect([model.runners.local?.transport, model.runners.local?.token, linkKeys(model)]).toEqual([ssh, token, ["link:local#1"]]);
+  });
+
+  test("its streams close until the runner answers over the new link", () => {
+    const [model] = run([...withRunningTask, { type: "UpdateRunner", name: "local", transport: ssh, token: null }]);
+    expect([model.runners.local?.status, streams(model)]).toEqual(["unknown", []]);
+  });
+
+  test("a LinkUp from the old link is ignored", () => {
+    const [model] = run([...withRunningTask, { type: "UpdateRunner", name: "local", transport: ssh, token: null }, linkUp(0)]);
+    expect(model.runners.local?.link.state).toBe("down");
+  });
+
+  test("a replaced token's vault entry is deleted", () => {
+    const [model, effects] = run([...withRunningTask, { type: "UpdateRunner", name: "local", transport: null, token: newToken }]);
+    expect([model.runners.local?.token, effects]).toEqual([newToken, [{ type: "DeleteSecrets", keys: ["runner/local/k"] }]]);
+  });
+
+  test("an unknown runner is reported", () => {
+    const [model] = run([{ type: "UpdateRunner", name: "nope", transport: ssh, token: null }]);
+    expect(model.notifications.at(-1)?.text).toBe("unknown runner nope");
   });
 });
 

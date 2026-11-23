@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
-import { awsEnv, direct, ssmArgs, transportFor } from "./transport.js";
+import { awsEnv, direct, sshArgs, ssmArgs, transportFor } from "./transport.js";
 import type { TransportSpec } from "./types.js";
 import { memoryVault } from "./vault.js";
 
@@ -17,15 +17,15 @@ const fakeAws = (name: string, body: string): string => {
   return path;
 };
 
-const spec: Extract<TransportSpec, { kind: "aws-ssm" }> = {
-  kind: "aws-ssm",
+const spec: Extract<TransportSpec, { kind: "aws_ssm" }> = {
+  kind: "aws_ssm",
   region: "eu-west-1",
   instanceId: "i-1",
   remotePort: 9000,
   credentials: { kind: "profile", profile: "dev" },
 };
 
-describe.skipIf(process.platform === "win32")("aws-ssm transport", () => {
+describe.skipIf(process.platform === "win32")("aws_ssm transport", () => {
   test("is up once the session manager says it is waiting for connections", async () => {
     const aws = fakeAws("ready", 'echo "Starting session"; echo "Waiting for connections..."; sleep 30');
     const abort = new AbortController();
@@ -72,7 +72,89 @@ describe.skipIf(process.platform === "win32")("aws-ssm transport", () => {
   });
 });
 
+/** Stands in for ssh: listens on the -L local port like a live forward, after `delayMs`; with `dropWith`, exits 500ms later saying so. */
+const fakeSsh = (name: string, delayMs = 0, dropWith?: string): string => {
+  const path = join(dir, name);
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+const forward = process.argv[process.argv.indexOf("-L") + 1];
+const port = Number(forward.split(":")[1]);
+setTimeout(() => require("node:net").createServer((s) => s.destroy()).listen(port, "127.0.0.1"), ${delayMs});
+${dropWith ? `setTimeout(() => { process.stderr.write(${JSON.stringify(dropWith + "\n")}); process.exit(255); }, ${delayMs + 500});` : ""}
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+};
+
+const sshSpec: Extract<TransportSpec, { kind: "ssh" }> = { kind: "ssh", host: "box", user: "ec2-user", port: 2222, identityFile: "~/.ssh/k", remotePort: 9000 };
+
+describe.skipIf(process.platform === "win32")("ssh transport", () => {
+  test("is up once the forwarded local port accepts connections", async () => {
+    const abort = new AbortController();
+    const link = await transportFor(sshSpec, { vault: memoryVault(), sshCommand: fakeSsh("ssh-ready", 300) }).open(abort.signal);
+    abort.abort();
+    expect(link.ok && /^http:\/\/127\.0\.0\.1:\d+$/.test(link.value.url)).toBe(true);
+  });
+
+  test("closing the link after it was aborted reports no error", async () => {
+    const abort = new AbortController();
+    const link = await transportFor(sshSpec, { vault: memoryVault(), sshCommand: fakeSsh("ssh-abort") }).open(abort.signal);
+    abort.abort();
+    expect(link.ok ? await link.value.closed : "not open").toBeNull();
+  });
+
+  test("an ssh that exits before the forward is up fails with its last error line", async () => {
+    const ssh = fakeAws("ssh-denied", 'echo "ec2-user@box: Permission denied (publickey)." >&2; exit 255');
+    const link = await transportFor(sshSpec, { vault: memoryVault(), sshCommand: ssh }).open(new AbortController().signal);
+    expect(link).toEqual({ ok: false, error: "ec2-user@box: Permission denied (publickey)." });
+  });
+
+  test("a dropped session reports its last error line as the reason", async () => {
+    const link = await transportFor(sshSpec, { vault: memoryVault(), sshCommand: fakeSsh("ssh-drop", 0, "Connection to box closed by remote host.") }).open(
+      new AbortController().signal,
+    );
+    expect(link.ok ? await link.value.closed : "not open").toBe("Connection to box closed by remote host.");
+  });
+
+  test("gives up when the forward is not ready in time", async () => {
+    const link = await transportFor(sshSpec, { vault: memoryVault(), sshCommand: fakeAws("ssh-slow", "sleep 30"), readyTimeoutMs: 300 }).open(new AbortController().signal);
+    expect(link).toEqual({ ok: false, error: "tunnel not ready after 0.3s" });
+  });
+});
+
 describe("transports", () => {
+  test("ssh arguments forward a loopback port and never prompt", () => {
+    expect(sshArgs(sshSpec, 5555)).toEqual([
+      "-N",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=3",
+      "-L",
+      "127.0.0.1:5555:127.0.0.1:9000",
+      "-p",
+      "2222",
+      "-i",
+      "~/.ssh/k",
+      "-o",
+      "IdentitiesOnly=yes",
+      "-l",
+      "ec2-user",
+      "--",
+      "box",
+    ]);
+  });
+
+  test("ssh leaves unset user, port and key to ~/.ssh/config", () => {
+    expect(sshArgs({ ...sshSpec, user: null, port: null, identityFile: null }, 5555).slice(-3)).toEqual(["127.0.0.1:5555:127.0.0.1:9000", "--", "box"]);
+  });
+
   test("direct is up at its URL right away", async () => {
     const link = await direct("http://h:9301/").open(new AbortController().signal);
     expect(link.ok && link.value.url).toBe("http://h:9301");

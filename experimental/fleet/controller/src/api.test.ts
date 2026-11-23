@@ -26,6 +26,8 @@ const model: Model = {
       lastSeenAt: 0,
       lastError: null,
       location: null,
+      available: null,
+      agentsChange: null,
     },
   },
   guideSessions: {
@@ -149,5 +151,56 @@ describe("api", () => {
 
   it("refuses input for a guide session that doesn't exist", async () => {
     expect((await post({ msg_id: "m1", type: "GuideInput", payload: { sessionId: "nope", input: {} } })).status).toBe(400);
+  });
+});
+
+describe("runner transports", () => {
+  it.each([
+    [{ url: "http://h:9301/" }, { kind: "direct", url: "http://h:9301" }],
+    [{ transport: { kind: "ssh", host: "box" } }, { kind: "ssh", host: "box", user: null, port: null, identityFile: null, remotePort: 9000 }],
+    [
+      { transport: { kind: "ssh", host: "10.0.0.5", user: "ec2-user", port: "2222", identityFile: "~/.ssh/fleet", remotePort: 9001 } },
+      { kind: "ssh", host: "10.0.0.5", user: "ec2-user", port: 2222, identityFile: "~/.ssh/fleet", remotePort: 9001 },
+    ],
+    [
+      { transport: { kind: "aws_ssm", region: "us-west-2", instanceId: "i-0abc", credentials: { kind: "profile", profile: "dev" } } },
+      { kind: "aws_ssm", region: "us-west-2", instanceId: "i-0abc", remotePort: 9000, credentials: { kind: "profile", profile: "dev" } },
+    ],
+  ])("AddRunner accepts %j", async (payload, transport) => {
+    const sent: Msg[] = [];
+    await post({ msg_id: "m1", type: "AddRunner", payload: { name: "home", token: "t", ...payload } }, sent);
+    expect(sent[0]?.type === "AddRunner" && sent[0].transport).toEqual(transport);
+  });
+
+  it.each([
+    [{ transport: { kind: "ssh", host: "-oProxyCommand=x" } }, "ssh transport needs a host"],
+    [{ transport: { kind: "ssh", host: "box", user: "-l" } }, "ssh user may hold only"],
+    [{ transport: { kind: "ssh", host: "box", port: 0 } }, "ssh ports must be 1-65535"],
+    [{ transport: { kind: "ssh", host: "box", identityFile: "-F/etc/x" } }, "ssh identityFile must be a file path"],
+    [{ transport: { kind: "aws_ssm", region: "us-west-2", instanceId: "box" } }, "aws_ssm transport needs an instanceId"],
+    [{ transport: { kind: "telnet" } }, "transport kind must be"],
+    [{ url: "h:9301" }, "url must start with"],
+  ])("AddRunner refuses %j", async (payload, error) => {
+    const body = (await (await post({ msg_id: "m1", type: "AddRunner", payload: { name: "home", token: "t", ...payload } })).json()) as { error: string };
+    expect(body.error).toContain(error);
+  });
+
+  it("UpdateRunner with only a transport keeps the token", async () => {
+    const sent: Msg[] = [];
+    await post({ msg_id: "m1", type: "UpdateRunner", payload: { name: "laptop", transport: { kind: "ssh", host: "box" } } }, sent);
+    expect(sent[0]).toMatchObject({ type: "UpdateRunner", name: "laptop", transport: { kind: "ssh", host: "box" }, token: null });
+  });
+
+  it("UpdateRunner stores a new token in the vault and logs only its key", async () => {
+    const sent: Msg[] = [];
+    const vault = memoryVault();
+    await post({ msg_id: "m1", type: "UpdateRunner", payload: { name: "laptop", token: "n3w" } }, sent, vault);
+    const msg = sent[0];
+    const key = msg?.type === "UpdateRunner" && msg.token?.kind === "vault" ? msg.token.key : "";
+    expect([JSON.stringify(sent).includes("n3w"), msg?.type === "UpdateRunner" && msg.transport, await vault.get(key)]).toEqual([false, null, { ok: true, value: "n3w" }]);
+  });
+
+  it("UpdateRunner with nothing to change is refused", async () => {
+    expect((await post({ msg_id: "m1", type: "UpdateRunner", payload: { name: "laptop" } })).status).toBe(400);
   });
 });

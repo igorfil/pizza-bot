@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { LoaderCircle, RotateCcw, X } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Check, LoaderCircle, RotateCcw, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type { FleetGuideSession, FleetModel, FleetRunner, FleetStepView } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
@@ -7,8 +7,30 @@ import { initialDraft } from "./fleet-view-model.js";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
+/** A wide modal for the Fleet page's multi-field flows; closing it never cancels anything. */
+export function FleetDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <DialogPrimitive.Root open onOpenChange={(open) => !open && onClose()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="sidebar-modal-backdrop" />
+        <DialogPrimitive.Content className="sidebar-modal sidebar-modal--wide fleet-dialog" aria-describedby={undefined}>
+          <div className="fleet-dialog-head">
+            <DialogPrimitive.Title className="sidebar-modal-title">{title}</DialogPrimitive.Title>
+            <DialogPrimitive.Close asChild>
+              <button type="button" className="fleet-icon-btn fleet-dialog-close" aria-label="Close">
+                <X size={14} />
+              </button>
+            </DialogPrimitive.Close>
+          </div>
+          {children}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}
+
 /** "Add runner": the guides the Controller offers. Picking one starts a session in the Controller. */
-export function GuidePicker({ model, send, onClose }: { model: FleetModel; send: FleetSend; onClose: () => void }) {
+export function GuidePicker({ model, send, onStarted }: { model: FleetModel; send: FleetSend; onStarted: (sessionId: string | null) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const guides = model.guideCatalog ?? [];
@@ -17,8 +39,7 @@ export function GuidePicker({ model, send, onClose }: { model: FleetModel; send:
     setStarting(guide);
     setError(null);
     try {
-      await send("StartGuide", { guide });
-      onClose();
+      onStarted(await send("StartGuide", { guide }));
     } catch (e) {
       setError(message(e, "Couldn't start the guide."));
     } finally {
@@ -27,25 +48,72 @@ export function GuidePicker({ model, send, onClose }: { model: FleetModel; send:
   };
 
   return (
-    <div className="fleet-agent-card fleet-agent-form" role="group" aria-label="Add runner">
-      <h3 className="fleet-agent-name">Add runner</h3>
+    <div className="fleet-guide" role="group" aria-label="Where should the runner live?">
       <p className="field-hint">Where should the runner live?</p>
       {guides.length === 0 && <p className="fleet-muted">This Controller offers no guides.</p>}
       <div className="fleet-guide-options">
         {guides.map((g) => (
           <button key={g.id} type="button" className="fleet-guide-pick" disabled={starting !== null} onClick={() => void start(g.id)}>
-            <span className="fleet-guide-pick-title">{g.title}</span>
+            <span className="fleet-guide-pick-title">
+              {starting === g.id && <LoaderCircle size={13} className="spin" aria-hidden="true" />} {g.title}
+            </span>
             <span className="fleet-muted">{g.description}</span>
           </button>
         ))}
       </div>
-      {error && <div className="schedule-editor-error" role="alert">{error}</div>}
-      <div className="fleet-agent-run-actions">
-        <button type="button" className="btn-secondary fleet-small-btn" onClick={onClose}>
-          Cancel
-        </button>
-      </div>
+      {error && (
+        <div className="schedule-editor-error" role="alert">
+          {error}
+        </div>
+      )}
     </div>
+  );
+}
+
+function Stepper({ steps }: { steps: NonNullable<FleetStepView["steps"]> }) {
+  return (
+    <ol className="fleet-stepper" aria-label="Steps">
+      {steps.labels.map((label, i) => (
+        <li key={label} className={i < steps.current ? "done" : i === steps.current ? "current" : undefined} aria-current={i === steps.current ? "step" : undefined}>
+          <span className="fleet-stepper-n" aria-hidden="true">
+            {i < steps.current ? <Check size={11} /> : i + 1}
+          </span>
+          {label}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** A radio or checkbox drawn as a card; the native input stays for keyboard and screen readers. */
+export function ChoiceCard({
+  type,
+  name,
+  value,
+  checked,
+  disabled,
+  title,
+  detail,
+  onChange,
+}: {
+  type: "radio" | "checkbox";
+  name: string;
+  value: string;
+  checked: boolean;
+  disabled?: boolean;
+  title: string;
+  detail?: string;
+  onChange: () => void;
+}) {
+  return (
+    <label className={`fleet-choice${checked ? " checked" : ""}${disabled ? " disabled" : ""}`}>
+      <input className="fleet-choice-input" type={type} name={name} value={value} checked={checked} disabled={disabled} onChange={onChange} />
+      <span className={`fleet-choice-mark ${type}`} aria-hidden="true">
+        {checked && <Check size={12} strokeWidth={3} />}
+      </span>
+      <span className="fleet-choice-title">{title}</span>
+      {detail && <span className="fleet-choice-detail">{detail}</span>}
+    </label>
   );
 }
 
@@ -54,17 +122,23 @@ function StepFields({ view, draft, onChange }: { view: FleetStepView; draft: Rec
     <>
       {view.fields.map((f) =>
         f.kind === "choice" ? (
-          <fieldset key={f.id} className="field fleet-guide-choice">
-            <legend className="field-label">{f.label}</legend>
-            {(f.options ?? []).map((o) => (
-              <label key={o.value} className={`fleet-guide-option${o.disabled ? " disabled" : ""}`}>
-                <input type="radio" name={f.id} value={o.value} checked={draft[f.id] === o.value} disabled={o.disabled} onChange={() => onChange(f.id, o.value)} />
-                <span>
-                  {o.label}
-                  {o.detail && <span className="fleet-muted"> · {o.detail}</span>}
-                </span>
-              </label>
-            ))}
+          <fieldset key={f.id} className="fleet-choice-field">
+            <legend className="field-label fleet-choice-legend">{f.label}</legend>
+            <div className="fleet-choice-grid">
+              {(f.options ?? []).map((o) => (
+                <ChoiceCard
+                  key={o.value}
+                  type="radio"
+                  name={f.id}
+                  value={o.value}
+                  checked={draft[f.id] === o.value}
+                  disabled={o.disabled ?? false}
+                  title={o.label}
+                  {...(o.detail ? { detail: o.detail } : {})}
+                  onChange={() => onChange(f.id, o.value)}
+                />
+              ))}
+            </div>
             {f.hint && <span className="field-hint">{f.hint}</span>}
           </fieldset>
         ) : (
@@ -86,10 +160,9 @@ function StepFields({ view, draft, onChange }: { view: FleetStepView; draft: Rec
 }
 
 /** Renders whatever step the Controller sends; it knows nothing about any particular guide. */
-export function GuideCard({ model, session, send }: { model: FleetModel; session: FleetGuideSession; send: FleetSend }) {
+export function GuideCard({ session, send }: { session: FleetGuideSession; send: FleetSend }) {
   const [draft, setDraft] = useState(() => initialDraft(session.view));
   const [error, setError] = useState<string | null>(null);
-  const guide = model.guideCatalog?.find((g) => g.id === session.guide);
   const { view, status } = session;
 
   const act = async (f: () => Promise<unknown>) => {
@@ -107,13 +180,8 @@ export function GuideCard({ model, session, send }: { model: FleetModel; session
   };
 
   return (
-    <form className="fleet-agent-card fleet-agent-form fleet-guide" onSubmit={submit} aria-label={`Add runner: ${guide?.title ?? session.guide}`}>
-      <div className="fleet-guide-head">
-        <span className="fleet-muted">Add runner · {guide?.title ?? session.guide}</span>
-        <button type="button" className="fleet-icon-btn" aria-label="Cancel guide" title="Cancel" onClick={() => void act(() => send("CancelGuide", { sessionId: session.id }))}>
-          <X size={14} />
-        </button>
-      </div>
+    <form className="fleet-guide" onSubmit={submit} aria-label={view.title}>
+      {view.steps && <Stepper steps={view.steps} />}
       <h3 className="fleet-agent-name">{view.title}</h3>
       {view.body && <p className="field-hint">{view.body}</p>}
       {status === "working" && (
@@ -127,7 +195,11 @@ export function GuideCard({ model, session, send }: { model: FleetModel; session
           {session.error ?? error}
         </div>
       )}
-      <div className="fleet-agent-run-actions">
+      <div className="fleet-guide-actions">
+        <button type="button" className="fleet-link-btn fleet-link-danger" onClick={() => void act(() => send("CancelGuide", { sessionId: session.id }))}>
+          Cancel setup
+        </button>
+        <span className="fleet-agent-links-spacer" />
         {status === "failed" && (
           <button type="button" className="btn-secondary fleet-small-btn" onClick={() => void act(() => send("GuideRetry", { sessionId: session.id }))}>
             <RotateCcw size={13} /> Retry
@@ -140,6 +212,34 @@ export function GuideCard({ model, session, send }: { model: FleetModel; session
         )}
       </div>
     </form>
+  );
+}
+
+/** The guide picker, then the guide it started, in one dialog. */
+export function AddRunnerDialog({
+  model,
+  session,
+  send,
+  onStarted,
+  onClose,
+}: {
+  model: FleetModel;
+  session: FleetGuideSession | null;
+  send: FleetSend;
+  onStarted: (sessionId: string | null) => void;
+  onClose: () => void;
+}) {
+  const guide = session ? model.guideCatalog?.find((g) => g.id === session.guide) : undefined;
+  // `updatedAt` only moves on the Controller's tick, so two steps within one tick need the view in the key too.
+  const stepKey = session ? `${session.id}:${session.updatedAt}:${session.status}:${session.view.title}:${session.view.fields.map((f) => f.id).join(",")}` : "";
+  return (
+    <FleetDialog title={session ? `Add runner · ${guide?.title ?? session.guide}` : "Add runner"} onClose={onClose}>
+      {session ? (
+        <GuideCard key={stepKey} session={session} send={send} />
+      ) : (
+        <GuidePicker model={model} send={send} onStarted={onStarted} />
+      )}
+    </FleetDialog>
   );
 }
 

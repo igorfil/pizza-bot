@@ -27,6 +27,8 @@ export const addRunner = (model: Model, spec: NewRunner): Model =>
       lastSeenAt: null,
       lastError: null,
       location: null,
+      available: null,
+      agentsChange: null,
     }),
     "info",
     `runner ${spec.name} added`,
@@ -37,7 +39,7 @@ const vaultKey = (ref: SecretRef): string[] => (ref.kind === "vault" ? [ref.key]
 /** Every vault entry a runner's config points at, so removing the runner can delete them. */
 export const vaultKeys = (runner: NewRunner): string[] => [
   ...vaultKey(runner.token),
-  ...(runner.transport.kind === "aws-ssm" && runner.transport.credentials.kind === "keys"
+  ...(runner.transport.kind === "aws_ssm" && runner.transport.credentials.kind === "keys"
     ? [...vaultKey(runner.transport.credentials.accessKeyId), ...vaultKey(runner.transport.credentials.secretAccessKey)]
     : []),
 ];

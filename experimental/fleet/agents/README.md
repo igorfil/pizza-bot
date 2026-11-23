@@ -86,4 +86,6 @@ input; stdout and exit code carry the contract unchanged.
 | `morningbrief` | laptop | optional focus | Outlook MCP (`aws-outlook-mcp`, read-only) + Bedrock Haiku 5.5 |
 | `slow` | laptop | `steps=N every=S text` | nothing; for disconnect tests |
 
-Which agents a runner serves is set by `RUNNER_AGENTS` (comma list of ids; default: all folders).
+Which agents a runner serves starts from `RUNNER_AGENTS` (comma list of ids; default: all folders).
+Add agent on the Fleet page changes it through the runner's `PUT /agents`, which is saved and wins
+from then on.

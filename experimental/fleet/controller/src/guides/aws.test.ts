@@ -47,7 +47,6 @@ describe("install script", () => {
     release: "https://github.com/o/r/releases/download/fleet-runner-v1",
     arch: "x86_64",
     token: "abc123",
-    agents: "dadjokes,slow",
     name: "ec2",
     region: "eu-west-1",
     port: 9000,

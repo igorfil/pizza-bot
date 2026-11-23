@@ -1,6 +1,6 @@
 import { chatFailed, chatReplied, createChat, failInterruptedChats, sendChatMessage } from "./chat.js";
 import { cancelGuide, guideInput, guideRetry, guideStepped, interruptGuides, startGuide } from "./guide-session.js";
-import { addRunner, notify, runnerSpec, setRunner } from "./runners.js";
+import { addRunner, notify, runnerSpec, setRunner, vaultKeys } from "./runners.js";
 import type {
   Agent,
   AgentInfo,
@@ -10,11 +10,13 @@ import type {
   Model,
   Msg,
   Runner,
+  SecretRef,
   Sub,
   Task,
   TaskSnapshot,
   TaskState,
   TaskUpdate,
+  TransportSpec,
 } from "./types.js";
 
 export const TICK_MS = 2_000;
@@ -105,7 +107,16 @@ const resyncAll = (model: Model): Model => {
   const runners = Object.fromEntries(
     Object.values(model.runners).map((r): [string, Runner] => [
       r.name,
-      { ...r, status: "unknown", link: { state: "down", error: null }, linkEpoch: r.linkEpoch + 1, linkFailures: 0, linkRetryAt: 0 },
+      {
+        ...r,
+        status: "unknown",
+        link: { state: "down", error: null },
+        linkEpoch: r.linkEpoch + 1,
+        linkFailures: 0,
+        linkRetryAt: 0,
+        // A change in flight when the Controller stopped never reports back; the next index tells.
+        agentsChange: r.agentsChange?.state === "adding" ? null : (r.agentsChange ?? null),
+      },
     ]),
   );
   const tasks = Object.fromEntries(
@@ -254,7 +265,7 @@ const syncAgents = (model: Model, runner: string, infos: AgentInfo[]): Model => 
   return { ...model, agents: { ...others, ...mine } };
 };
 
-const runnerOk = (model: Model, name: string, agents: AgentInfo[], location: string | null): Result => {
+const runnerOk = (model: Model, name: string, agents: AgentInfo[], location: string | null, available: AgentInfo[] | null): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
   const recovered = runner.status !== "healthy";
@@ -267,6 +278,7 @@ const runnerOk = (model: Model, name: string, agents: AgentInfo[], location: str
       lastSeenAt: model.now,
       nextCheckAt: model.now + HEALTH_INTERVAL_MS,
       location,
+      available,
     }),
     name,
     agents,
@@ -306,6 +318,58 @@ const linkDown = (model: Model, name: string, epoch: number, error: string | nul
   return runner.status === "unreachable" ? updated : notify(updated, "error", `runner ${name} disconnected: ${reason}`);
 };
 
+/** New config takes effect through a fresh link; vault entries only the old config used are deleted. */
+const updateRunner = (model: Model, name: string, transport: TransportSpec | null, token: SecretRef | null): Result => {
+  const runner = model.runners[name];
+  if (!runner) return [notify(model, "error", `unknown runner ${name}`), []];
+  const next: Runner = {
+    ...runner,
+    transport: transport ?? runner.transport,
+    token: token ?? runner.token,
+    status: "unknown",
+    link: { state: "down", error: null },
+    linkEpoch: runner.linkEpoch + 1,
+    linkFailures: 0,
+    linkRetryAt: 0,
+  };
+  const kept = new Set(vaultKeys(next));
+  const stale = vaultKeys(runner).filter((k) => !kept.has(k));
+  return [notify(setRunner(model, next), "info", `runner ${name} updated`), stale.length > 0 ? [{ type: "DeleteSecrets", keys: stale }] : []];
+};
+
+/** Asks the runner to serve what it serves now plus `ids`; the runner answers with its new index. */
+const addAgents = (model: Model, name: string, ids: string[]): Result => {
+  const runner = model.runners[name];
+  if (!runner) return [notify(model, "error", `unknown runner ${name}`), []];
+  const fail = (error: string): Result => [setRunner(model, { ...runner, agentsChange: { state: "failed", agents: ids, error } }), []];
+  if (runner.agentsChange?.state === "adding") return [model, []];
+  if (runner.status !== "healthy" || runner.link.state !== "up") return fail(`${name} isn't reachable right now`);
+  if (!runner.available) return fail(`${name} can't change its agents; update the runner`);
+  const unknown = ids.find((id) => !runner.available!.some((a) => a.id === id));
+  if (unknown) return fail(`${name} has no agent ${unknown} to add`);
+  const served = Object.values(model.agents).filter((a) => a.runner === name).map((a) => a.id);
+  const agents = [...new Set([...served, ...ids])].sort();
+  return [
+    setRunner(model, { ...runner, agentsChange: { state: "adding", agents: ids } }),
+    [{ type: "SetRunnerAgents", runner: name, endpoint: { url: runner.link.url, token: runner.token }, agents, added: ids }],
+  ];
+};
+
+const agentsSet = (model: Model, msg: Extract<Msg, { type: "AgentsSet" }>): Result => {
+  const runner = model.runners[msg.runner];
+  if (!runner) return [model, []];
+  const [next, effects] = runnerOk(setRunner(model, { ...runner, agentsChange: null }), msg.runner, msg.agents, msg.location, msg.available);
+  const names = msg.agents.filter((a) => msg.added.includes(a.id)).map((a) => a.name);
+  return [notify(next, "info", `added ${names.join(", ")} to ${msg.runner}`), effects];
+};
+
+const agentsSetFailed = (model: Model, name: string, error: string): Model => {
+  const runner = model.runners[name];
+  if (!runner) return model;
+  const agents = runner.agentsChange?.agents ?? [];
+  return notify(setRunner(model, { ...runner, agentsChange: { state: "failed", agents, error } }), "error", `couldn't add agents to ${name}: ${error}`);
+};
+
 const removeRunner = (model: Model, name: string, teardown: boolean): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
@@ -328,6 +392,9 @@ export const update = (model: Model, msg: Msg): Result => {
       const { type: _type, ...spec } = msg;
       return [addRunner(model, spec), []];
     }
+
+    case "UpdateRunner":
+      return updateRunner(model, msg.name, msg.transport, msg.token);
 
     case "RemoveRunner":
       return removeRunner(model, msg.name, msg.teardown);
@@ -360,7 +427,16 @@ export const update = (model: Model, msg: Msg): Result => {
       return tick(model, msg.now, msg.local);
 
     case "RunnerOk":
-      return runnerOk(model, msg.name, msg.agents, msg.location);
+      return runnerOk(model, msg.name, msg.agents, msg.location, msg.available ?? null);
+
+    case "AddAgents":
+      return addAgents(model, msg.runner, msg.agents);
+
+    case "AgentsSet":
+      return agentsSet(model, msg);
+
+    case "AgentsSetFailed":
+      return [agentsSetFailed(model, msg.runner, msg.error), []];
 
     case "RunnerFailed":
       return [runnerFailed(model, msg.name, msg.error), []];
