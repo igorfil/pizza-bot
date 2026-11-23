@@ -24,7 +24,7 @@ const fakeHost = (over: Partial<Ec2Host> = {}): Ec2Host => ({
   ...over,
 });
 
-const BEDROCK_OK = "FLEET_BEDROCK us.anthropic.claude-haiku-5-5 ok\n";
+const BEDROCK_OK = "FLEET_BEDROCK us.amazon.nova-micro-v1:0 ok\n";
 
 /** The Bedrock check gets `bedrock` as its output; every other script goes to the host as given. */
 const withBedrock = (host: Ec2Host, bedrock: string): Ec2Host => ({
@@ -54,7 +54,7 @@ const ports = (over: Partial<GuidePorts> = {}): GuidePorts => ({
   transports: () => upTransport,
   fetch: (async () => new Response("{}", { status: 200 })) as typeof fetch,
   sleep: async () => {},
-  release: "https://github.com/o/r/releases/download/fleet-runner-v1",
+  pushLocalBuild: async () => ok(undefined),
   ...over,
 });
 
@@ -231,7 +231,7 @@ describe("aws guide: existing instance", () => {
       origin: {
         guide: "aws",
         summary: "EC2 i-online · eu-west-1",
-        teardown: { label: "uninstall the runner from i-online", data: { instanceId: "i-online", region: "eu-west-1" } },
+        teardown: { label: "uninstall the runner and its agents from i-online", data: { instanceId: "i-online", region: "eu-west-1" } },
       },
     });
   });
@@ -280,11 +280,6 @@ describe("aws guide: existing instance", () => {
     expect(token(installs(scripts)[0]!)).toBe(token(installs(scripts)[1]!));
   });
 
-  test("no release configured fails with what to set", async () => {
-    const p = ports({ release: "" });
-    const r = await answer(stateOf(await toTarget(p)), pick, p);
-    expect(r.kind === "failed" && r.error).toContain("FLEET_RUNNER_RELEASE");
-  });
 
   test("a tunnel that won't open fails at the check, and Retry checks again", async () => {
     const down: Transport = { open: async () => fail("SessionManagerPlugin is not found") };
@@ -319,10 +314,10 @@ describe("aws guide: instance that already runs a runner", () => {
     expect([token, JSON.stringify(stateOf(r)).includes("abc123")]).toEqual([{ ok: true, value: "abc123" }, false]);
   });
 
-  test("an adopted runner is never uninstalled on removal", async () => {
+  test("removing an adopted runner uninstalls it and its agents too", async () => {
     const p = ports({ aws: fakeAws(existing()) });
     const r = await answer(stateOf(await toTarget(p)), pick, p);
-    expect(r.kind === "done" && r.runner.origin).toEqual({ guide: "aws", summary: "EC2 i-online · eu-west-1 · existing runner", teardown: null });
+    expect(r.kind === "done" && r.runner.origin?.teardown?.label).toBe("uninstall the runner and its agents from i-online");
   });
 
   test("installs when the check finds no runner", async () => {
@@ -372,7 +367,6 @@ describe("aws guide: local build (temporary)", () => {
     const pushes: string[][] = [];
     const scripts: string[] = [];
     const p = ports({
-      release: "local",
       pushLocalBuild: async (id, region, arch) => (pushes.push([id, region, arch]), ok(undefined)),
       aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")) })),
     });
@@ -381,16 +375,15 @@ describe("aws guide: local build (temporary)", () => {
   });
 
   test("a failed copy shows why and Retry copies again", async () => {
-    const p = ports({ release: "local", pushLocalBuild: async () => fail("Docker isn't running") });
+    const p = ports({ pushLocalBuild: async () => fail("zig is missing: brew install zig") });
     const r = await answer(stateOf(await toTarget(p)), pick, p);
-    expect([r.kind, r.kind === "failed" && r.error, stateOf(r).step]).toEqual(["failed", "Docker isn't running", "push"]);
+    expect([r.kind, r.kind === "failed" && r.error, stateOf(r).step]).toEqual(["failed", "zig is missing: brew install zig", "push"]);
   });
 
   test("an instance that already runs a runner is adopted without copying anything", async () => {
     const pushes: string[] = [];
     const found = "FLEET_RUNNER=present\nFLEET_RUNNER_PORT=9000\nFLEET_RUNNER_TOKEN=abc\n";
     const p = ports({
-      release: "local",
       pushLocalBuild: async (id) => (pushes.push(id), ok(undefined)),
       aws: fakeAws(fakeHost({ scriptResult: async () => ok({ done: true, ok: true, output: found }) })),
     });
@@ -419,6 +412,7 @@ describe("aws guide: set-up checklist", () => {
     expect(seen.filter((r) => r.kind === "working").map((r) => marks(r).find((m) => m.endsWith(":current")))).toEqual([
       "Connect to the instance:current",
       "Connect to the instance:current",
+      "Copy the local build:current",
       "Install the runner:current",
       "Install the runner:current",
       "Open the tunnel to the runner:current",
@@ -430,7 +424,7 @@ describe("aws guide: set-up checklist", () => {
   test("checks off the steps before the current one", async () => {
     const seen = await screens(ports());
     const atBedrock = seen.find((r) => marks(r).includes("Verify Bedrock access:current"))!;
-    expect(marks(atBedrock)).toEqual(["Connect to the instance:done", "Install the runner:done", "Open the tunnel to the runner:done", "Verify Bedrock access:current"]);
+    expect(marks(atBedrock)).toEqual(["Connect to the instance:done", "Copy the local build:done", "Install the runner:done", "Open the tunnel to the runner:done", "Verify Bedrock access:current"]);
   });
 
   test("shows the current step's progress under it", async () => {
@@ -445,8 +439,8 @@ describe("aws guide: set-up checklist", () => {
     expect(marks(seen.find((r) => marks(r).includes("Open the tunnel to the runner:current"))!)).toContain("Install the runner:skipped");
   });
 
-  test("the local build adds a copy step", async () => {
-    const seen = await screens(ports({ release: "local", pushLocalBuild: async () => ok(undefined) }));
+  test("starts with every step to do, the local build copy included", async () => {
+    const seen = await screens(ports());
     expect(marks(seen[0]!)).toEqual(["Connect to the instance:current", "Copy the local build:pending", "Install the runner:pending", "Open the tunnel to the runner:pending", "Verify Bedrock access:pending"]);
   });
 
@@ -456,13 +450,23 @@ describe("aws guide: set-up checklist", () => {
     expect(marks(seen.at(-1)!)).toContain("Open the tunnel to the runner:failed");
   });
 
-  test("an instance role that reaches no model fails with how to fix it", async () => {
-    const denied = "FLEET_BEDROCK us.anthropic.claude-haiku-5-5 AccessDeniedException\n";
+  test("checks Bedrock with one call to the cheapest model", async () => {
+    const scripts: string[] = [];
+    const host = fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")) });
+    const p = ports({ aws: { profiles: async () => [{ name: "default", region: "eu-west-1" }], host: async () => ok(host) } });
+    const atBedrock = (await screens(p)).find((r) => marks(r).includes("Verify Bedrock access:current"))!;
+    await awsGuide.step(stateOf(atBedrock), null, p);
+    expect(scripts.at(-1)).toContain('for model in ["us.amazon.nova-micro-v1:0"]:');
+  });
+
+  test("an instance role that can't reach Bedrock fails the set-up with how to fix it", async () => {
+    const denied = "FLEET_BEDROCK us.amazon.nova-micro-v1:0 AccessDeniedException\n";
     const seen = await screens(ports({ aws: fakeAws(fakeHost(), undefined, undefined, denied) }));
     const last = seen.at(-1)!;
-    expect([last.kind, last.kind === "failed" && last.error]).toEqual([
+    expect([last.kind, last.kind === "failed" && last.error, marks(last).at(-1)]).toEqual([
       "failed",
-      "The instance role can't call any model (Claude Haiku 5.5: AccessDeniedException). Allow bedrock:InvokeModel for them on the instance role, then Retry.",
+      "The instance can't call Bedrock: Amazon Nova Micro answered AccessDeniedException. Allow bedrock:InvokeModel on the instance role for us.amazon.nova-micro-v1:0 and the models your agents will use, then Retry.",
+      "Verify Bedrock access:failed",
     ]);
   });
 });
@@ -479,5 +483,23 @@ describe("aws guide: teardown", () => {
     const scripts: string[] = [];
     await awsGuide.teardown!(runner(), ports({ aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("c")) })) }));
     expect(scripts[0]).toContain("systemctl disable --now fleet-runner");
+  });
+
+  test("deletes every agent on the instance, created ones included", async () => {
+    const scripts: string[] = [];
+    await awsGuide.teardown!(runner(), ports({ aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("c")) })) }));
+    expect([scripts[0]?.includes("rm -rf /opt/fleet-agents"), scripts[0]?.includes("rm -rf /var/lib/fleet-runner")]).toEqual([true, true]);
+  });
+
+  test("says the instance was not terminated", async () => {
+    const r = await awsGuide.teardown!(runner(), ports());
+    expect(r).toEqual({ ok: true, value: "uninstalling the runner and its agents from i-1; the instance was not terminated" });
+  });
+
+  test("works for a runner adopted before removal could uninstall, from its transport", async () => {
+    const scripts: string[] = [];
+    const adopted = { ...runner(), origin: { guide: "aws", summary: "", teardown: null } };
+    await awsGuide.teardown!(adopted, ports({ aws: fakeAws(fakeHost({ sendScript: async (id, s) => (scripts.push(`${id}:${s.slice(0, 11)}`), ok("c")) })) }));
+    expect(scripts).toEqual(["i-1:#!/bin/bash"]);
   });
 });

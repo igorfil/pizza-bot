@@ -187,6 +187,11 @@ describe("AgentsView", () => {
     expect([html.match(/>\s*Add runner/g)?.length, html.match(/>\s*Add agent/g)?.length]).toEqual([1, 1]);
   });
 
+  it("offers no remove button for a runner on this machine", () => {
+    const local = { ...model, runners: { ec2: { ...model.runners.ec2!, local: true } } };
+    expect([view(model).includes('aria-label="Remove runner ec2"'), view(local).includes('aria-label="Remove runner ec2"')]).toEqual([true, false]);
+  });
+
   it("says how many agents run on how many runners", () => {
     expect(view(model)).toContain("1 agent on 1 runner");
   });

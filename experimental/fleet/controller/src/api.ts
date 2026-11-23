@@ -8,11 +8,20 @@ import type { SecretStore } from "./vault.js";
 
 const KEEPALIVE_MS = 15_000;
 
+const LOOPBACK = /^https?:\/\/(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?(\/|$)/;
+
+/** What a UI may know about a runner's transport: its kind, the EC2 instance, and whether it is this machine. */
+export const transportFacts = (t: TransportSpec) => ({
+  transport: t.kind,
+  instanceId: t.kind === "aws_ssm" ? t.instanceId : null,
+  local: t.kind === "direct" && LOOPBACK.test(t.url),
+});
+
 /** Runner tokens and guide internals never leave the Controller. */
 export const publicModel = (model: Model) => ({
   ...model,
   agentModels: AGENT_MODELS,
-  runners: Object.fromEntries(Object.entries(model.runners).map(([k, { token: _t, transport, ...r }]) => [k, { ...r, transport: transport.kind }])),
+  runners: Object.fromEntries(Object.entries(model.runners).map(([k, { token: _t, transport, ...r }]) => [k, { ...r, ...transportFacts(transport) }])),
   guideSessions: Object.fromEntries(Object.entries(model.guideSessions).map(([k, { state: _s, secretKeys: _k, ...g }]) => [k, g])),
 });
 

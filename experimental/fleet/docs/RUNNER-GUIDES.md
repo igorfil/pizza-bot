@@ -160,10 +160,10 @@ interface Ec2Host {
 - `working` results immediately ask for the next step; `done` adds the runner and closes the session.
 - On `Booted`, a session that was mid-step shows "The Controller restarted during this step" with
   Retry.
-- **Removing a runner asks** what to do when the runner has a teardown: "Remove from fleet" or
-  "Remove and <teardown label>" (for AWS: stop and uninstall the runner; the instance keeps
-  running). Open tasks of a removed runner become
-  `lost` (Q-CORE-2).
+- **Removing an EC2 runner** uninstalls the runner and every agent on the instance, created ones
+  included, and warns that the instance itself is not terminated. Other runners are only forgotten;
+  a runner on this machine (direct link to loopback) has no remove button. Open tasks of a removed
+  runner become `lost` (Q-CORE-2).
 
 ## Guides in this change
 
@@ -182,24 +182,22 @@ Listed in Add runner as "Coming soon" (`comingSoon` in the catalog); it can't be
 | detect | Runs a check script over SSM RunCommand. If `/etc/fleet-runner.env` exists and the runner answers `GET /agents`, the guide stores its `RUNNER_TOKEN` in the vault, uses its `RUNNER_BIND` port and skips to check. The token passes through SSM command output. |
 | install | Only when detect found no running runner. Generates the runner token (vault) and runs the bootstrap script over SSM RunCommand: downloads the runner binary and the agents tarball from the GitHub release, installs uv, creates the `fleet-runner` user, env file and systemd unit, pre-warms agents, starts the service. |
 | check | Opens the `aws_ssm` transport and reads `GET /agents`. |
-| bedrock | Over SSM RunCommand, calls each model in `AGENT_MODELS` once (1 token) with the instance role, the way agents will. Fails, with what to allow on the role, when no model answers. |
-| done | Saves the runner: `aws_ssm` transport, token ref, origin with teardown data. An adopted runner gets no teardown: the Controller never uninstalls what it didn't install. |
+| bedrock | Over SSM RunCommand, calls the cheapest offered model (`BEDROCK_PROBE_MODEL`, Amazon Nova Micro) once, 1 token, with the instance role, the way agents will. Fails, with what to allow on the role, when it can't. |
+| done | Saves the runner: `aws_ssm` transport, token ref, origin with teardown data. |
 
 The set-up steps (detect through bedrock, plus the local-build copy) show as a checklist
 (`StepView.checklist`): done steps are checked, the current one spins with its progress under it,
 a failed one is marked, and an adopted runner's install is shown as skipped.
 
-Release assets (`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`) come from
-`FLEET_RUNNER_RELEASE` (a GitHub release download base, e.g.
-`https://github.com/<owner>/<repo>/releases/download/<tag>`). `.github/workflows/fleet-runner-release.yml`
-builds and publishes them on a `fleet-runner-v*` tag.
-
-**Temporary, until a release is tested:** `FLEET_RUNNER_RELEASE=local` installs this checkout instead.
-Before installing, the guide runs `deploy/dev-push.sh`: `deploy/dev-build.sh` cross-compiles the
-static musl runner with `cargo zigbuild` (needs `brew install zig`, `cargo install cargo-zigbuild`,
-`rustup target add aarch64-unknown-linux-musl`) and packs the agents. Then it scp's both over SSM to
-`/tmp/fleet-local`, using a 60-second EC2 Instance Connect key, and the install script reads them
-through `file://`. Remove `local-build.ts`, the `push` step and both scripts once releases are in use.
+**Temporary, until runner releases are published:** the guide always installs this checkout's
+build; nothing needs to be set. Before installing, it runs `deploy/dev-push.sh`:
+`deploy/dev-build.sh` cross-compiles the static musl runner with `cargo zigbuild` (needs
+`brew install zig`, `cargo install cargo-zigbuild`, `rustup target add aarch64-unknown-linux-musl`)
+and packs the agents. Then it scp's both over SSM to `/tmp/fleet-local`, using a 60-second EC2
+Instance Connect key, and the install script reads them through `file://`.
+`.github/workflows/fleet-runner-release.yml` already publishes the same assets
+(`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`) on a `fleet-runner-v*` tag; once the guide
+downloads those instead, remove `local-build.ts`, the `push` step and both scripts.
 
 ## Testing
 

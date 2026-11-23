@@ -36,7 +36,6 @@ const runtime = startRuntime(openLog(join(home, "controller.db")), {
   transports: (spec) => transportFor(spec, { vault }),
   aws: sdkAwsPort(vault),
   guides: GUIDES,
-  release: process.env.FLEET_RUNNER_RELEASE ?? "",
   pushLocalBuild: pushLocalBuild(vault),
 });
 serveApi(runtime, { port, token, allowedOrigins, vault });

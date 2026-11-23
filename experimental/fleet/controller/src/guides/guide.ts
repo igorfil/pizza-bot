@@ -14,10 +14,8 @@ export type GuidePorts = {
   transports: (spec: TransportSpec) => Transport;
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
-  /** GitHub release download base with the runner binaries and agents tarball, or "local". */
-  release: string;
-  /** TEMPORARY: copies this checkout's build to an instance when `release` is "local". */
-  pushLocalBuild?: PushLocalBuild;
+  /** TEMPORARY: copies this checkout's runner build to an instance, the only install source until releases exist. */
+  pushLocalBuild: PushLocalBuild;
 };
 
 /**

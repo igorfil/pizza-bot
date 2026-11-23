@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createApi } from "./api.js";
+import { createApi, transportFacts } from "./api.js";
 import type { Runtime } from "./runtime.js";
 import type { Model, Msg } from "./types.js";
 import { initialModel } from "./update.js";
@@ -221,5 +221,20 @@ describe("runner transports", () => {
 
   it("UpdateRunner with nothing to change is refused", async () => {
     expect((await post({ msg_id: "m1", type: "UpdateRunner", payload: { name: "laptop" } })).status).toBe(400);
+  });
+});
+
+describe("transport facts for UIs", () => {
+  it.each([
+    ["http://127.0.0.1:9301", true],
+    ["http://localhost:9301", true],
+    ["http://homelab:9301", false],
+  ])("a direct runner at %s is local: %s", (url, local) => {
+    expect(transportFacts({ kind: "direct", url }).local).toBe(local);
+  });
+
+  it("an EC2 runner names its instance and is never local, though its tunnel is on loopback", () => {
+    const t = { kind: "aws_ssm" as const, region: "us-west-2", instanceId: "i-1", remotePort: 9000, credentials: { kind: "default" as const } };
+    expect(transportFacts(t)).toEqual({ transport: "aws_ssm", instanceId: "i-1", local: false });
   });
 });

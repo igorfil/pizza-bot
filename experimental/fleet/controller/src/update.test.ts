@@ -461,6 +461,18 @@ describe("removing a runner", () => {
     expect(effects[0]?.type === "RetireRunner" && effects[0].teardown).toBe(true);
   });
 
+  test("tears down an EC2 runner even when its guide offered no teardown", () => {
+    const ec2: Msg = {
+      type: "AddRunner",
+      name: "local",
+      transport: { kind: "aws_ssm", region: "us-west-2", instanceId: "i-1", remotePort: 9000, credentials: { kind: "default" } },
+      token,
+      origin: { guide: "aws", summary: "", teardown: null },
+    };
+    const [, effects] = run([{ type: "Tick", now: 1_000 }, ec2, { type: "RemoveRunner", name: "local", teardown: true }]);
+    expect(effects[0]?.type === "RetireRunner" && effects[0].teardown).toBe(true);
+  });
+
   test("never tears down a runner that has nothing to tear down", () => {
     const [, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, { type: "RemoveRunner", name: "local", teardown: true }]);
     expect(effects[0]?.type === "RetireRunner" && effects[0].teardown).toBe(false);

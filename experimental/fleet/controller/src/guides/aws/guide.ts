@@ -3,7 +3,7 @@ import { fail, ok, type Outcome } from "../../outcome.js";
 import type { AwsCredentials, ChecklistItem, GuideInput, GuideResult, GuideState, NewRunner, StepView, TransportSpec } from "../../types.js";
 import { reveal } from "../../vault.js";
 import { nameProblem, type GuidePorts, type RunnerGuide } from "../guide.js";
-import { AGENT_MODELS } from "../../agent-models.js";
+import { AGENT_MODELS, BEDROCK_PROBE_MODEL } from "../../agent-models.js";
 import { bedrockScript, detectScript, installScript, parseBedrock, parseDetect, uninstallScript } from "./install.js";
 import { LOCAL_RELEASE_DIR } from "./local-build.js";
 import type { Arch, Ec2Host, Instance } from "./port.js";
@@ -13,6 +13,11 @@ const POLL_MS = 5_000;
 const MAX_INSTALL_POLLS = 120;
 const MAX_DETECT_POLLS = 24;
 const CHECK_TIMEOUT_MS = 45_000;
+
+const modelLabel = (id: string): string => AGENT_MODELS.find((m) => m.id === id)?.label ?? id;
+
+const probing = `Calling ${modelLabel(BEDROCK_PROBE_MODEL)} from the instance…`;
+
 /** Where account-wide calls go when the profile names no region. */
 const HOME_REGION = "us-east-1";
 
@@ -34,8 +39,6 @@ type AwsState = {
   remotePort?: number;
   /** The instance already ran a runner, so the Controller adopted it instead of installing. */
   adopted?: boolean;
-  /** FLEET_RUNNER_RELEASE=local: the set-up copies this checkout's build first. */
-  local?: boolean;
   commandId?: string;
   polls?: number;
 };
@@ -68,7 +71,7 @@ const SETUP_TITLE = "Setting up the runner";
 
 /** The set-up as a checklist: done before the current step, then the current one, then pending. */
 const checklistOf = (state: AwsState, failedNow: boolean, progress?: string): StepView["checklist"] => {
-  const items = SETUP.filter((i) => i.key !== "push" || state.local);
+  const items = SETUP;
   const at = items.findIndex((i) => i.steps.includes(state.step));
   if (at < 0) return undefined;
   return items.map((item, n): ChecklistItem => {
@@ -230,7 +233,7 @@ const chooseTarget = (state: AwsState, input: GuideInput, ports: GuidePorts): Pr
     (state.found?.[instance] ? null : "Pick an instance.");
   if (problem) return target(kept, ports, problem);
   return working(
-    { ...kept, step: "detect", instanceId: instance, region: state.found![instance]!.region, local: ports.release === "local" },
+    { ...kept, step: "detect", instanceId: instance, region: state.found![instance]!.region },
     "Looking for a runner",
     "Checking the instance…",
   );
@@ -261,9 +264,7 @@ const waitDetect = async (state: AwsState, ports: GuidePorts): Promise<GuideResu
     if (!result.value.ok) return failed({ ...state, step: "detect" }, "Looking for a runner", result.value.output.trim().split("\n").slice(-5).join("\n") || "the check script failed");
     const found = parseDetect(result.value.output);
     if (found) return adopt(state, found.port, found.token, ports);
-    return state.local
-      ? working({ ...state, step: "push" }, "Installing the runner", "Building this checkout's runner and copying it to the instance…")
-      : working({ ...state, step: "install" }, "Installing the runner", "Starting…");
+    return working({ ...state, step: "push" }, "Installing the runner", "Building this checkout's runner and copying it to the instance…");
   }
   const polls = (state.polls ?? 0) + 1;
   if (polls > MAX_DETECT_POLLS) return failed({ ...state, step: "detect" }, "Looking for a runner", `the check script did not finish in ${(MAX_DETECT_POLLS * POLL_MS) / 60_000} minutes`);
@@ -282,28 +283,20 @@ const runnerToken = async (state: AwsState, ports: GuidePorts): Promise<Outcome<
   return stored.ok ? ok({ key, token }) : stored;
 };
 
-// TEMPORARY: FLEET_RUNNER_RELEASE=local installs this checkout's build, copied over scp (local-build.ts).
+// TEMPORARY: until runner releases are published, the runner installed is this checkout's build, copied over scp (local-build.ts).
 const push = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
-  if (!ports.pushLocalBuild) return failed(state, "Installing the runner", "this Controller can't copy a local build");
   const pushed = await ports.pushLocalBuild(state.instanceId!, state.region!, state.found?.[state.instanceId!]?.arch ?? "arm64", state.credentials!);
   return pushed.ok ? working({ ...state, step: "install" }, "Installing the runner", "Starting…") : failed(state, "Installing the runner", pushed.error);
 };
 
-const releaseBase = (release: string): string | null =>
-  release === "local" ? LOCAL_RELEASE_DIR : /^https:\/\/\S+$/.test(release) ? release.replace(/\/+$/, "") : null;
-
 const install = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
-  const release = releaseBase(ports.release);
-  if (!release) {
-    return failed(state, "Installing the runner", "Set FLEET_RUNNER_RELEASE to the GitHub release download URL with the runner binaries (docs/RUNNER-GUIDES.md), or to local to copy this checkout's build.");
-  }
   const h = await host(state, ports);
   if (!h.ok) return failed(state, "Installing the runner", h.error);
   const token = await runnerToken(state, ports);
   if (!token.ok) return failed(state, "Installing the runner", token.error);
   const withToken: AwsState = { ...state, tokenKey: token.value.key };
   const script = installScript({
-    release,
+    release: LOCAL_RELEASE_DIR,
     arch: state.found?.[state.instanceId!]?.arch ?? "arm64",
     token: token.value.token,
     name: state.name!,
@@ -338,8 +331,7 @@ const done = (state: AwsState): NewRunner => ({
   origin: {
     guide: "aws",
     summary: `EC2 ${state.instanceId} · ${state.region}${state.adopted ? " · existing runner" : ""}`,
-    // An adopted runner wasn't installed by the Controller, so removing it never uninstalls it.
-    teardown: state.adopted ? null : { label: `uninstall the runner from ${state.instanceId}`, data: { instanceId: state.instanceId!, region: state.region! } },
+    teardown: { label: `uninstall the runner and its agents from ${state.instanceId}`, data: { instanceId: state.instanceId!, region: state.region! } },
   },
 });
 
@@ -353,7 +345,7 @@ const check = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> =
     const res = await ports.fetch(`${link.value.url}/agents`, { signal: abort.signal }).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
     if (typeof res === "string") return failed(state, "Connecting", res);
     if (!res.ok) return failed(state, "Connecting", `the runner answered HTTP ${res.status}`);
-    return working({ ...state, step: "bedrock" }, "Checking Bedrock", "Calling each model from the instance…");
+    return working({ ...state, step: "bedrock" }, "Checking Bedrock", probing);
   } finally {
     clearTimeout(timer);
     abort.abort();
@@ -363,14 +355,13 @@ const check = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> =
 const bedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed(state, "Checking Bedrock", h.error);
-  const sent = await h.value.sendScript(state.instanceId!, bedrockScript(AGENT_MODELS.map((m) => m.id), state.region!));
+  const sent = await h.value.sendScript(state.instanceId!, bedrockScript([BEDROCK_PROBE_MODEL], state.region!));
   if (!sent.ok) return failed(state, "Checking Bedrock", sent.error);
-  return working({ ...state, step: "bedrocking", commandId: sent.value, polls: 0 }, "Checking Bedrock", "Calling each model from the instance…");
+  return working({ ...state, step: "bedrocking", commandId: sent.value, polls: 0 }, "Checking Bedrock", probing);
 };
 
-const modelLabel = (id: string): string => AGENT_MODELS.find((m) => m.id === id)?.label ?? id;
 
-/** Agents call Bedrock with the instance role, so a runner whose role reaches no model can't run any. */
+/** Agents call Bedrock with the instance role, so a role that can't reach the cheapest model fails the set-up. */
 const waitBedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", h.error);
@@ -379,12 +370,12 @@ const waitBedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideRes
   if (result.value.done) {
     if (!result.value.ok) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", result.value.output.trim().split("\n").slice(-5).join("\n") || "the Bedrock check failed");
     const { usable, refused } = parseBedrock(result.value.output);
-    if (usable.length === 0) {
-      const why = refused.map((r) => `${modelLabel(r.model)}: ${r.reason}`).join(", ") || "no model answered";
+    if (!usable.includes(BEDROCK_PROBE_MODEL)) {
+      const why = refused.find((r) => r.model === BEDROCK_PROBE_MODEL)?.reason ?? "no answer";
       return failed(
         { ...state, step: "bedrock" },
         "Checking Bedrock",
-        `The instance role can't call any model (${why}). Allow bedrock:InvokeModel for them on the instance role, then Retry.`,
+        `The instance can't call Bedrock: ${modelLabel(BEDROCK_PROBE_MODEL)} answered ${why}. Allow bedrock:InvokeModel on the instance role for ${BEDROCK_PROBE_MODEL} and the models your agents will use, then Retry.`,
       );
     }
     return { kind: "done", runner: done(state) };
@@ -392,7 +383,7 @@ const waitBedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideRes
   const polls = (state.polls ?? 0) + 1;
   if (polls > MAX_DETECT_POLLS) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", "the Bedrock check did not finish in 2 minutes");
   await ports.sleep(POLL_MS);
-  return working({ ...state, polls }, "Checking Bedrock", `Calling each model from the instance… (${polls * (POLL_MS / 1000)}s)`);
+  return working({ ...state, polls }, "Checking Bedrock", `${probing} (${polls * (POLL_MS / 1000)}s)`);
 };
 
 export const awsGuide: RunnerGuide = {
@@ -442,13 +433,13 @@ export const awsGuide: RunnerGuide = {
     }
   },
 
+  /** Uninstalls the runner and every agent on the instance; the instance itself is never terminated. */
   teardown: async (runner, ports) => {
     const t = runner.transport;
-    const data = runner.origin?.teardown?.data;
-    if (t.kind !== "aws_ssm" || !data?.instanceId) return fail("this runner has no AWS instance to tear down");
+    if (t.kind !== "aws_ssm") return fail("this runner has no AWS instance to tear down");
     const h = await ports.aws.host(t.credentials, t.region);
     if (!h.ok) return h;
-    const sent = await h.value.sendScript(data.instanceId, uninstallScript());
-    return sent.ok ? ok(`uninstalling the runner from ${data.instanceId}`) : sent;
+    const sent = await h.value.sendScript(t.instanceId, uninstallScript());
+    return sent.ok ? ok(`uninstalling the runner and its agents from ${t.instanceId}; the instance was not terminated`) : sent;
   },
 };

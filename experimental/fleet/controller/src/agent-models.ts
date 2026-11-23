@@ -5,4 +5,8 @@ export const AGENT_MODELS: readonly { id: string; label: string }[] = [
   { id: "us.anthropic.claude-opus-5-5", label: "Claude Opus 5.5" },
   { id: "us.openai.gpt-6.1-terra", label: "GPT-6.1 Terra" },
   { id: "us.amazon.nova-2-lite-v1:0", label: "Amazon Nova 2 Lite" },
+  { id: "us.amazon.nova-micro-v1:0", label: "Amazon Nova Micro" },
 ];
+
+/** The cheapest model offered; runner set-up calls it once to prove the instance can reach Bedrock. */
+export const BEDROCK_PROBE_MODEL = "us.amazon.nova-micro-v1:0";

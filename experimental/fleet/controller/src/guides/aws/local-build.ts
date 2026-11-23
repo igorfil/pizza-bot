@@ -1,5 +1,5 @@
-// TEMPORARY: lets the AWS guide install this checkout's build (FLEET_RUNNER_RELEASE=local) before a
-// release exists. Remove with deploy/dev-build.sh and deploy/dev-push.sh once releases are tested.
+// TEMPORARY: the AWS guide installs this checkout's runner build, copied to the instance, until runner
+// releases are published. Remove with deploy/dev-build.sh and deploy/dev-push.sh once releases are tested.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { fail, ok, type Outcome } from "../../outcome.js";

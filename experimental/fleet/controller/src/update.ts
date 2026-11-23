@@ -10,6 +10,7 @@ import type {
   Model,
   Msg,
   NewAgentSpec,
+  NewRunner,
   Runner,
   SecretRef,
   Sub,
@@ -390,6 +391,9 @@ const agentsSetFailed = (model: Model, name: string, error: string): Model => {
   return notify(setRunner(model, { ...runner, agentsChange: { state: "failed", agents, error } }), "error", `couldn't add agents to ${name}: ${error}`);
 };
 
+/** EC2 runners can always be uninstalled, including ones the guide adopted before that was offered. */
+export const canTearDown = (runner: NewRunner): boolean => runner.transport.kind === "aws_ssm" || runner.origin?.teardown != null;
+
 const removeRunner = (model: Model, name: string, teardown: boolean): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
@@ -397,7 +401,7 @@ const removeRunner = (model: Model, name: string, teardown: boolean): Result => 
   const agents = Object.fromEntries(Object.entries(model.agents).filter(([, a]) => a.runner !== name));
   const orphaned = Object.values(model.tasks).filter((t) => t.runner === name && !isTerminal(t));
   const lost = orphaned.reduce((m, t) => setTask(m, { ...t, state: "lost", statusText: `runner ${name} was removed` }), { ...model, runners, agents });
-  return [lost, [{ type: "RetireRunner", runner: runnerSpec(runner), teardown: teardown && runner.origin?.teardown != null }]];
+  return [lost, [{ type: "RetireRunner", runner: runnerSpec(runner), teardown: teardown && canTearDown(runner) }]];
 };
 
 const withTask = (model: Model, taskId: string, f: (task: Task) => Result): Result => {

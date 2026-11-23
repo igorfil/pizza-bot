@@ -23,8 +23,7 @@ export type RuntimeDeps = {
   transports: (spec: TransportSpec) => Transport;
   aws: AwsPort;
   guides: readonly RunnerGuide[];
-  release: string;
-  pushLocalBuild?: PushLocalBuild;
+  pushLocalBuild: PushLocalBuild;
 };
 
 const localClock = (date: Date): LocalClock => ({
@@ -83,8 +82,7 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
     transports: deps.transports,
     fetch,
     sleep,
-    release: deps.release,
-    ...(deps.pushLocalBuild ? { pushLocalBuild: deps.pushLocalBuild } : {}),
+    pushLocalBuild: deps.pushLocalBuild,
   });
 
   const effectResult = async (effect: Effect): Promise<Msg | null> => {

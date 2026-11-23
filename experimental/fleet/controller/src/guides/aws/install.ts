@@ -148,8 +148,9 @@ export const uninstallScript = (): string => `#!/bin/bash
 set -uo pipefail
 systemctl disable --now fleet-runner
 rm -f /etc/systemd/system/fleet-runner.service /etc/fleet-runner.env /usr/local/bin/fleet-runner
-rm -rf /opt/fleet-agents
+rm -rf /opt/fleet-agents /tmp/fleet-local
 userdel -r fleet-runner
+rm -rf /var/lib/fleet-runner
 systemctl daemon-reload
 echo uninstalled
 `;

@@ -2139,6 +2139,12 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
 .fleet-segmented button:hover { color: var(--text); }
 .fleet-segmented button.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
 .fleet-prompt { min-height: 120px; resize: vertical; line-height: 1.5; font-family: inherit; }
+.fleet-remove-warning {
+  display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; padding: 10px 12px; font-size: 12.5px; line-height: 1.45;
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border)); border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 8%, var(--panel)); color: var(--text);
+}
+.fleet-remove-warning svg { flex: 0 0 auto; margin-top: 1px; color: var(--warn); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .fleet-runner-change { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--info); }
 .fleet-runner-empty { margin: 0; font-size: 13px; }

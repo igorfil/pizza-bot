@@ -137,15 +137,17 @@ export function RunnerGroup({
         </span>
         {down && runner.lastError && <span className="fleet-runner-error">{runner.lastError}</span>}
         <span className="fleet-agent-links-spacer" />
-        <button
-          type="button"
-          className="fleet-icon-btn fleet-agent-remove"
-          onClick={() => setConfirmRemove(true)}
-          aria-label={`Remove runner ${runner.name}`}
-          title="Remove runner"
-        >
-          <Trash2 size={13} />
-        </button>
+        {!runner.local && (
+          <button
+            type="button"
+            className="fleet-icon-btn fleet-agent-remove"
+            onClick={() => setConfirmRemove(true)}
+            aria-label={`Remove runner ${runner.name}`}
+            title="Remove runner"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </header>
       {change?.state === "failed" && (
         <p className="fleet-runner-change fleet-tone-bad" role="alert">
@@ -180,9 +182,17 @@ export function RunnerGroup({
           onCancel={() => setConfirmRemove(false)}
           onRemove={(teardown) => {
             setConfirmRemove(false);
-            void send("RemoveRunner", { name: runner.name, teardown }).catch((e: unknown) =>
-              notify({ title: "Couldn't remove the runner", description: e instanceof Error ? e.message : undefined, tone: "error" }),
-            );
+            send("RemoveRunner", { name: runner.name, teardown })
+              .then(() =>
+                runner.instanceId
+                  ? notify({
+                      title: `Removed ${runner.name} and its agents`,
+                      description: `EC2 instance ${runner.instanceId} was not terminated and keeps running. Terminate it in the AWS console if you no longer need it.`,
+                      tone: "warning",
+                    })
+                  : notify({ title: `Removed ${runner.name}`, tone: "success" }),
+              )
+              .catch((e: unknown) => notify({ title: "Couldn't remove the runner", description: e instanceof Error ? e.message : undefined, tone: "error" }));
           }}
         />
       )}

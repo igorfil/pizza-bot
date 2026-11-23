@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Check, Circle, LoaderCircle, Minus, RotateCcw, X } from "lucide-react";
+import { Check, Circle, LoaderCircle, Minus, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type { FleetChecklistItem, FleetGuideSession, FleetModel, FleetRunner, FleetStepView } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
@@ -288,7 +288,9 @@ export function AddRunnerDialog({
   );
 }
 
-/** Removing a guide-made runner asks whether to also undo what the guide set up. */
+const agentsText = (n: number) => (n === 1 ? "its agent" : `its ${n} agents`);
+
+/** An EC2 runner is uninstalled with every agent on it; the instance itself is never terminated. */
 export function RemoveRunnerDialog({
   runner,
   agentCount,
@@ -300,32 +302,35 @@ export function RemoveRunnerDialog({
   onCancel: () => void;
   onRemove: (teardown: boolean) => void;
 }) {
-  const teardown = runner.origin?.teardown;
+  const instance = runner.instanceId ?? null;
   return (
     <DialogPrimitive.Root open onOpenChange={(open) => !open && onCancel()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="sidebar-modal-backdrop" />
-        <DialogPrimitive.Content className="sidebar-modal">
+        <DialogPrimitive.Content className="sidebar-modal sidebar-modal--wide">
           <DialogPrimitive.Title className="sidebar-modal-title">Remove runner {runner.name}?</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sidebar-modal-body">
-            {teardown
-              ? `The Controller forgets ${runner.name} and its ${agentCount} agent(s). It can also ${teardown.label}.`
-              : `The Controller forgets ${runner.name} and its ${agentCount} agent(s). The runner itself keeps running.`}
+            {instance
+              ? `This uninstalls the runner from ${instance} and deletes ${agentsText(agentCount)} there, including agents you created. Runs in progress stop.`
+              : `The Controller forgets ${runner.name} and ${agentsText(agentCount)}. The runner itself keeps running.`}
           </DialogPrimitive.Description>
+          {instance && (
+            <p className="fleet-remove-warning" role="note">
+              <TriangleAlert size={15} aria-hidden="true" />
+              <span>
+                The EC2 instance <strong>{instance}</strong> is not terminated. It keeps running and costing money; terminate it in the AWS console if you no longer need it.
+              </span>
+            </p>
+          )}
           <div className="sidebar-modal-actions">
             <DialogPrimitive.Close asChild>
               <button type="button" className="sidebar-modal-btn">
                 Cancel
               </button>
             </DialogPrimitive.Close>
-            <button type="button" className={`sidebar-modal-btn${teardown ? "" : " danger"}`} onClick={() => onRemove(false)}>
-              {teardown ? "Only remove from fleet" : "Remove"}
+            <button type="button" className="sidebar-modal-btn danger" onClick={() => onRemove(instance !== null)}>
+              {instance ? "Remove runner and agents" : "Remove"}
             </button>
-            {teardown && (
-              <button type="button" className="sidebar-modal-btn danger" onClick={() => onRemove(true)}>
-                Remove and {teardown.label}
-              </button>
-            )}
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

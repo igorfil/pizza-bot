@@ -14,6 +14,10 @@ export type FleetLink = { state: "up"; url: string } | { state: "down"; error: s
 export interface FleetRunner {
   name: string;
   transport: "direct" | "aws_ssm" | "ssh";
+  /** The EC2 instance an aws_ssm runner lives on. */
+  instanceId?: string | null;
+  /** The runner is on this machine (a direct link to loopback); it can't be removed from the page. */
+  local?: boolean;
   origin: FleetRunnerOrigin | null;
   link: FleetLink;
   status: FleetRunnerStatus;
