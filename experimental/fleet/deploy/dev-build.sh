@@ -1,6 +1,7 @@
 #!/bin/bash
-# TEMPORARY, for testing the AWS guide before a release exists: cross-compiles what a fleet-runner-v*
-# release publishes (static musl runner + agents tarball) from this checkout, into runner/target-linux/dist.
+# TEMPORARY, until runner releases are published: cross-compiles what a fleet-runner-v* release
+# publishes (static musl runner + agents tarball) from this checkout, into runner/target-linux/dist.
+# `npm run build` runs it for both architectures; the AWS guide copies the result (dev-push.sh).
 # Needs: brew install zig; cargo install cargo-zigbuild; rustup target add <arch>-unknown-linux-musl.
 # Usage: dev-build.sh <arm64|x86_64>
 set -euo pipefail
@@ -17,6 +18,7 @@ esac
 
 command -v zig >/dev/null || { echo "zig is missing: brew install zig" >&2; exit 1; }
 command -v cargo-zigbuild >/dev/null || { echo "cargo-zigbuild is missing: cargo install cargo-zigbuild" >&2; exit 1; }
+rustup target list --installed 2>/dev/null | grep -qx "$TARGET" || { echo "the Rust target is missing: rustup target add $TARGET" >&2; exit 1; }
 
 mkdir -p "$DIST"
 (cd "$FLEET/runner" && CARGO_TARGET_DIR="$FLEET/runner/target-linux" cargo zigbuild --release --locked --target "$TARGET")

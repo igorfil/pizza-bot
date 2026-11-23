@@ -190,11 +190,13 @@ The set-up steps (detect through bedrock, plus the local-build copy) show as a c
 a failed one is marked, and an adopted runner's install is shown as skipped.
 
 **Temporary, until runner releases are published:** the guide always installs this checkout's
-build; nothing needs to be set. Before installing, it runs `deploy/dev-push.sh`:
-`deploy/dev-build.sh` cross-compiles the static musl runner with `cargo zigbuild` (needs
-`brew install zig`, `cargo install cargo-zigbuild`, `rustup target add aarch64-unknown-linux-musl`)
-and packs the agents. Then it scp's both over SSM to `/tmp/fleet-local`, using a 60-second EC2
-Instance Connect key, and the install script reads them through `file://`.
+build; nothing needs to be set. `npm run build` makes it: `deploy/dev-build.sh` cross-compiles the
+static musl runner for arm64 and x86_64 with `cargo zigbuild` and packs the agents into
+`runner/target-linux/dist` (needs `brew install zig`, `cargo install cargo-zigbuild`,
+`rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl`; without zig the build
+skips this with a warning, as on CI). The guide's "Copy the local build" step runs
+`deploy/dev-push.sh`, which scp's that build over SSM to `/tmp/fleet-local` using a 60-second EC2
+Instance Connect key, and the install script reads it through `file://`.
 `.github/workflows/fleet-runner-release.yml` already publishes the same assets
 (`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`) on a `fleet-runner-v*` tag; once the guide
 downloads those instead, remove `local-build.ts`, the `push` step and both scripts.

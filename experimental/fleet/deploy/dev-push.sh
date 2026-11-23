@@ -1,7 +1,7 @@
 #!/bin/bash
-# TEMPORARY, for testing the AWS guide before a release exists: builds this checkout's runner and agents
-# (dev-build.sh) and copies them with scp over SSM into /tmp/fleet-local on the instance, where the
-# guide's install script reads them through file:// instead of downloading a release.
+# TEMPORARY, until runner releases are published: copies the Linux runner and agents that `npm run build`
+# made (dev-build.sh) with scp over SSM into /tmp/fleet-local on the instance, where the guide's install
+# script reads them through file:// instead of downloading a release.
 # A throwaway key goes to the instance through EC2 Instance Connect (valid 60 s), so no key needs to be
 # set up there; if that fails, your own ssh keys are tried.
 # Usage: dev-push.sh <instance-id> <region> <arm64|x86_64>; AWS credentials come from the environment.
@@ -20,10 +20,10 @@ case "$ARCH" in
   *) echo "unknown arch $ARCH" >&2; exit 2 ;;
 esac
 
-if [ "${FLEET_DEV_SKIP_BUILD:-0}" != 1 ]; then
-  bash "$FLEET/deploy/dev-build.sh" "$ARCH"
-fi
-[ -f "$DIST/$ASSET" ] && [ -f "$DIST/fleet-agents.tar.gz" ] || { echo "no local build in $DIST" >&2; exit 1; }
+[ -f "$DIST/$ASSET" ] && [ -f "$DIST/fleet-agents.tar.gz" ] || {
+  echo "there is no $ARCH Linux runner build yet; run npm run build (it needs zig and cargo-zigbuild)" >&2
+  exit 1
+}
 
 KEYDIR="$(mktemp -d)"
 trap 'rm -rf "$KEYDIR"' EXIT

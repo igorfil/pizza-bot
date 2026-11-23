@@ -1,5 +1,5 @@
-// TEMPORARY: the AWS guide installs this checkout's runner build, copied to the instance, until runner
-// releases are published. Remove with deploy/dev-build.sh and deploy/dev-push.sh once releases are tested.
+// TEMPORARY: the AWS guide installs the Linux runner build `npm run build` made, copied to the instance,
+// until runner releases are published. Remove with deploy/dev-build.sh and deploy/dev-push.sh once releases are tested.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { fail, ok, type Outcome } from "../../outcome.js";
@@ -12,7 +12,7 @@ import type { Arch } from "./port.js";
 export const LOCAL_RELEASE_DIR = "file:///tmp/fleet-local";
 
 const SCRIPT = fileURLToPath(new URL("../../../../deploy/dev-push.sh", import.meta.url));
-const TIMEOUT_MS = 20 * 60_000;
+const TIMEOUT_MS = 5 * 60_000;
 
 export type PushLocalBuild = (instanceId: string, region: string, arch: Arch, credentials: AwsCredentials) => Promise<Outcome<void>>;
 

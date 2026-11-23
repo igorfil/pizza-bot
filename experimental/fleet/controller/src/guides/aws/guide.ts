@@ -264,7 +264,7 @@ const waitDetect = async (state: AwsState, ports: GuidePorts): Promise<GuideResu
     if (!result.value.ok) return failed({ ...state, step: "detect" }, "Looking for a runner", result.value.output.trim().split("\n").slice(-5).join("\n") || "the check script failed");
     const found = parseDetect(result.value.output);
     if (found) return adopt(state, found.port, found.token, ports);
-    return working({ ...state, step: "push" }, "Installing the runner", "Building this checkout's runner and copying it to the instance…");
+    return working({ ...state, step: "push" }, "Installing the runner", "Copying the runner that npm run build made to the instance…");
   }
   const polls = (state.polls ?? 0) + 1;
   if (polls > MAX_DETECT_POLLS) return failed({ ...state, step: "detect" }, "Looking for a runner", `the check script did not finish in ${(MAX_DETECT_POLLS * POLL_MS) / 60_000} minutes`);
@@ -283,7 +283,7 @@ const runnerToken = async (state: AwsState, ports: GuidePorts): Promise<Outcome<
   return stored.ok ? ok({ key, token }) : stored;
 };
 
-// TEMPORARY: until runner releases are published, the runner installed is this checkout's build, copied over scp (local-build.ts).
+// TEMPORARY: until runner releases are published, the runner installed is the Linux build `npm run build` made, copied over scp (local-build.ts).
 const push = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
   const pushed = await ports.pushLocalBuild(state.instanceId!, state.region!, state.found?.[state.instanceId!]?.arch ?? "arm64", state.credentials!);
   return pushed.ok ? working({ ...state, step: "install" }, "Installing the runner", "Starting…") : failed(state, "Installing the runner", pushed.error);
