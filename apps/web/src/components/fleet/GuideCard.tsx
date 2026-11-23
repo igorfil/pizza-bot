@@ -1,9 +1,9 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Check, Circle, LoaderCircle, Minus, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import type { FleetChecklistItem, FleetGuideSession, FleetModel, FleetRunner, FleetStepView } from "./fleet-types.js";
+import type { FleetAgent, FleetChecklistItem, FleetGuideSession, FleetModel, FleetRunner, FleetStepView } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
-import { initialDraft } from "./fleet-view-model.js";
+import { duration, initialDraft, stuckFor } from "./fleet-view-model.js";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
@@ -204,10 +204,11 @@ function StepFields({ view, draft, onChange }: { view: FleetStepView; draft: Rec
 }
 
 /** Renders whatever step the Controller sends; it knows nothing about any particular guide. */
-export function GuideCard({ session, send }: { session: FleetGuideSession; send: FleetSend }) {
+export function GuideCard({ session, send, now = 0 }: { session: FleetGuideSession; send: FleetSend; now?: number }) {
   const [draft, setDraft] = useState(() => initialDraft(session.view));
   const [error, setError] = useState<string | null>(null);
   const { view, status } = session;
+  const stuck = stuckFor(now, session);
 
   const act = async (f: () => Promise<unknown>) => {
     setError(null);
@@ -240,12 +241,17 @@ export function GuideCard({ session, send }: { session: FleetGuideSession; send:
           {session.error ?? error}
         </div>
       )}
+      {stuck !== null && (
+        <p className="fleet-guide-stuck" role="status">
+          No progress for {duration(stuck)}. If this step seems stuck, retry it; set-up steps are safe to repeat.
+        </p>
+      )}
       <div className="fleet-guide-actions">
         <button type="button" className="fleet-link-btn fleet-link-danger" onClick={() => void act(() => send("CancelGuide", { sessionId: session.id }))}>
           Cancel setup
         </button>
         <span className="fleet-agent-links-spacer" />
-        {status === "failed" && (
+        {(status === "failed" || stuck !== null) && (
           <button type="button" className="btn-secondary fleet-small-btn" onClick={() => void act(() => send("GuideRetry", { sessionId: session.id }))}>
             <RotateCcw size={13} /> Retry
           </button>
@@ -280,11 +286,42 @@ export function AddRunnerDialog({
   return (
     <FleetDialog title={session ? `Add runner · ${guide?.title ?? session.guide}` : "Add runner"} onClose={onClose}>
       {session ? (
-        <GuideCard key={stepKey} session={session} send={send} />
+        <GuideCard key={stepKey} session={session} send={send} now={model.now} />
       ) : (
         <GuidePicker model={model} send={send} onStarted={onStarted} />
       )}
     </FleetDialog>
+  );
+}
+
+/** A created agent is deleted from its runner; a shipped one is turned off and can be added back. */
+export function DeleteAgentDialog({ agent, runner, onCancel, onConfirm }: { agent: FleetAgent; runner: FleetRunner; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <DialogPrimitive.Root open onOpenChange={(open) => !open && onCancel()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="sidebar-modal-backdrop" />
+        <DialogPrimitive.Content className="sidebar-modal">
+          <DialogPrimitive.Title className="sidebar-modal-title">
+            {agent.created ? "Delete" : "Remove"} {agent.name}?
+          </DialogPrimitive.Title>
+          <DialogPrimitive.Description className="sidebar-modal-body">
+            {agent.created
+              ? `This deletes ${agent.name} and its system prompt from ${runner.name}. Its past results stay in the Inbox.`
+              : `${runner.name} stops running ${agent.name}. It stays on the machine, so you can turn it back on with Add agent.`}
+          </DialogPrimitive.Description>
+          <div className="sidebar-modal-actions">
+            <DialogPrimitive.Close asChild>
+              <button type="button" className="sidebar-modal-btn">
+                Cancel
+              </button>
+            </DialogPrimitive.Close>
+            <button type="button" className="sidebar-modal-btn danger" onClick={onConfirm}>
+              {agent.created ? "Delete agent" : "Remove agent"}
+            </button>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 

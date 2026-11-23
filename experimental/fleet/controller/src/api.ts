@@ -152,6 +152,8 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
       if (systemPrompt.length > 20_000) return "the system prompt must be at most 20000 characters";
       return { type, runner: p.runner, agent: { name, model, systemPrompt } };
     }
+    case "DeleteAgent":
+      return str(p.agent) ? { type, agent: p.agent } : "DeleteAgent needs agent (<runner>/<id>)";
     case "RemoveRunner":
       return str(p.name) ? { type, name: p.name, teardown: p.teardown === true || p.teardown === "true" } : "RemoveRunner needs name";
     case "StartGuide":

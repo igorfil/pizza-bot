@@ -40,6 +40,7 @@ const model: Model = {
       view: { title: "Add", fields: [{ id: "name", label: "Name", kind: "text" }, { id: "token", label: "Token", kind: "secret" }] },
       error: null,
       secretKeys: [],
+      attempt: 0,
       createdAt: 0,
       updatedAt: 0,
     },

@@ -201,12 +201,17 @@ describe("AgentsView", () => {
   });
 
   it("shows agents being added to a runner", () => {
-    const ec2 = { ...model.runners.ec2!, available: [{ id: "slow", name: "Slow", description: "" }], agentsChange: { state: "adding" as const, agents: ["slow"] } };
+    const ec2 = { ...model.runners.ec2!, available: [{ id: "slow", name: "Slow", description: "" }], agentsChange: { action: "add" as const, agents: ["slow"], error: null } };
     expect(view({ ...model, runners: { ec2 } })).toContain("Adding Slow…");
   });
 
+  it("explains why removing an agent failed", () => {
+    const ec2 = { ...model.runners.ec2!, agentsChange: { action: "remove" as const, agents: ["Dad jokes"], error: "HTTP 500" } };
+    expect(view({ ...model, runners: { ec2 } })).toContain("Couldn&#x27;t remove Dad jokes: HTTP 500");
+  });
+
   it("explains why adding agents failed", () => {
-    const ec2 = { ...model.runners.ec2!, agentsChange: { state: "failed" as const, agents: ["slow"], error: "HTTP 500" } };
+    const ec2 = { ...model.runners.ec2!, agentsChange: { action: "add" as const, agents: ["slow"], error: "HTTP 500" } };
     expect(view({ ...model, runners: { ec2 } })).toContain("Couldn&#x27;t add slow: HTTP 500");
   });
 });
@@ -238,6 +243,21 @@ describe("Add agent", () => {
 describe("AgentCard", () => {
   const card = (m: FleetModel) =>
     wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} />);
+
+  it("has a delete button that names what it does", () => {
+    const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true } } };
+    expect([card(model).includes('aria-label="Remove agent Dad jokes"'), card(created).includes('aria-label="Delete agent Dad jokes"')]).toEqual([true, true]);
+  });
+
+  it("can't be deleted while it runs", () => {
+    const running = { ...model, tasks: { a: { ...jokes, id: "a", state: "working" as const } } };
+    expect(card(running)).toMatch(/<button[^>]*class="fleet-agent-delete"[^>]*disabled=""/);
+  });
+
+  it("shows that it's being removed, without actions", () => {
+    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} removing />);
+    expect([html.includes("Removing…"), html.includes("fleet-agent-delete")]).toEqual([true, false]);
+  });
 
   it("keeps the agent's key out of the card text", () => {
     expect(card(model)).not.toContain(">ec2/dadjokes<");
@@ -356,6 +376,17 @@ describe("runner guides", () => {
       /<li class="current" aria-current="step">.*lucide-loader-circle.*Install the runner.*Installing… \(35s\)/.test(html),
       /<li class="pending">.*Verify Bedrock access/.test(html),
     ]).toEqual([true, true, true]);
+  });
+
+  it("offers Retry once a running step has made no progress for a minute", () => {
+    const running = session({ status: "working", updatedAt: NOW - 70_000, view: { title: "Installing", progress: "Installing…", fields: [] } });
+    const html = wrap(<GuideCard session={running} send={noop} now={NOW} />);
+    expect([html.includes("No progress for 1m 10s"), html.includes("Retry")]).toEqual([true, true]);
+  });
+
+  it("doesn't offer Retry while a step is making progress", () => {
+    const running = session({ status: "working", updatedAt: NOW - 5_000, view: { title: "Installing", progress: "Installing…", fields: [] } });
+    expect(wrap(<GuideCard session={running} send={noop} now={NOW} />).includes("Retry")).toBe(false);
   });
 
   it("can always cancel the setup", () => {

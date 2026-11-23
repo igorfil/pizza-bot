@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Play, Plus, Server, Square, Trash2, X } from "lucide-react";
+import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Play, Plus, RotateCcw, Server, Square, Trash2, X } from "lucide-react";
 import { AddAgentDialog } from "./AddAgentDialog.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
-import { AddRunnerDialog, RemoveRunnerDialog } from "./GuideCard.js";
+import { AddRunnerDialog, DeleteAgentDialog, RemoveRunnerDialog } from "./GuideCard.js";
 import {
   activeRun,
   agentNames,
@@ -13,6 +13,7 @@ import {
   ago,
   guideSessionsOf,
   guideStatusText,
+  stuckFor,
   defaultInput,
   inputLabel,
   isFinished,
@@ -32,6 +33,7 @@ const stripTone = (t: FleetTask) => (isFinished(t) ? taskTone(t.state) : "runnin
 const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
 
 export function AgentsView({ model, send }: { model: FleetModel; send: FleetSend }) {
+  const notify = useAppToast();
   const [adding, setAdding] = useState(false);
   const [guide, setGuide] = useState<{ id: string; seen: boolean } | null>(null);
   const agents = agentsOf(model);
@@ -72,6 +74,19 @@ export function AgentsView({ model, send }: { model: FleetModel; send: FleetSend
               </span>
               <span className="fleet-muted fleet-guide-row-status">{guideStatusText(s)}</span>
               <span className="fleet-agent-links-spacer" />
+              {(s.status === "failed" || stuckFor(model.now, s) !== null) && (
+                <button
+                  type="button"
+                  className="fleet-link-btn"
+                  onClick={() =>
+                    void send("GuideRetry", { sessionId: s.id }).catch((e: unknown) =>
+                      notify({ title: "Couldn't retry the step", description: e instanceof Error ? e.message : undefined, tone: "error" }),
+                    )
+                  }
+                >
+                  <RotateCcw size={12} /> Retry
+                </button>
+              )}
               <button type="button" className="fleet-link-btn" onClick={() => setGuide({ id: s.id, seen: true })}>
                 Open
               </button>
@@ -125,6 +140,7 @@ export function RunnerGroup({
   const Where = placeIcon(runner);
   const down = runner.status === "unreachable";
   const change = runner.agentsChange ?? null;
+  const adding = change?.action === "add" && change.error === null ? change : null;
   return (
     <section className={`fleet-runner${down ? " down" : ""}`} aria-label={`Runner ${runner.name}`}>
       <header className="fleet-runner-head">
@@ -149,9 +165,9 @@ export function RunnerGroup({
           </button>
         )}
       </header>
-      {change?.state === "failed" && (
+      {change?.error && (
         <p className="fleet-runner-change fleet-tone-bad" role="alert">
-          Couldn't add {agentNames(model, runner, change.agents)}: {change.error}
+          Couldn't {change.action} {agentNames(model, runner, change.agents)}: {change.error}
         </p>
       )}
       {agents.length === 0 && runner.lastSeenAt === null ? (
@@ -159,18 +175,25 @@ export function RunnerGroup({
       ) : (
         <div className="fleet-agent-grid">
           {agents.map((a) => (
-            <AgentCard key={a.key} model={model} agent={a} runner={runner} send={send} />
+            <AgentCard
+              key={a.key}
+              model={model}
+              agent={a}
+              runner={runner}
+              send={send}
+              removing={change?.action === "remove" && change.error === null && change.agents.includes(a.name)}
+            />
           ))}
           <button
             type="button"
             className="fleet-agent-card fleet-agent-add"
             onClick={() => setAddingAgent(true)}
-            disabled={change?.state === "adding"}
-            aria-label={change?.state === "adding" ? `Adding ${agentNames(model, runner, change.agents)} to ${runner.name}` : `Add agent to ${runner.name}`}
+            disabled={change !== null && change.error === null}
+            aria-label={adding ? `Adding ${agentNames(model, runner, adding.agents)} to ${runner.name}` : `Add agent to ${runner.name}`}
           >
-            {change?.state === "adding" ? <LoaderCircle size={22} strokeWidth={1.5} className="spin" /> : <Plus size={22} strokeWidth={1.5} />}
-            {change?.state === "adding" ? `Adding ${agentNames(model, runner, change.agents)}…` : "Add agent"}
-            {agents.length === 0 && change?.state !== "adding" && <span className="fleet-muted">Choose what {runner.name} runs.</span>}
+            {adding ? <LoaderCircle size={22} strokeWidth={1.5} className="spin" /> : <Plus size={22} strokeWidth={1.5} />}
+            {adding ? `Adding ${agentNames(model, runner, adding.agents)}…` : "Add agent"}
+            {agents.length === 0 && !adding && <span className="fleet-muted">Choose what {runner.name} runs.</span>}
           </button>
         </div>
       )}
@@ -205,13 +228,16 @@ export function AgentCard({
   agent,
   runner,
   send,
+  removing = false,
 }: {
   model: FleetModel;
   agent: FleetAgent;
   runner: FleetRunner;
   send: FleetSend;
+  removing?: boolean;
 }) {
   const notify = useAppToast();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
   const [running, setRunning] = useState(false);
   const [input, setInput] = useState("");
@@ -248,13 +274,38 @@ export function AgentCard({
     }
   };
 
+  const remove = () => {
+    setConfirmDelete(false);
+    send("DeleteAgent", { agent: agent.key }).catch((e: unknown) =>
+      notify({ title: `Couldn't remove ${agent.name}`, description: e instanceof Error ? e.message : undefined, tone: "error" }),
+    );
+  };
+
   return (
-    <article className={`fleet-agent-card${down ? " down" : ""}`} aria-label={agent.name}>
+    <article className={`fleet-agent-card${down ? " down" : ""}${removing ? " removing" : ""}`} aria-label={agent.name} aria-busy={removing || undefined}>
       <header className="fleet-agent-head">
         <h3 className="fleet-agent-name" title={agent.key}>
           {agent.name}
         </h3>
       </header>
+      {!down && !removing && (
+        <button
+          type="button"
+          className="fleet-agent-delete"
+          onClick={() => setConfirmDelete(true)}
+          disabled={!!active}
+          aria-label={`${agent.created ? "Delete" : "Remove"} agent ${agent.name}`}
+          title={active ? "Wait for the run to finish, or cancel it, before removing the agent" : agent.created ? "Delete agent" : "Remove agent"}
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+      {removing && (
+        <p className="fleet-agent-live" role="status">
+          <LoaderCircle size={13} className="spin" aria-hidden="true" /> Removing…
+        </p>
+      )}
+      {confirmDelete && <DeleteAgentDialog agent={agent} runner={runner} onCancel={() => setConfirmDelete(false)} onConfirm={remove} />}
       <p className="fleet-agent-desc">{agent.description}</p>
 
       {down ? (

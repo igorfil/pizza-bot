@@ -89,6 +89,13 @@ export const agentsSummary = (model: FleetModel): string =>
 export const agentNames = (model: FleetModel, r: FleetRunner, ids: string[]): string =>
   ids.map((id) => model.agents[`${r.name}/${id}`]?.name ?? r.available?.find((a) => a.id === id)?.name ?? id).join(", ");
 
+/** Long enough that every set-up step normally reports progress first: polls do every 5s, the tunnel check gives up at 45s. */
+export const STUCK_MS = 60_000;
+
+/** How long a running guide step has gone without progress, once that looks stuck; else null. */
+export const stuckFor = (now: number, s: FleetGuideSession): number | null =>
+  s.status === "working" && now - s.updatedAt >= STUCK_MS ? now - s.updatedAt : null;
+
 /** One line for a guide that is still open, shown on the page while its dialog is closed. */
 export const guideStatusText = (s: FleetGuideSession): string =>
   s.status === "working" ? (s.view.progress ?? s.view.title) : s.status === "failed" ? `Stopped: ${s.error ?? s.view.title}` : `Waiting for you: ${s.view.title}`;

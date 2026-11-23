@@ -39,7 +39,8 @@ export type Link = { state: "down"; error: string | null } | { state: "up"; url:
 export type AgentInput = { label: string; hint: string; example: string };
 
 /** What a runner's `GET /agents` reports for one agent. */
-export type AgentInfo = { id: string; name: string; description: string; input: AgentInput | null };
+/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. */
+export type AgentInfo = { id: string; name: string; description: string; input: AgentInput | null; created?: boolean };
 
 /** A host process: one per machine. Health and reconnect are per runner; the link comes first. */
 export type Runner = NewRunner & {
@@ -64,7 +65,8 @@ export type Runner = NewRunner & {
 /** The bare-minimum agent: a model and a system prompt, run by the runner's built-in harness. */
 export type NewAgentSpec = { name: string; model: string; systemPrompt: string };
 
-export type AgentsChange = { state: "adding"; agents: string[] } | { state: "failed"; agents: string[]; error: string };
+/** In flight while `error` is null; `agents` are names or ids, for display. */
+export type AgentsChange = { action: "add" | "remove"; agents: string[]; error: string | null };
 
 /** An agent hosted by a runner; the unit users run, schedule and see. Key: `<runner>/<id>`. */
 export type Agent = AgentInfo & {
@@ -175,6 +177,8 @@ export type GuideSession = {
   error: string | null;
   /** Vault keys of secrets typed into this session; the unused ones are deleted when it ends. */
   secretKeys: string[];
+  /** Bumped by a retry, so a step abandoned while still running can't overwrite the new one. */
+  attempt: number;
   createdAt: number;
   updatedAt: number;
 };
@@ -212,6 +216,7 @@ export type IntentMsg =
   | { type: "RemoveRunner"; name: string; teardown: boolean }
   | { type: "AddAgents"; runner: string; agents: string[] }
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
+  | { type: "DeleteAgent"; agent: string }
   | { type: "CreateTask"; taskId: string; agent: string; prompt: string }
   | { type: "CancelTask"; taskId: string }
   | { type: "AckInbox"; taskId: string }
@@ -233,7 +238,7 @@ export type WorldMsg =
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
   | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
-  | { type: "AgentsSet"; runner: string; added: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
+  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
   | { type: "AgentsSetFailed"; runner: string; error: string }
   | { type: "RunnerFailed"; name: string; error: string }
   | { type: "RunnerRetired"; name: string; text: string; ok: boolean }
@@ -246,7 +251,7 @@ export type WorldMsg =
   | { type: "CancelFailed"; taskId: string; error: string }
   | { type: "ChatReplied"; chatId: string; text: string }
   | { type: "ChatFailed"; chatId: string; error: string }
-  | { type: "GuideStepped"; sessionId: string; result: GuideResult };
+  | { type: "GuideStepped"; sessionId: string; attempt?: number; result: GuideResult };
 
 export type Msg = IntentMsg | WorldMsg;
 
@@ -259,11 +264,12 @@ export type Effect =
   | { type: "CheckRunner"; runner: string; url: string }
   | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[] }
   | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
+  | { type: "DeleteRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string }
   | { type: "Dispatch"; taskId: string; endpoint: Endpoint; prompt: string }
   | { type: "GetTask"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "Cancel"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "ChatComplete"; chatId: string; system: string; turns: LlmTurn[] }
-  | { type: "RunGuideStep"; sessionId: string; guide: string; state: GuideState | null; input: GuideInput | null }
+  | { type: "RunGuideStep"; sessionId: string; attempt: number; guide: string; state: GuideState | null; input: GuideInput | null }
   | { type: "DeleteSecrets"; keys: string[] }
   | { type: "RetireRunner"; runner: NewRunner; teardown: boolean };
 
@@ -277,6 +283,7 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "RemoveRunner",
   "AddAgents",
   "CreateAgent",
+  "DeleteAgent",
   "CreateTask",
   "CancelTask",
   "AckInbox",

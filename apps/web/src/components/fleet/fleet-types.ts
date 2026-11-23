@@ -39,7 +39,8 @@ export interface FleetAgentInfo {
   description: string;
 }
 
-export type FleetAgentsChange = { state: "adding"; agents: string[] } | { state: "failed"; agents: string[]; error: string };
+/** In flight while `error` is null. */
+export type FleetAgentsChange = { action: "add" | "remove"; agents: string[]; error: string | null };
 
 /** What users run, schedule and see. Key: `<runner>/<id>`. */
 export interface FleetAgent {
@@ -50,6 +51,8 @@ export interface FleetAgent {
   description: string;
   input: { label: string; hint: string; example: string } | null;
   schedule: { at: string; prompt: string } | null;
+  /** Made with Create new; deleting it deletes it, while a shipped agent is only turned off. */
+  created?: boolean;
 }
 
 export type FleetTaskState =

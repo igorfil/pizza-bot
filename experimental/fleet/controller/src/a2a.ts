@@ -88,7 +88,7 @@ type IndexJson = {
   canCreate?: unknown;
   created?: unknown;
   available?: NonNullable<IndexJson["agents"]>;
-  agents?: { id?: unknown; name?: unknown; description?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
+  agents?: { id?: unknown; name?: unknown; description?: unknown; created?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
 };
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -100,6 +100,7 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
         name: str(a.name) || str(a.id),
         description: str(a.description),
         input: a.input ? { label: str(a.input.label), hint: str(a.input.hint), example: str(a.input.example) } : null,
+        ...(a.created === true ? { created: true } : {}),
       }
     : null;
 
@@ -136,6 +137,20 @@ export const createAgent = (url: string, token: string, agent: NewAgentSpec): Pr
     if (res.status === 405) throw new Error("this runner can't create agents; update the runner");
     if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
     return { ...toIndex(body), created: str(body.created) };
+  });
+
+/** Deletes a created agent or turns off a shipped one; the runner answers with its new index. */
+export const deleteAgent = (url: string, token: string, id: string): Promise<Outcome<RunnerIndex>> =>
+  attempt(async () => {
+    const res = await fetch(`${url}/agents/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
+    if (res.status === 405) throw new Error("this runner can't delete agents; update the runner");
+    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
+    return toIndex(body);
   });
 
 /** Replaces the agents the runner serves; it answers with its new index. */

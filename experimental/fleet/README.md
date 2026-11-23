@@ -175,6 +175,7 @@ Intents (only these are accepted over the API; world Msgs are rejected):
 |---|---|
 | `AddRunner` | `name, token`, and `url` (direct) or `transport` (below) |
 | `AddAgents` | `runner`, `agents` (ids from the runner's `available`); the runner starts serving them |
+| `DeleteAgent` | `agent` (`<runner>/<id>`); a created agent is deleted from its runner, a shipped one turned off. Refused while it has a run in progress |
 | `CreateAgent` | `runner`, `name`, `model` (one of the model's `agentModels`), `systemPrompt`; the runner creates and serves a prompt agent |
 | `UpdateRunner` | `name`, plus any of `url`/`transport`, `token`; the link reopens with the new config |
 | `RemoveRunner` | `name` |

@@ -117,9 +117,14 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
         if (!guide) return null;
         const state = effect.state ?? guide.start();
         try {
-          return { type: "GuideStepped", sessionId: effect.sessionId, result: await guide.step(state, effect.input, ports(effect.sessionId)) };
+          return { type: "GuideStepped", sessionId: effect.sessionId, attempt: effect.attempt, result: await guide.step(state, effect.input, ports(effect.sessionId)) };
         } catch (e) {
-          return { type: "GuideStepped", sessionId: effect.sessionId, result: { kind: "failed", state, view: { title: guide.title, fields: [] }, error: errorText(e) } };
+          return {
+            type: "GuideStepped",
+            sessionId: effect.sessionId,
+            attempt: effect.attempt,
+            result: { kind: "failed", state, view: { title: guide.title, fields: [] }, error: errorText(e) },
+          };
         }
       }
       case "DeleteSecrets":
@@ -137,6 +142,13 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
         const r = ep.ok ? await a2a.createAgent(ep.value.url, ep.value.token, effect.agent) : ep;
         return r.ok
           ? { type: "AgentsSet", runner: effect.runner, added: [r.value.created], ...indexFields(r.value) }
+          : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
+      }
+      case "DeleteRunnerAgent": {
+        const ep = await withToken(effect.endpoint);
+        const r = ep.ok ? await a2a.deleteAgent(ep.value.url, ep.value.token, effect.agentId) : ep;
+        return r.ok
+          ? { type: "AgentsSet", runner: effect.runner, added: [], removed: [effect.agentId], ...indexFields(r.value) }
           : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
       }
       case "RetireRunner": {

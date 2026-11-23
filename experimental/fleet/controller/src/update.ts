@@ -4,6 +4,7 @@ import { addRunner, notify, runnerSpec, setRunner, vaultKeys } from "./runners.j
 import type {
   Agent,
   AgentInfo,
+  AgentsChange,
   Effect,
   Endpoint,
   LocalClock,
@@ -117,7 +118,7 @@ const resyncAll = (model: Model): Model => {
         linkFailures: 0,
         linkRetryAt: 0,
         // A change in flight when the Controller stopped never reports back; the next index tells.
-        agentsChange: r.agentsChange?.state === "adding" ? null : (r.agentsChange ?? null),
+        agentsChange: r.agentsChange?.error ? r.agentsChange : null,
       },
     ]),
   );
@@ -342,53 +343,70 @@ const updateRunner = (model: Model, name: string, transport: TransportSpec | nul
   return [notify(setRunner(model, next), "info", `runner ${name} updated`), stale.length > 0 ? [{ type: "DeleteSecrets", keys: stale }] : []];
 };
 
+type ChangeContext = { runner: Runner; url: string; fail: (error: string) => Result; start: (effect: Effect) => Result };
+
 /** Runs `change` against a reachable runner with no other agent change in flight; a refusal stays on the runner. */
-const changeAgents = (model: Model, name: string, agents: string[], change: (runner: Runner, url: string, fail: (error: string) => Result) => Result): Result => {
+const changeAgents = (model: Model, name: string, action: AgentsChange["action"], agents: string[], change: (c: ChangeContext) => Result): Result => {
   const runner = model.runners[name];
   if (!runner) return [notify(model, "error", `unknown runner ${name}`), []];
-  const fail = (error: string): Result => [setRunner(model, { ...runner, agentsChange: { state: "failed", agents, error } }), []];
-  if (runner.agentsChange?.state === "adding") return [model, []];
+  const fail = (error: string): Result => [setRunner(model, { ...runner, agentsChange: { action, agents, error } }), []];
+  const start = (effect: Effect): Result => [setRunner(model, { ...runner, agentsChange: { action, agents, error: null } }), [effect]];
+  if (runner.agentsChange && runner.agentsChange.error === null) return [model, []];
   if (runner.status !== "healthy" || runner.link.state !== "up") return fail(`${name} isn't reachable right now`);
-  return change(runner, runner.link.url, fail);
+  return change({ runner, url: runner.link.url, fail, start });
 };
-
-const changing = (model: Model, runner: Runner, agents: string[], effect: Effect): Result => [
-  setRunner(model, { ...runner, agentsChange: { state: "adding", agents } }),
-  [effect],
-];
 
 /** Asks the runner to serve what it serves now plus `ids`; the runner answers with its new index. */
 const addAgents = (model: Model, name: string, ids: string[]): Result =>
-  changeAgents(model, name, ids, (runner, url, fail) => {
+  changeAgents(model, name, "add", ids, ({ runner, url, fail, start }) => {
     if (!runner.available) return fail(`${name} can't change its agents; update the runner`);
     const unknown = ids.find((id) => !runner.available!.some((a) => a.id === id));
     if (unknown) return fail(`${name} has no agent ${unknown} to add`);
     const served = Object.values(model.agents).filter((a) => a.runner === name).map((a) => a.id);
     const agents = [...new Set([...served, ...ids])].sort();
-    return changing(model, runner, ids, { type: "SetRunnerAgents", runner: name, endpoint: { url, token: runner.token }, agents, added: ids });
+    return start({ type: "SetRunnerAgents", runner: name, endpoint: { url, token: runner.token }, agents, added: ids });
   });
 
 /** The change shows the new agent's name until the runner answers with its id. */
 const createAgent = (model: Model, name: string, agent: NewAgentSpec): Result =>
-  changeAgents(model, name, [agent.name], (runner, url, fail) =>
+  changeAgents(model, name, "add", [agent.name], ({ runner, url, fail, start }) =>
     runner.canCreateAgents
-      ? changing(model, runner, [agent.name], { type: "CreateRunnerAgent", runner: name, endpoint: { url, token: runner.token }, agent })
+      ? start({ type: "CreateRunnerAgent", runner: name, endpoint: { url, token: runner.token }, agent })
       : fail(`${name} can't create agents; update the runner`),
   );
+
+/** Deleting would orphan a run in progress, so it waits until the agent is idle. */
+const deleteAgent = (model: Model, key: string): Result => {
+  const agent = model.agents[key];
+  if (!agent) return [notify(model, "error", `unknown agent ${key}`), []];
+  return changeAgents(model, agent.runner, "remove", [agent.name], ({ runner, url, fail, start }) =>
+    Object.values(model.tasks).some((t) => t.runner === agent.runner && t.agent === agent.id && !isTerminal(t) && t.state !== "queued")
+      ? fail(`${agent.name} has a run in progress; cancel it or wait for it to finish`)
+      : start({ type: "DeleteRunnerAgent", runner: runner.name, endpoint: { url, token: runner.token }, agentId: agent.id }),
+  );
+};
 
 const agentsSet = (model: Model, msg: Extract<Msg, { type: "AgentsSet" }>): Result => {
   const runner = model.runners[msg.runner];
   if (!runner) return [model, []];
-  const [next, effects] = runnerOk(setRunner(model, { ...runner, agentsChange: null }), msg.runner, msg);
+  const removed = msg.removed ?? [];
+  const removedNames = removed.map((id) => model.agents[agentKey(msg.runner, id)]?.name ?? id);
+  // Runs still waiting for the runner would otherwise be sent to an agent that's gone, so cancel them before syncing.
+  const canceled = Object.values(model.tasks)
+    .filter((t) => t.runner === msg.runner && removed.includes(t.agent) && t.state === "queued")
+    .reduce((m, t) => setTask(m, { ...t, state: "canceled", statusText: "the agent was deleted" }), setRunner(model, { ...runner, agentsChange: null }));
+  const [next, effects] = runnerOk(canceled, msg.runner, msg);
   const names = msg.agents.filter((a) => msg.added.includes(a.id)).map((a) => a.name);
-  return [notify(next, "info", `added ${names.join(", ")} to ${msg.runner}`), effects];
+  const text = removed.length > 0 ? `removed ${removedNames.join(", ")} from ${msg.runner}` : `added ${names.join(", ")} to ${msg.runner}`;
+  return [notify(next, "info", text), effects];
 };
 
 const agentsSetFailed = (model: Model, name: string, error: string): Model => {
   const runner = model.runners[name];
   if (!runner) return model;
+  const action = runner.agentsChange?.action ?? "add";
   const agents = runner.agentsChange?.agents ?? [];
-  return notify(setRunner(model, { ...runner, agentsChange: { state: "failed", agents, error } }), "error", `couldn't add agents to ${name}: ${error}`);
+  return notify(setRunner(model, { ...runner, agentsChange: { action, agents, error } }), "error", `couldn't ${action} agents on ${name}: ${error}`);
 };
 
 /** EC2 runners can always be uninstalled, including ones the guide adopted before that was offered. */
@@ -458,6 +476,9 @@ export const update = (model: Model, msg: Msg): Result => {
 
     case "CreateAgent":
       return createAgent(model, msg.runner, msg.agent);
+
+    case "DeleteAgent":
+      return deleteAgent(model, msg.agent);
 
     case "AgentsSet":
       return agentsSet(model, msg);
@@ -544,7 +565,7 @@ export const update = (model: Model, msg: Msg): Result => {
       return cancelGuide(model, msg.sessionId);
 
     case "GuideStepped":
-      return guideStepped(model, msg.sessionId, msg.result);
+      return guideStepped(model, msg.sessionId, msg.attempt ?? 0, msg.result);
   }
 };
 

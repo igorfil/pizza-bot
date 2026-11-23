@@ -343,7 +343,7 @@ describe("adding agents", () => {
 
   test("shows the agents being added until the runner answers", () => {
     const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
-    expect(model.runners.local?.agentsChange).toEqual({ state: "adding", agents: ["dadjokes"] });
+    expect(model.runners.local?.agentsChange).toEqual({ action: "add", agents: ["dadjokes"], error: null });
   });
 
   test("the runner's answer lists the new agent and clears the change", () => {
@@ -353,17 +353,17 @@ describe("adding agents", () => {
 
   test("a refusal from the runner stays on the runner with its reason", () => {
     const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }, { type: "AgentsSetFailed", runner: "local", error: "HTTP 500" }]);
-    expect(model.runners.local?.agentsChange).toEqual({ state: "failed", agents: ["dadjokes"], error: "HTTP 500" });
+    expect(model.runners.local?.agentsChange).toEqual({ action: "add", agents: ["dadjokes"], error: "HTTP 500" });
   });
 
   test("an agent the runner doesn't offer is refused without calling it", () => {
     const [model, effects] = run([...ready, { type: "AddAgents", runner: "local", agents: ["nope"] }]);
-    expect([model.runners.local?.agentsChange, effects]).toEqual([{ state: "failed", agents: ["nope"], error: "local has no agent nope to add" }, []]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([{ action: "add", agents: ["nope"], error: "local has no agent nope to add" }, []]);
   });
 
   test("a runner that can't change its agents is refused without calling it", () => {
     const [model, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy(), { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
-    expect([model.runners.local?.agentsChange?.state === "failed" && model.runners.local.agentsChange.error, effects]).toEqual([
+    expect([model.runners.local?.agentsChange?.error, effects]).toEqual([
       "local can't change its agents; update the runner",
       [],
     ]);
@@ -395,7 +395,7 @@ describe("creating an agent", () => {
   test("asks the runner to create it and shows it as being added", () => {
     const [model, effects] = run([...ready, { type: "CreateAgent", runner: "local", agent: poet }]);
     expect([model.runners.local?.agentsChange, effects]).toEqual([
-      { state: "adding", agents: ["Haiku poet"] },
+      { action: "add", agents: ["Haiku poet"], error: null },
       [{ type: "CreateRunnerAgent", runner: "local", endpoint: { url: "http://x", token }, agent: poet }],
     ]);
   });
@@ -408,7 +408,41 @@ describe("creating an agent", () => {
 
   test("a runner that can't create agents is refused without calling it", () => {
     const [model, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy(), { type: "CreateAgent", runner: "local", agent: poet }]);
-    expect([model.runners.local?.agentsChange, effects]).toEqual([{ state: "failed", agents: ["Haiku poet"], error: "local can't create agents; update the runner" }, []]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([{ action: "add", agents: ["Haiku poet"], error: "local can't create agents; update the runner" }, []]);
+  });
+});
+
+describe("deleting an agent", () => {
+  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy()];
+  const deleted: Msg = { type: "AgentsSet", runner: "local", added: [], removed: ["sys"], agents: [], location: "laptop", available: [] };
+
+  test("asks the runner to delete it and shows it as being removed", () => {
+    const [model, effects] = run([...ready, { type: "DeleteAgent", agent: "local/sys" }]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([
+      { action: "remove", agents: ["System report"], error: null },
+      [{ type: "DeleteRunnerAgent", runner: "local", endpoint: { url: "http://x", token }, agentId: "sys" }],
+    ]);
+  });
+
+  test("the runner's answer drops the agent", () => {
+    const [model] = run([...ready, { type: "DeleteAgent", agent: "local/sys" }, deleted]);
+    expect([model.agents, model.runners.local?.agentsChange, model.notifications.at(-1)?.text]).toEqual([{}, null, "removed System report from local"]);
+  });
+
+  test("waits while the agent has a run in progress", () => {
+    const [model, effects] = run([...withRunningTask, { type: "DeleteAgent", agent: "local/sys" }]);
+    expect([model.runners.local?.agentsChange?.error, effects]).toEqual(["System report has a run in progress; cancel it or wait for it to finish", []]);
+  });
+
+  test("its runs waiting for the runner are canceled, not sent", () => {
+    const [model] = run([...ready, booted, { type: "CreateTask", taskId: "t1", agent: "local/sys", prompt: "" }]);
+    const [after, effects] = update(model, deleted);
+    expect([after.tasks.t1?.state, after.tasks.t1?.statusText, effects]).toEqual(["canceled", "the agent was deleted", []]);
+  });
+
+  test("a failed delete stays on the runner as a removal", () => {
+    const [model] = run([...ready, { type: "DeleteAgent", agent: "local/sys" }, { type: "AgentsSetFailed", runner: "local", error: "HTTP 500" }]);
+    expect(model.runners.local?.agentsChange).toEqual({ action: "remove", agents: ["System report"], error: "HTTP 500" });
   });
 });
 
@@ -495,7 +529,7 @@ describe("guide sessions", () => {
 
   test("StartGuide runs the guide's first step", () => {
     const [model, effects] = run(started);
-    expect([model.guideSessions.g1?.status, effects]).toEqual(["working", [{ type: "RunGuideStep", sessionId: "g1", guide: "manual", state: null, input: null }]]);
+    expect([model.guideSessions.g1?.status, effects]).toEqual(["working", [{ type: "RunGuideStep", sessionId: "g1", attempt: 0, guide: "manual", state: null, input: null }]]);
   });
 
   test("an unknown guide is refused", () => {
@@ -515,7 +549,7 @@ describe("guide sessions", () => {
 
   test("a working result asks for the next step right away", () => {
     const [, effects] = run([...started, { type: "GuideStepped", sessionId: "g1", result: { kind: "working", state: { n: 1 }, view } }]);
-    expect(effects).toEqual([{ type: "RunGuideStep", sessionId: "g1", guide: "manual", state: { n: 1 }, input: null }]);
+    expect(effects).toEqual([{ type: "RunGuideStep", sessionId: "g1", attempt: 0, guide: "manual", state: { n: 1 }, input: null }]);
   });
 
   test("done adds the runner and ends the session", () => {
@@ -550,7 +584,31 @@ describe("guide sessions", () => {
       { type: "GuideStepped", sessionId: "g1", result: { kind: "failed", state: { step: "verify" }, view, error: "denied" } },
       { type: "GuideRetry", sessionId: "g1" },
     ]);
-    expect(effects).toEqual([{ type: "RunGuideStep", sessionId: "g1", guide: "manual", state: { step: "verify" }, input: null }]);
+    expect(effects).toEqual([{ type: "RunGuideStep", sessionId: "g1", attempt: 1, guide: "manual", state: { step: "verify" }, input: null }]);
+  });
+
+  const stuck: Msg[] = [...started, { type: "GuideStepped", sessionId: "g1", result: { kind: "working", state: { step: "installing" }, view } }];
+
+  test("Retry repeats a step that is still running", () => {
+    const [model, effects] = run([...stuck, { type: "GuideRetry", sessionId: "g1" }]);
+    expect([model.guideSessions.g1?.status, effects]).toEqual(["working", [{ type: "RunGuideStep", sessionId: "g1", attempt: 1, guide: "manual", state: { step: "installing" }, input: null }]]);
+  });
+
+  test("the abandoned step's late answer is ignored", () => {
+    const late: Msg = { type: "GuideStepped", sessionId: "g1", attempt: 0, result: { kind: "failed", state: { step: "installing" }, view, error: "old" } };
+    const [model, effects] = run([...stuck, { type: "GuideRetry", sessionId: "g1" }, late]);
+    expect([model.guideSessions.g1?.status, model.guideSessions.g1?.error, effects]).toEqual(["working", null, []]);
+  });
+
+  test("the retried step's answer is applied", () => {
+    const fresh: Msg = { type: "GuideStepped", sessionId: "g1", attempt: 1, result: asked };
+    const [model] = run([...stuck, { type: "GuideRetry", sessionId: "g1" }, fresh]);
+    expect(model.guideSessions.g1?.status).toBe("ask");
+  });
+
+  test("Retry does nothing while the guide waits for an answer", () => {
+    const [, effects] = run([...atForm, { type: "GuideRetry", sessionId: "g1" }]);
+    expect(effects).toEqual([]);
   });
 
   test("a step running when the Controller died can be retried", () => {

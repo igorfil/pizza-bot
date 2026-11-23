@@ -18,6 +18,7 @@ const dropSession = (model: Model, id: string): Model => {
 const step = (session: GuideSession, input: GuideInput | null): Effect => ({
   type: "RunGuideStep",
   sessionId: session.id,
+  attempt: session.attempt,
   guide: session.guide,
   state: session.state,
   input,
@@ -43,6 +44,7 @@ export const startGuide = (model: Model, sessionId: string, guide: string): Resu
     view: { title: info.title, progress: "Starting…", fields: [] },
     error: null,
     secretKeys: [],
+    attempt: 0,
     createdAt: model.now,
     updatedAt: model.now,
   };
@@ -60,18 +62,20 @@ export const guideInput = (model: Model, sessionId: string, input: GuideInput): 
     return [setSession(model, next), [step(next, input)]];
   });
 
+/** Repeats the current step after a failure, or while it still runs but seems stuck; steps are safe to repeat. */
 export const guideRetry = (model: Model, sessionId: string): Result =>
   withSession(model, sessionId, (s) => {
-    if (s.status !== "failed") return [model, []];
-    const next: GuideSession = { ...s, status: "working", error: null };
+    if (s.status === "ask") return [model, []];
+    const next: GuideSession = { ...s, status: "working", error: null, attempt: s.attempt + 1 };
     return [setSession(model, next), [step(next, null)]];
   });
 
 export const cancelGuide = (model: Model, sessionId: string): Result =>
   withSession(model, sessionId, (s) => [dropSession(model, s.id), deleteSecrets(s.secretKeys)]);
 
-export const guideStepped = (model: Model, sessionId: string, result: GuideResult): Result =>
+export const guideStepped = (model: Model, sessionId: string, attempt: number, result: GuideResult): Result =>
   withSession(model, sessionId, (s) => {
+    if (attempt !== s.attempt) return [model, []];
     switch (result.kind) {
       case "ask":
         return [setSession(model, { ...s, status: "ask", state: result.state, view: result.view, error: result.error ?? null }), []];
