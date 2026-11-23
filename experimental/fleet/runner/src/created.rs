@@ -58,7 +58,7 @@ pub fn parse_request(body: &Value) -> Result<NewAgent, String> {
 pub fn manifest_toml(agent: &NewAgent) -> String {
     let mut input = toml::Table::new();
     input.insert("label".into(), "Message".into());
-    input.insert("hint".into(), "what to ask the agent".into());
+    input.insert("hint".into(), "optional; leave empty to just run it".into());
     let mut env = toml::Table::new();
     env.insert("MODEL".into(), agent.model.clone().into());
     let mut doc = toml::Table::new();
@@ -83,6 +83,17 @@ pub fn write(dir: &Path, agent: &NewAgent) -> Result<PathBuf, String> {
     std::fs::write(folder.join("system.md"), &agent.system_prompt).map_err(io)?;
     std::fs::write(folder.join("agent.py"), HARNESS).map_err(io)?;
     Ok(folder)
+}
+
+/// Brings every created agent's `agent.py` up to the harness in this binary; returns how many changed.
+pub fn refresh_harness(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().join("agent.py"))
+        .filter(|p| p.is_file() && std::fs::read_to_string(p).is_ok_and(|text| text != HARNESS))
+        .filter(|p| std::fs::write(p, HARNESS).is_ok())
+        .count()
 }
 
 #[cfg(test)]
@@ -116,6 +127,18 @@ mod tests {
         let a = parse_request(&json!({"name": "Say \"hi\"", "model": "us.openai.gpt-5.5", "systemPrompt": ""})).unwrap();
         let spec = manifest::parse(&a.id, Path::new("/x"), &manifest_toml(&a)).unwrap();
         assert_eq!((spec.name.as_str(), spec.env["MODEL"].as_str()), ("Say \"hi\"", "us.openai.gpt-5.5"));
+    }
+
+    #[test]
+    fn refreshes_an_outdated_harness() {
+        let dir = std::env::temp_dir().join(format!("fleet-refresh-{}", std::process::id()));
+        let a = parse_request(&json!({"name": "Old", "model": "m", "systemPrompt": ""})).unwrap();
+        let folder = write(&dir, &a).unwrap();
+        std::fs::write(folder.join("agent.py"), "old harness").unwrap();
+        let (first, second) = (refresh_harness(&dir), refresh_harness(&dir));
+        let text = std::fs::read_to_string(folder.join("agent.py")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((first, second, text == HARNESS), (1, 0, true));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 # dependencies = ["boto3"]
 # ///
 """Agent created from the Fleet page: one Bedrock call with this folder's system.md and $MODEL.
-Written by the runner; contract: agents/README.md."""
+Written by the runner, which refreshes it on start; contract: agents/README.md."""
 
 import json
 import os
@@ -12,16 +12,16 @@ from pathlib import Path
 
 import boto3
 
+# Converse needs a non-empty user turn; agents like "random fact" are meant to run without input.
+NO_INPUT = "Go."
+
 
 def emit(**event: object) -> None:
     print(json.dumps(event), flush=True)
 
 
 def main() -> int:
-    message = json.load(sys.stdin).get("input", "").strip()
-    if not message:
-        emit(error="send a message for the agent to answer")
-        return 1
+    message = json.load(sys.stdin).get("input", "").strip() or NO_INPUT
     model = os.environ["MODEL"]
     system = Path("system.md").read_text(encoding="utf-8").strip()
     emit(status=f"asking {model}")

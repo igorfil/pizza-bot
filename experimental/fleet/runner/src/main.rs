@@ -17,7 +17,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{any, delete, get};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -111,6 +111,7 @@ fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
         "description": s.description,
         "input": s.input,
         "url": agent_url(cfg, s),
+        "created": s.dir.starts_with(&cfg.created_dir),
     })
 }
 
@@ -218,6 +219,30 @@ impl App {
         index["created"] = json!(agent.id);
         Ok(index)
     }
+
+    /// A created agent's folder is deleted; a shipped one is only turned off, so it can be added back.
+    fn delete(&self, id: &str) -> Result<Value, ApiError> {
+        let folder = {
+            let agents = self.agents.read().unwrap();
+            let spec = agents.specs.iter().find(|s| s.id == id).ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("this runner has no agent {id:?}")))?;
+            spec.dir.starts_with(&self.cfg.created_dir).then(|| spec.dir.clone())
+        };
+        if let Some(folder) = &folder {
+            std::fs::remove_dir_all(folder).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{}: {e}", folder.display())))?;
+        }
+        let served = {
+            let mut agents = self.agents.write().unwrap();
+            if folder.is_some() {
+                agents.specs.retain(|s| s.id != id);
+                agents.routers.remove(id);
+            }
+            agents.served.remove(id);
+            agents.served.clone()
+        };
+        self.save_served(&served)?;
+        tracing::info!(agent = %id, deleted = folder.is_some(), "agent removed");
+        Ok(self.index())
+    }
 }
 
 async fn put_agents(State(app): State<Arc<App>>, headers: HeaderMap, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
@@ -232,6 +257,13 @@ async fn post_agents(State(app): State<Arc<App>>, headers: HeaderMap, Json(body)
         return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
     }
     app.create(&body).map(|index| (StatusCode::CREATED, Json(index)))
+}
+
+async fn delete_agent(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
+    if !authorized(&headers, &app.bearer) {
+        return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    app.delete(&id).map(Json)
 }
 
 /// Routes `/agents/<id>/<rest>` to that agent's router, so agents can be added while the runner runs.
@@ -288,6 +320,10 @@ async fn main() -> Result<(), String> {
         .init();
 
     let cfg = load_config()?;
+    let refreshed = created::refresh_harness(&cfg.created_dir);
+    if refreshed > 0 {
+        tracing::info!(refreshed, "updated the harness of created agents");
+    }
     let specs = load_specs(&cfg)?;
 
     let sqlite = Arc::new(store::SqliteTaskStore::open(&cfg.db).map_err(|e| e.to_string())?);
@@ -313,6 +349,7 @@ async fn main() -> Result<(), String> {
 
     let router = axum::Router::new()
         .route("/agents", get(|State(app): State<Arc<App>>| async move { Json(app.index()) }).put(put_agents).post(post_agents))
+        .route("/agents/{id}", delete(delete_agent))
         .route("/agents/{id}/{*rest}", any(agent_request))
         .with_state(app.clone());
 

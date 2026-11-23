@@ -269,6 +269,9 @@ Endpoints:
   (`agent.toml`, `system.md`, and the built-in `agent.py` harness) into `RUNNER_CREATED_AGENTS_DIR`,
   serves it at once, and answers with the new index plus `created: <id>`. The index's `canCreate`
   says a runner supports it.
+- `DELETE /agents/<id>`: bearer token required; deletes a created agent's folder, or turns a
+  shipped agent off (it stays in `available`), and answers with the new index. Each index entry's
+  `created` tells the two apart.
 - `PUT /agents`: bearer token required; `{agents: [ids]}` replaces the served set, saves it in
   `RUNNER_DB` so it survives restarts, and answers with the new index. Unserved agents answer 404.
 - `/agents/<id>/.well-known/agent-card.json`: public A2A agent card per agent. Its one skill carries
