@@ -89,3 +89,12 @@ input; stdout and exit code carry the contract unchanged.
 Which agents a runner serves starts from `RUNNER_AGENTS` (comma list of ids; default: all folders).
 Add agent on the Fleet page changes it through the runner's `PUT /agents`, which is saved and wins
 from then on.
+
+## Created agents
+
+Add agent → Create new on the Fleet page makes the bare-minimum agent: a name, a Bedrock model and a
+system prompt. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR`
+(`agent.toml` with `MODEL` in `[env]`, `system.md`, and `agent.py`, a copy of the harness built into
+the runner from `runner/src/prompt_agent.py`). Each run sends the input to the model with the system
+prompt through Bedrock Converse and returns the reply as a `reply` artifact; there are no tools and no
+memory between runs. The runner's AWS credentials (on EC2, the instance role) must allow the model.

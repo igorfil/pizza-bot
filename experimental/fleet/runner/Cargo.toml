@@ -9,6 +9,7 @@ a2a-server = { package = "a2a-server-lf", version = "0.5.3", default-features = 
 async-trait = "0.1"
 async-stream = "0.3"
 axum = "0.8"
+tower = { version = "0.5", features = ["util"] }
 chrono = "0.4"
 futures = "0.3"
 rusqlite = { version = "0.37", features = ["bundled"] }
