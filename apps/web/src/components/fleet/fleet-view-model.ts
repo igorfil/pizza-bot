@@ -113,6 +113,43 @@ export const inboxOf = (model: FleetModel): FleetTask[] =>
     .filter((t) => isFinished(t) && !t.ackedAt)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
+/** Every finished run, read or not, newest first. */
+export const finishedRunsOf = (model: FleetModel): FleetTask[] =>
+  Object.values(model.tasks)
+    .filter(isFinished)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+const DAY_MS = 86_400_000;
+
+const startOfDay = (at: number): number => new Date(at).setHours(0, 0, 0, 0);
+
+/** "Today", "Yesterday", else the weekday and date, in the viewer's time zone. */
+export const dayLabel = (at: number, now: number): string => {
+  const days = Math.round((startOfDay(now) - startOfDay(at)) / DAY_MS);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return new Date(at).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+};
+
+/** Consecutive runs under one day heading; expects runs newest first. */
+export const groupByDay = (tasks: FleetTask[], now: number): { label: string; tasks: FleetTask[] }[] =>
+  tasks.reduce<{ label: string; tasks: FleetTask[] }[]>((groups, t) => {
+    const label = dayLabel(t.updatedAt, now);
+    const last = groups.at(-1);
+    return last?.label === label ? [...groups.slice(0, -1), { label, tasks: [...last.tasks, t] }] : [...groups, { label, tasks: [t] }];
+  }, []);
+
+/** One group per agent, ordered by each agent's newest run; expects runs newest first. */
+export const groupByAgent = (model: FleetModel, tasks: FleetTask[]): { key: string; name: string; tasks: FleetTask[] }[] =>
+  [...new Set(tasks.map(taskAgentKey))].map((key) => {
+    const mine = tasks.filter((t) => taskAgentKey(t) === key);
+    return { key, name: agentName(model, mine[0]!), tasks: mine };
+  });
+
+/** The selected item, or the one that took its place once it left the list (e.g. was marked read). */
+export const selectedOrNext = (items: FleetTask[], selectedId: string | null, lastIndex: number): FleetTask | undefined =>
+  items.find((t) => t.id === selectedId) ?? items[Math.min(Math.max(lastIndex, 0), items.length - 1)];
+
 /** Runs that finished between two Models; none for the first Model, so connecting doesn't replay old results. */
 export const finishedSince = (prev: FleetModel | null, next: FleetModel): FleetTask[] =>
   prev ? inboxOf(next).filter((t) => !prev.tasks[t.id] || !isFinished(prev.tasks[t.id]!)) : [];

@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AppToastProvider } from "../AppToast.js";
 import { FleetConnectForm, FleetLinkBadge, FleetModule } from "./FleetModule.js";
-import { InboxCard, InboxView } from "./InboxView.js";
+import { InboxView, type InboxLayout } from "./InboxView.js";
+import { InboxCard } from "./RunCard.js";
 import { ChatPane } from "./ChatsView.js";
 import { AgentCard, AgentsView, InlineRuns } from "./AgentsView.js";
 import { addAgentModes } from "./AddAgentDialog.js";
@@ -102,6 +103,42 @@ describe("InboxView", () => {
       wrap(<InboxView model={model} send={noop} onOpenChat={() => {}} />).includes("Mark all read"),
       wrap(<InboxView model={two} send={noop} onOpenChat={() => {}} />).includes("Mark all read"),
     ]).toEqual([false, true]);
+  });
+});
+
+describe("Inbox layouts", () => {
+  const two = { ...model, tasks: { t1: jokes, t2: { ...jokes, id: "t2", prompt: "tea", updatedAt: NOW - 30_000 } } };
+  const view = (layout: InboxLayout, m: FleetModel = two) => wrap(<InboxView model={m} send={noop} onOpenChat={() => {}} initialLayout={layout} />);
+
+  it("offers every layout, with the current one pressed", () => {
+    const html = view("feed");
+    expect([html.match(/aria-pressed="(true|false)"/g)?.length, /aria-pressed="true"[^>]*title="Every result in full/.test(html)]).toEqual([5, true]);
+  });
+
+  it("keeps the switcher when there is nothing to review", () => {
+    const read = { ...model, tasks: { t1: { ...jokes, ackedAt: NOW } } };
+    const html = view("table", read);
+    expect([html.includes("All caught up"), html.includes('aria-label="Inbox layout"')]).toEqual([true, true]);
+  });
+
+  it("list: one option per result, the newest selected and shown", () => {
+    const html = view("list");
+    expect([html.match(/role="option"/g)?.length, /aria-selected="true"[^>]*>.*Topic: tea/.test(html)]).toEqual([2, true]);
+  });
+
+  it("feed: results under a day heading, each in full", () => {
+    const html = view("feed");
+    expect([html.includes(">Today<"), html.match(/It got mugged\./g)?.length]).toEqual([true, 2]);
+  });
+
+  it("by agent: one group with its count, the newest open and the rest as rows", () => {
+    const html = view("agents");
+    expect([html.includes('aria-label="Older results from Dad jokes"'), html.match(/It got mugged\./g)?.length]).toEqual([true, 1]);
+  });
+
+  it("table: a row per result and bulk actions that wait for a selection", () => {
+    const html = view("table");
+    expect([html.match(/aria-label="Select Topic:/g)?.length, /<button[^>]*disabled=""[^>]*>.*?Mark read/.test(html)]).toEqual([2, true]);
   });
 });
 

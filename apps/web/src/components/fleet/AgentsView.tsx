@@ -5,7 +5,7 @@ import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { AddRunnerDialog, DeleteAgentDialog, FleetDialog, RemoveRunnerDialog } from "./GuideCard.js";
-import { RunDialog } from "./InboxView.js";
+import { RunDialog } from "./RunCard.js";
 import {
   activeRun,
   agentNames,

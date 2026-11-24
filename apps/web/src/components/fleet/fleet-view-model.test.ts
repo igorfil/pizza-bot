@@ -5,8 +5,11 @@ import {
   ago,
   artifactsNewestFirst,
   defaultInput,
+  dayLabel,
   duration,
   finishedSince,
+  groupByAgent,
+  groupByDay,
   inboxOf,
   initialDraft,
   runnerHealth,
@@ -14,6 +17,7 @@ import {
   runsOf,
   runStrip,
   runTitle,
+  selectedOrNext,
 } from "./fleet-view-model.js";
 
 const NOW = 1_000_000;
@@ -236,5 +240,47 @@ describe("finishedSince", () => {
 
   it("leaves out runs already marked read", () => {
     expect(finishedSince(model([working]), model([task({ ackedAt: NOW })]))).toEqual([]);
+  });
+});
+
+describe("inbox layout helpers", () => {
+  const noon = new Date(2026, 10, 24, 12).getTime();
+  const at = (day: number, hour: number) => new Date(2026, 10, day, hour).getTime();
+
+  it("labels today and yesterday by calendar day, not by 24 hours", () => {
+    expect([dayLabel(at(24, 0), noon), dayLabel(at(23, 23), noon), dayLabel(at(23, 1), noon)]).toEqual(["Today", "Yesterday", "Yesterday"]);
+  });
+
+  it("names older days by date", () => {
+    expect(dayLabel(at(20, 9), noon)).not.toMatch(/Today|Yesterday/);
+  });
+
+  it("groups runs under one heading per day, in order", () => {
+    const runs = [task({ id: "a", updatedAt: at(24, 9) }), task({ id: "b", updatedAt: at(24, 8) }), task({ id: "c", updatedAt: at(23, 9) })];
+    expect(groupByDay(runs, noon).map((g) => [g.label, g.tasks.map((t) => t.id)])).toEqual([
+      ["Today", ["a", "b"]],
+      ["Yesterday", ["c"]],
+    ]);
+  });
+
+  it("groups runs by agent, the agent with the newest run first", () => {
+    const runs = [task({ id: "a", agent: "geofact" }), task({ id: "b" }), task({ id: "c", agent: "geofact" })];
+    expect(groupByAgent(model(runs), runs).map((g) => [g.key, g.tasks.map((t) => t.id)])).toEqual([
+      ["ec2/geofact", ["a", "c"]],
+      ["ec2/dadjokes", ["b"]],
+    ]);
+  });
+
+  it("keeps the selection while it is in the list", () => {
+    const runs = [task({ id: "a" }), task({ id: "b" })];
+    expect(selectedOrNext(runs, "b", 0)?.id).toBe("b");
+  });
+
+  it("moves to the result that took the place of one marked read", () => {
+    expect(selectedOrNext([task({ id: "a" }), task({ id: "c" })], "b", 1)?.id).toBe("c");
+  });
+
+  it("moves to the last result when the last one was marked read", () => {
+    expect(selectedOrNext([task({ id: "a" })], "b", 1)?.id).toBe("a");
   });
 });

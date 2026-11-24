@@ -16,11 +16,25 @@ Three views inside the one screen, as tabs under the header (from the Inbox / Ch
 mockups). The header has the link status (Live / Connecting… / Reconnecting… / Not connected) and a
 Connection button.
 
-### Inbox: a stack of results
+### Inbox: five layouts
+
+A switcher in the Inbox bar (Stack · List · Feed · By agent · Table) changes the layout; the choice
+is saved per device in `localStorage` (`pizza.fleet.inboxLayout`). Every layout shows the same
+result body (`RunResult`) and actions (Run again, Continue in chat, Ok, got it), from `RunCard.tsx`.
+
+- **Stack** (default): one big card at a time, the next ones peeking out behind it; Ok, got it has focus.
+- **List**: results on the left, the selected one in full on the right; ↑/↓ or j/k move, and
+  marking one read selects the one that took its place. Stacks vertically on narrow screens.
+- **Feed**: every result in full, newest first, under day headings; "Show read" adds results
+  already marked read, which turns it into a history.
+- **By agent**: one section per agent with its count and a per-agent Mark all read; the newest
+  result open, older ones as rows that open the result dialog.
+- **Table**: one row per result (agent, input, state, runner, when); checkboxes pick rows for bulk
+  Mark read / Run again, and a row opens the result dialog.
 
 ```
  Inbox (15) · Chats · Agents
-           15 results to review                          [Mark all read]
+  15 results to review   [Stack|List|Feed|By agent|Table]   [Mark all read]
   ┌────────────────────────────────────────────────────────┐
   │ (ec2) completed · just now                             │
   │                   Topic: tacos                         │  ← skill label + input
@@ -30,14 +44,15 @@ Connection button.
   │ ▸ metrics  (older artifacts collapsed)                 │
   │ [ Ask a follow-up about this result…           ] [➤]  │  → new chat seeded with the run
   │      [↻ Run again] [💬 Continue in chat] [✓ Ok, got it]│
-  └────────────────────────────────────────────────────────┘┘┘  ← next items peek out behind
+  └────────────────────────────────────────────────────────┘┘┘  ← Stack: next items peek out behind
 ```
 
 - Items = finished runs not yet acknowledged, newest first; the tab shows the count.
-- Ok, got it → `AckInbox`; Mark all read → `AckAllInbox`; Run again → `CreateTask` with the same
-  input; Continue in chat / follow-up → `CreateChat {fromTaskId, text}` and switches to Chats with
-  that chat open.
-- Failed runs show the reason in a red banner. Empty state: "All caught up".
+- Ok, got it → `AckInbox`; Mark all read → `AckAllInbox` (per agent and bulk send one `AckInbox`
+  each); Run again → `CreateTask` with the same input; Continue in chat / follow-up → `CreateChat
+  {fromTaskId, text}` and switches to Chats with that chat open.
+- Failed runs show the reason in a red banner. Empty state: "All caught up" (the switcher stays).
+- The result dialog (from By agent, Table, or an agent's run history) offers Ok, got it for unread runs.
 
 ### Chats: plain conversation with the Controller's LLM
 
@@ -93,7 +108,9 @@ New, all in `apps/web/src/components/fleet/`:
 | `use-fleet.ts` | hook: connection, Model, link state, retry loop |
 | `fleet-view-model.ts` | pure helpers: inbox, chats, runs per agent, run strip, titles, location, tones, time formats |
 | `FleetModule.tsx` | hub: header, `ModuleTabs` (Inbox / Chats / Agents), `FleetLinkBadge`, `FleetConnectForm` |
-| `InboxView.tsx` | stack + `InboxCard` |
+| `InboxView.tsx` | Inbox bar, layout switcher, Stack |
+| `InboxLayouts.tsx` | List, Feed, By agent, Table |
+| `RunCard.tsx` | `InboxCard` (stack / detail / compact), `RunResult`, `RunDialog`, shared run actions |
 | `ChatsView.tsx` | chat list + `ChatPane` |
 | `AgentsView.tsx` | grid + `AgentCard`, inline runs, add-agent card |
 | `FleetScreen.tsx` | container: hook + chooses connect form or hub |
