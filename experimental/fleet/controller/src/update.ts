@@ -269,9 +269,9 @@ const syncAgents = (model: Model, runner: string, infos: AgentInfo[]): Model => 
   return { ...model, agents: { ...others, ...mine } };
 };
 
-type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean };
+type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[] };
 
-const runnerOk = (model: Model, name: string, { agents, location, available, canCreate }: RunnerIndex): Result => {
+const runnerOk = (model: Model, name: string, { agents, location, available, canCreate, harnesses }: RunnerIndex): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
   const recovered = runner.status !== "healthy";
@@ -286,6 +286,7 @@ const runnerOk = (model: Model, name: string, { agents, location, available, can
       location,
       available: available ?? null,
       canCreateAgents: canCreate === true,
+      harnesses: harnesses ?? [],
     }),
     name,
     agents,

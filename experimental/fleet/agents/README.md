@@ -102,8 +102,9 @@ from then on.
 ## Created agents
 
 Add agent → Create new on the Fleet page makes the bare-minimum agent: a name, a Bedrock model and a
-system prompt. On a runner with the `pizza-bot` harness it is written as `harness = "pizza-bot"`, so
-adding `.mcp.json` and `skills/` to its folder gives it tools. Otherwise it runs the single-call script below. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR`
+system prompt. On a runner with the `pizza-bot` harness it is written as `harness = "pizza-bot"`, and
+the dialog also takes MCP servers and skills, which the runner writes as the folder's `.mcp.json` and
+`skills/<name>/SKILL.md` (and returns in `GET /agents`, so they can be edited). Otherwise it runs the single-call script below. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR`
 (`agent.toml` with `MODEL` in `[env]`, `system.md`, and `agent.py`, a copy of the harness built into
 the runner from `runner/src/prompt_agent.py`). Each run sends the input to the model with the system
 prompt through Bedrock Converse and returns the reply as a `reply` artifact; an empty input is sent

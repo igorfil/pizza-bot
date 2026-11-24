@@ -387,7 +387,7 @@ describe("adding agents", () => {
 });
 
 describe("creating an agent", () => {
-  const poet = { name: "Haiku poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku." };
+  const poet = { name: "Haiku poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku.", mcpServers: {}, skills: [] };
   const creator: Msg = { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: [], canCreate: true };
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), creator];
   const made = { id: "haiku-poet", name: "Haiku poet", description: "", input: null };
@@ -414,7 +414,7 @@ describe("creating an agent", () => {
 
 describe("editing an agent", () => {
   const poet = { id: "poet", name: "Poet", description: "", input: null, created: true, model: "m", systemPrompt: "One haiku." };
-  const spec = { name: "Haiku poet", model: "m2", systemPrompt: "Two haiku." };
+  const spec = { name: "Haiku poet", model: "m2", systemPrompt: "Two haiku.", mcpServers: {}, skills: [] };
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), { type: "RunnerOk", name: "local", agents: [poet, sys], location: "laptop", available: [], canCreate: true }];
   const edited: Msg = { type: "AgentsSet", runner: "local", added: [], edited: ["poet"], agents: [{ ...poet, ...spec }, sys], location: "laptop", available: [], canCreate: true };
 

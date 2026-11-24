@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Plus, Trash2 } from "lucide-react";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { ChoiceCard, FleetDialog } from "./GuideCard.js";
@@ -64,29 +64,134 @@ function ErrorLine({ error }: { error: string | null }) {
   ) : null;
 }
 
-type AgentSpec = { name: string; model: string; systemPrompt: string };
+/** `mcpServers` is `.mcp.json` text and each skill a whole SKILL.md; the Controller parses both. */
+type AgentSpec = { name: string; model: string; systemPrompt: string; mcpServers: string; skills: string[] };
 
-/** The bare-minimum agent: a name, a model and a system prompt, run by the runner's built-in harness. */
+/** MCP servers and skills need the runner's pizza-bot harness. */
+export const runsTools = (runner: FleetRunner | undefined): boolean => runner?.harnesses?.includes("pizza-bot") ?? false;
+
+const MCP_EXAMPLE = '{\n  "mcpServers": {\n    "fetch": { "command": "uvx", "args": ["mcp-server-fetch"] }\n  }\n}';
+
+const SKILL_TEMPLATE = "---\nname: my-skill\ndescription: What this skill does, and when to use it.\ntools:\n  - mcp:fetch:*\n---\nHow to do the work, step by step, and what to report back.\n";
+
+/** Null when the text is empty or valid JSON. */
+const jsonProblem = (text: string): string | null => {
+  if (text.trim() === "") return null;
+  try {
+    JSON.parse(text);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : "not valid JSON";
+  }
+};
+
+const skillName = (content: string): string | null => /^---\r?\n[\s\S]*?^name:\s*["']?([^"'\r\n]+)/m.exec(content)?.[1]?.trim() ?? null;
+
+export const mcpServersText = (agent: FleetAgent): string =>
+  agent.mcpServers && Object.keys(agent.mcpServers).length > 0 ? JSON.stringify({ mcpServers: agent.mcpServers }, null, 2) : "";
+
+function ToolsFields({
+  mcpServers,
+  setMcpServers,
+  skills,
+  setSkills,
+}: {
+  mcpServers: string;
+  setMcpServers: (text: string) => void;
+  skills: string[];
+  setSkills: (skills: string[]) => void;
+}) {
+  const problem = jsonProblem(mcpServers);
+  return (
+    <>
+      <label className="field">
+        <span className="field-label">MCP servers</span>
+        <textarea
+          className="field-input fleet-prompt fleet-code"
+          value={mcpServers}
+          onChange={(e) => setMcpServers(e.target.value)}
+          rows={6}
+          spellCheck={false}
+          placeholder={MCP_EXAMPLE}
+          aria-invalid={problem !== null}
+        />
+        {problem ? (
+          <span className="schedule-editor-error" role="alert">
+            Not valid JSON: {problem}
+          </span>
+        ) : (
+          <span className="field-hint">
+            The <code>.mcp.json</code> an MCP server documents. Commands run on the runner&apos;s machine; write tokens as <code>{"${VAR}"}</code> and set them in
+            the runner&apos;s environment.
+          </span>
+        )}
+      </label>
+      <fieldset className="fleet-choice-field">
+        <legend className="field-label fleet-choice-legend">Skills</legend>
+        <div className="fleet-skill-list">
+          {skills.map((content, i) => (
+            <div key={i} className="fleet-skill">
+              <div className="fleet-skill-head">
+                <span>{skillName(content) ?? `Skill ${i + 1}`}</span>
+                <button
+                  type="button"
+                  className="fleet-icon-btn fleet-link-danger"
+                  onClick={() => setSkills(skills.filter((_, j) => j !== i))}
+                  aria-label={`Remove ${skillName(content) ?? `skill ${i + 1}`}`}
+                  title="Remove skill"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              <textarea
+                className="field-input fleet-prompt fleet-code"
+                value={content}
+                onChange={(e) => setSkills(skills.map((s, j) => (j === i ? e.target.value : s)))}
+                rows={8}
+                spellCheck={false}
+                aria-label={`SKILL.md of ${skillName(content) ?? `skill ${i + 1}`}`}
+              />
+            </div>
+          ))}
+          <button type="button" className="btn-secondary fleet-small-btn fleet-skill-add" onClick={() => setSkills([...skills, SKILL_TEMPLATE])}>
+            <Plus size={13} aria-hidden="true" />
+            Add skill
+          </button>
+        </div>
+        <span className="field-hint">
+          Each skill is a SKILL.md. Its <code>tools</code> list grants MCP tools, like <code>mcp:fetch:*</code>. A server no skill grants gets a skill of its own.
+        </span>
+      </fieldset>
+    </>
+  );
+}
+
+/** A created agent: a name, a model and a system prompt, plus MCP servers and skills on a pizza-bot runner. */
 function AgentSpecForm({
   model,
+  tools,
   initial,
   label,
   onSave,
   onClose,
 }: {
   model: FleetModel;
+  tools: boolean;
   initial?: AgentSpec;
   label: string;
-  onSave: (spec: AgentSpec) => Promise<unknown>;
+  onSave: (spec: Partial<AgentSpec>) => Promise<unknown>;
   onClose: () => void;
 }) {
   const models = model.agentModels ?? [];
   const [name, setName] = useState(initial?.name ?? "");
   const [picked, setPicked] = useState(models.find((m) => m.id === initial?.model)?.id ?? models[0]?.id ?? "");
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? "");
+  const [mcpServers, setMcpServers] = useState(initial?.mcpServers ?? "");
+  const [skills, setSkills] = useState<string[]>(initial?.skills ?? []);
   const { saving, error, submit } = useSubmit(onClose);
+  const spec = (): Partial<AgentSpec> => ({ name: name.trim(), model: picked, systemPrompt, ...(tools ? { mcpServers, skills } : {}) });
   return (
-    <form className="fleet-guide" onSubmit={(e) => void submit(e, () => onSave({ name: name.trim(), model: picked, systemPrompt }))}>
+    <form className="fleet-guide" onSubmit={(e) => void submit(e, () => onSave(spec()))}>
       <label className="field">
         <span className="field-label">Name</span>
         <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="e.g. Release notes writer" autoFocus />
@@ -108,10 +213,15 @@ function AgentSpecForm({
           rows={6}
           placeholder="You turn a list of merged pull requests into short, friendly release notes."
         />
-        <span className="field-hint">Each run sends the message you type to the model with this prompt and returns its reply.</span>
+        <span className="field-hint">
+          {tools
+            ? "Each run gives the agent the message you type, with this prompt and the tools and skills below, and returns its answer."
+            : "Each run sends the message you type to the model with this prompt and returns its reply."}
+        </span>
       </label>
+      {tools && <ToolsFields mcpServers={mcpServers} setMcpServers={setMcpServers} skills={skills} setSkills={setSkills} />}
       <ErrorLine error={error} />
-      <Actions saving={saving} disabled={name.trim() === "" || picked === ""} label={label} onClose={onClose} />
+      <Actions saving={saving} disabled={name.trim() === "" || picked === "" || (tools && jsonProblem(mcpServers) !== null)} label={label} onClose={onClose} />
     </form>
   );
 }
@@ -121,7 +231,14 @@ export function EditAgentDialog({ model, agent, send, onClose }: { model: FleetM
     <FleetDialog title={`Edit ${agent.name}`} onClose={onClose}>
       <AgentSpecForm
         model={model}
-        initial={{ name: agent.name, model: agent.model ?? "", systemPrompt: agent.systemPrompt ?? "" }}
+        tools={runsTools(model.runners[agent.runner])}
+        initial={{
+          name: agent.name,
+          model: agent.model ?? "",
+          systemPrompt: agent.systemPrompt ?? "",
+          mcpServers: mcpServersText(agent),
+          skills: (agent.skills ?? []).map((s) => s.content),
+        }}
         label="Save changes"
         onSave={(spec) => send("EditAgent", { agent: agent.key, ...spec })}
         onClose={onClose}
@@ -198,6 +315,7 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
           {mode === "create" ? (
             <AgentSpecForm
               model={model}
+              tools={runsTools(runner)}
               label="Create agent"
               onSave={(spec) => send("CreateAgent", { runner: runner.name, ...spec })}
               onClose={onClose}

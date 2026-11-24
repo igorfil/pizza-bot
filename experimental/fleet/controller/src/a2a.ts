@@ -1,7 +1,7 @@
 import { ClientFactory, ClientFactoryOptions, DefaultAgentCardResolver, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
 import { attempt, type Outcome } from "./outcome.js";
-import type { AgentInfo, Artifact, NewAgentSpec, TaskSnapshot, TaskUpdate } from "./types.js";
+import type { AgentInfo, AgentSkill, Artifact, McpServers, NewAgentSpec, TaskSnapshot, TaskUpdate } from "./types.js";
 
 /** One agent behind a runner link, with its token already read from the vault. */
 export type AgentEndpoint = { url: string; token: string };
@@ -86,12 +86,31 @@ const auth = (endpoint: AgentEndpoint) => ({ Authorization: `Bearer ${endpoint.t
 type IndexJson = {
   location?: unknown;
   canCreate?: unknown;
+  harnesses?: unknown;
   created?: unknown;
   available?: NonNullable<IndexJson["agents"]>;
-  agents?: { id?: unknown; name?: unknown; description?: unknown; created?: unknown; model?: unknown; systemPrompt?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
+  agents?: {
+    id?: unknown;
+    name?: unknown;
+    description?: unknown;
+    created?: unknown;
+    model?: unknown;
+    systemPrompt?: unknown;
+    mcpServers?: unknown;
+    skills?: unknown;
+    input?: { label?: unknown; hint?: unknown; example?: unknown } | null;
+  }[];
 };
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+const mcpServersOf = (v: unknown): McpServers =>
+  isObject(v) ? Object.fromEntries(Object.entries(v).filter((e): e is [string, Record<string, unknown>] => isObject(e[1]))) : {};
+
+const skillsOf = (v: unknown): AgentSkill[] =>
+  Array.isArray(v) ? v.filter(isObject).map((s) => ({ id: str(s.id), content: str(s.content) })).filter((s) => s.id !== "") : [];
 
 const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | null =>
   str(a.id)
@@ -101,11 +120,13 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
         description: str(a.description),
         input: a.input ? { label: str(a.input.label), hint: str(a.input.hint), example: str(a.input.example) } : null,
         ...(a.created === true ? { created: true } : {}),
-        ...(a.created === true && typeof a.model === "string" ? { model: a.model, systemPrompt: str(a.systemPrompt) } : {}),
+        ...(a.created === true && typeof a.model === "string"
+          ? { model: a.model, systemPrompt: str(a.systemPrompt), mcpServers: mcpServersOf(a.mcpServers), skills: skillsOf(a.skills) }
+          : {}),
       }
     : null;
 
-export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate: boolean };
+export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate: boolean; harnesses: string[] };
 
 const infos = (list: IndexJson["agents"]): AgentInfo[] => (list ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null);
 
@@ -115,6 +136,7 @@ const toIndex = (index: IndexJson): RunnerIndex => ({
   location: str(index.location) || null,
   available: Array.isArray(index.available) ? infos(index.available) : null,
   canCreate: index.canCreate === true,
+  harnesses: Array.isArray(index.harnesses) ? index.harnesses.filter((h): h is string => typeof h === "string") : [],
 });
 
 /** The runner's `GET /agents` is both discovery and its health check. */

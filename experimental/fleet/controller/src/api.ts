@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { AGENT_MODELS } from "./agent-models.js";
+import { mcpServersFrom, skillsFrom } from "./agent-tools.js";
 import { INTENT_TYPES, type GuideInput, type IntentMsg, type Model, type NewAgentSpec, type TransportSpec } from "./types.js";
 import type { Runtime } from "./runtime.js";
 import type { SecretStore } from "./vault.js";
@@ -125,7 +126,11 @@ const agentSpecOf = (type: string, p: Record<string, unknown>): NewAgentSpec | s
   if (name.length > 60) return "the agent name must be at most 60 characters";
   if (!AGENT_MODELS.some((m) => m.id === model)) return `model must be one of ${AGENT_MODELS.map((m) => m.id).join(", ")}`;
   if (systemPrompt.length > 20_000) return "the system prompt must be at most 20000 characters";
-  return { name, model, systemPrompt };
+  const mcpServers = mcpServersFrom(p.mcpServers);
+  if (typeof mcpServers === "string") return mcpServers;
+  const skills = skillsFrom(p.skills);
+  if (typeof skills === "string") return skills;
+  return { name, model, systemPrompt, mcpServers, skills };
 };
 
 /** Ids are minted here, not by UIs, so `update` stays pure and replayable. */

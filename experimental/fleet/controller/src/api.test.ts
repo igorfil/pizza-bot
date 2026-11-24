@@ -28,6 +28,7 @@ const model: Model = {
       location: null,
       available: null,
       canCreateAgents: false,
+      harnesses: [],
       agentsChange: null,
     },
   },
@@ -160,7 +161,15 @@ describe("creating agents", () => {
   it("CreateAgent carries the name, model and system prompt", async () => {
     const sent: Msg[] = [];
     await post({ msg_id: "m1", type: "CreateAgent", payload: { runner: "laptop", name: " Poet ", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku." } }, sent);
-    expect(sent[0]).toEqual({ type: "CreateAgent", runner: "laptop", agent: { name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku." } });
+    expect(sent[0]).toEqual({ type: "CreateAgent", runner: "laptop", agent: { name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku.", mcpServers: {}, skills: [] } });
+  });
+
+  it("CreateAgent carries the MCP servers and skills", async () => {
+    const sent: Msg[] = [];
+    const brief = "---\nname: brief\ndescription: Briefs.\n---\nBe brief.";
+    const mcpServers = JSON.stringify({ mcpServers: { fetch: { command: "uvx", args: ["mcp-server-fetch"] } } });
+    await post({ msg_id: "m1", type: "CreateAgent", payload: { runner: "laptop", name: "R", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "", mcpServers, skills: [brief] } }, sent);
+    expect(sent[0]).toMatchObject({ agent: { mcpServers: { fetch: { command: "uvx", args: ["mcp-server-fetch"] } }, skills: [{ id: "brief", content: brief }] } });
   });
 
   it("refuses a model that isn't offered", async () => {
@@ -171,7 +180,7 @@ describe("creating agents", () => {
   it("EditAgent carries the agent and its new spec", async () => {
     const sent: Msg[] = [];
     await post({ msg_id: "m1", type: "EditAgent", payload: { agent: "laptop/poet", name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: " Two haiku. " } }, sent);
-    expect(sent[0]).toEqual({ type: "EditAgent", agent: "laptop/poet", spec: { name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "Two haiku." } });
+    expect(sent[0]).toEqual({ type: "EditAgent", agent: "laptop/poet", spec: { name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "Two haiku.", mcpServers: {}, skills: [] } });
   });
 
   it("refuses an edit without a name", async () => {

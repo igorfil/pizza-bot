@@ -38,9 +38,25 @@ export type Link = { state: "down"; error: string | null } | { state: "up"; url:
 
 export type AgentInput = { label: string; hint: string; example: string };
 
+/** The `mcpServers` map of a Claude-format `.mcp.json`. */
+export type McpServers = Record<string, Record<string, unknown>>;
+
+/** One skill folder: `skills/<id>/SKILL.md`. */
+export type AgentSkill = { id: string; content: string };
+
 /** What a runner's `GET /agents` reports for one agent. */
-/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model` and `systemPrompt`. */
-export type AgentInfo = { id: string; name: string; description: string; input: AgentInput | null; created?: boolean; model?: string; systemPrompt?: string };
+/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model`, `systemPrompt`, `mcpServers` and `skills`. */
+export type AgentInfo = {
+  id: string;
+  name: string;
+  description: string;
+  input: AgentInput | null;
+  created?: boolean;
+  model?: string;
+  systemPrompt?: string;
+  mcpServers?: McpServers;
+  skills?: AgentSkill[];
+};
 
 /** A host process: one per machine. Health and reconnect are per runner; the link comes first. */
 export type Runner = NewRunner & {
@@ -58,12 +74,14 @@ export type Runner = NewRunner & {
   available: AgentInfo[] | null;
   /** The runner takes CreateAgent (`POST /agents`). */
   canCreateAgents: boolean;
+  /** Harnesses the runner offers; `pizza-bot` lets created agents have MCP servers and skills. */
+  harnesses: string[];
   /** The last AddAgents or CreateAgent for this runner, until it lands or a new one starts. */
   agentsChange: AgentsChange | null;
 };
 
-/** The bare-minimum agent: a model and a system prompt, run by the runner's built-in harness. */
-export type NewAgentSpec = { name: string; model: string; systemPrompt: string };
+/** A created agent; MCP servers and skills need a runner with the `pizza-bot` harness. */
+export type NewAgentSpec = { name: string; model: string; systemPrompt: string; mcpServers: McpServers; skills: AgentSkill[] };
 
 /** In flight while `error` is null; `agents` are names or ids, for display. */
 export type AgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
@@ -239,8 +257,8 @@ export type WorldMsg =
   | { type: "Tick"; now: number; local?: LocalClock; since?: number }
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
-  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
-  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
+  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[] }
+  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[] }
   | { type: "AgentsSetFailed"; runner: string; error: string }
   | { type: "RunnerFailed"; name: string; error: string }
   | { type: "RunnerRetired"; name: string; text: string; ok: boolean }

@@ -126,6 +126,9 @@ fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
     if is_created(cfg, s) {
         v["model"] = json!(s.env.get("MODEL"));
         v["systemPrompt"] = json!(std::fs::read_to_string(s.dir.join("system.md")).unwrap_or_default());
+        let tools = created::tools_json(&s.dir);
+        v["mcpServers"] = tools["mcpServers"].clone();
+        v["skills"] = tools["skills"].clone();
     }
     v
 }
@@ -216,9 +219,17 @@ impl App {
         self.cfg.harnesses.has(PIZZA_BOT)
     }
 
+    fn parse_agent(&self, body: &Value) -> Result<created::NewAgent, ApiError> {
+        let agent = created::parse_request(body).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+        if agent.needs_pizza_bot() && !self.pizza_bot() {
+            return Err(api_error(StatusCode::BAD_REQUEST, "MCP servers and skills need the pizza-bot harness, which this runner doesn't have"));
+        }
+        Ok(agent)
+    }
+
     /// Writes a new prompt agent into the created-agents folder and serves it right away.
     fn create(&self, body: &Value) -> Result<Value, ApiError> {
-        let agent = created::parse_request(body).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+        let agent = self.parse_agent(body)?;
         if self.agents.read().unwrap().specs.iter().any(|s| s.id == agent.id) {
             return Err(api_error(StatusCode::CONFLICT, format!("this runner already has an agent {:?}", agent.id)));
         }
@@ -252,7 +263,7 @@ impl App {
         };
         let mut request = body.as_object().cloned().unwrap_or_default();
         request.insert("id".into(), json!(id));
-        let agent = created::parse_request(&Value::Object(request)).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+        let agent = self.parse_agent(&Value::Object(request))?;
         created::rewrite(&folder, &agent, self.pizza_bot()).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         let spec = manifest::parse(id, &folder, &created::manifest_toml(&agent, self.pizza_bot())).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         let router = self.agent_router(&spec);
