@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { AlarmClock, Check, MessageSquare, RotateCcw, SendHorizontal } from "lucide-react";
+import { AlarmClock, Bot, Check, CornerDownRight, MessageSquare, RotateCcw, SendHorizontal } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAppToast } from "../AppToast.js";
 import type { FleetModel, FleetTask } from "./fleet-types.js";
@@ -58,6 +58,11 @@ export function RunMeta({ model, task }: { model: FleetModel; task: FleetTask })
       {task.trigger === "schedule" && (
         <span className="fleet-inbox-scheduled">
           <AlarmClock size={12} aria-hidden="true" /> scheduled
+        </span>
+      )}
+      {task.followUpOf && (
+        <span className="fleet-inbox-scheduled">
+          <CornerDownRight size={12} aria-hidden="true" /> follow-up
         </span>
       )}
       <span className={`fleet-state fleet-tone-${taskTone(task.state)}`}>{task.state}</span>
@@ -165,11 +170,22 @@ export function InboxCard({
 
       {!small && (
         <form className="fleet-inbox-ask" onSubmit={ask}>
+          <span
+            className={`fleet-inbox-ask-to${toAgent ? " agent" : ""}`}
+            title={
+              toAgent
+                ? `${agentName(model, task)} gets your message and remembers this conversation`
+                : `${agentName(model, task)} doesn't keep conversations, so this opens a chat about the result`
+            }
+          >
+            {toAgent ? <Bot size={13} aria-hidden="true" /> : <MessageSquare size={13} aria-hidden="true" />}
+            {toAgent ? agentName(model, task) : "Chat"}
+          </span>
           <input
             className="field-input"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder={toAgent ? `Ask ${agentName(model, task)} a follow-up…` : "Ask a follow-up about this result…"}
+            placeholder={toAgent ? `Reply to ${agentName(model, task)}…` : "Ask about this result in a chat…"}
             aria-label="Ask a follow-up"
             disabled={busy}
           />

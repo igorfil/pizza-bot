@@ -2091,6 +2091,12 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
 .fleet-inbox-extra[open] summary { margin-bottom: 6px; }
 .fleet-inbox-ask { display: flex; gap: 8px; }
 .fleet-inbox-ask .field-input { flex: 1; min-width: 0; }
+.fleet-inbox-ask-to {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; max-width: 40%; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fleet-inbox-ask-to.agent { color: var(--brand); border-color: color-mix(in oklch, var(--brand) 45%, var(--border)); background: color-mix(in oklch, var(--brand) 10%, transparent); }
 .fleet-earlier-list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .fleet-earlier-prompt { margin: 0 0 4px; font-weight: 600; color: var(--text); }
 .fleet-inbox-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
