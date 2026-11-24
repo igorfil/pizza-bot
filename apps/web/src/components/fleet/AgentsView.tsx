@@ -5,6 +5,7 @@ import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { AddRunnerDialog, DeleteAgentDialog, RemoveRunnerDialog } from "./GuideCard.js";
+import { RunDialog } from "./InboxView.js";
 import {
   activeRun,
   agentNames,
@@ -32,7 +33,7 @@ const stripTone = (t: FleetTask) => (isFinished(t) ? taskTone(t.state) : "runnin
 
 const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
 
-export function AgentsView({ model, send }: { model: FleetModel; send: FleetSend }) {
+export function AgentsView({ model, send, onOpenChat }: { model: FleetModel; send: FleetSend; onOpenChat: (chatId: string) => void }) {
   const notify = useAppToast();
   const [adding, setAdding] = useState(false);
   const [guide, setGuide] = useState<{ id: string; seen: boolean } | null>(null);
@@ -96,7 +97,7 @@ export function AgentsView({ model, send }: { model: FleetModel; send: FleetSend
       )}
 
       {runners.map((r) => (
-        <RunnerGroup key={r.name} model={model} runner={r} agents={agents.filter((a) => a.runner === r.name)} send={send} />
+        <RunnerGroup key={r.name} model={model} runner={r} agents={agents.filter((a) => a.runner === r.name)} send={send} onOpenChat={onOpenChat} />
       ))}
 
       {runners.length === 0 && sessions.length === 0 && (
@@ -128,11 +129,13 @@ export function RunnerGroup({
   runner,
   agents,
   send,
+  onOpenChat,
 }: {
   model: FleetModel;
   runner: FleetRunner;
   agents: FleetAgent[];
   send: FleetSend;
+  onOpenChat: (chatId: string) => void;
 }) {
   const notify = useAppToast();
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -181,6 +184,7 @@ export function RunnerGroup({
               agent={a}
               runner={runner}
               send={send}
+              onOpenChat={onOpenChat}
               removing={change?.action === "remove" && change.error === null && change.agents.includes(a.name)}
             />
           ))}
@@ -228,12 +232,14 @@ export function AgentCard({
   agent,
   runner,
   send,
+  onOpenChat,
   removing = false,
 }: {
   model: FleetModel;
   agent: FleetAgent;
   runner: FleetRunner;
   send: FleetSend;
+  onOpenChat: (chatId: string) => void;
   removing?: boolean;
 }) {
   const notify = useAppToast();
@@ -242,6 +248,8 @@ export function AgentCard({
   const [running, setRunning] = useState(false);
   const [input, setInput] = useState("");
   const [starting, setStarting] = useState(false);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const openTask = openTaskId ? model.tasks[openTaskId] : undefined;
   const active = activeRun(model, agent.key);
   const strip = runStrip(model, agent.key);
   const down = runner.status === "unreachable";
@@ -372,7 +380,8 @@ export function AgentCard({
         )}
       </footer>
 
-      {showRuns && <InlineRuns model={model} runs={runsOf(model, agent.key).slice(0, INLINE_RUNS)} />}
+      {showRuns && <InlineRuns model={model} runs={runsOf(model, agent.key).slice(0, INLINE_RUNS)} onOpen={setOpenTaskId} />}
+      {openTask && <RunDialog model={model} task={openTask} send={send} onOpenChat={onOpenChat} onClose={() => setOpenTaskId(null)} />}
     </article>
   );
 }
@@ -445,18 +454,31 @@ export function ScheduleRow({ agent, send }: { agent: FleetAgent; send: FleetSen
   );
 }
 
-function InlineRuns({ model, runs }: { model: FleetModel; runs: FleetTask[] }) {
+export function InlineRuns({ model, runs, onOpen }: { model: FleetModel; runs: FleetTask[]; onOpen: (taskId: string) => void }) {
   if (runs.length === 0) return <p className="fleet-muted fleet-inline-runs">No runs yet.</p>;
   return (
     <ul className="fleet-inline-runs">
-      {runs.map((t) => (
-        <li key={t.id}>
-          <span className={`fleet-strip-cell fleet-strip-${stripTone(t)}`} aria-hidden="true" />
-          <span className={`fleet-state fleet-tone-${taskTone(t.state)}`}>{t.state}</span>
-          <span className="fleet-muted">{ago(model.now, t.createdAt)}</span>
-          <span className="fleet-inline-runs-input">{t.prompt || "(no input)"}</span>
-        </li>
-      ))}
+      {runs.map((t) => {
+        const cells = (
+          <>
+            <span className={`fleet-strip-cell fleet-strip-${stripTone(t)}`} aria-hidden="true" />
+            <span className={`fleet-state fleet-tone-${taskTone(t.state)}`}>{t.state}</span>
+            <span className="fleet-muted">{ago(model.now, t.createdAt)}</span>
+            <span className="fleet-inline-runs-input">{t.prompt || "(no input)"}</span>
+          </>
+        );
+        return (
+          <li key={t.id}>
+            {isFinished(t) ? (
+              <button type="button" className="fleet-inline-run" onClick={() => onOpen(t.id)} title="Open the result">
+                {cells}
+              </button>
+            ) : (
+              <div className="fleet-inline-run">{cells}</div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

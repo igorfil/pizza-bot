@@ -56,7 +56,8 @@ Connection button.
   the agent card, health line or live status of the active run (with cancel), and a strip of the
   last 10 runs (green ok, red failed, grey canceled, pulsing blue running; tooltip has state, age,
   input).
-- [runs] expands the card in place with the last 5 runs. [evals] is disabled ("coming soon").
+- [runs] expands the card in place with the last 5 runs. A finished one opens its result in a dialog,
+  read or not, with Run again and Continue in chat. [evals] is disabled ("coming soon").
 - Schedule row: "Daily at 07:30 · change" or "Not scheduled · schedule"; inline time picker with
   Save / turn off / cancel (`SetSchedule`). Scheduled runs show a "scheduled" chip on their inbox
   card; runs without input are titled "Your <agent> report".

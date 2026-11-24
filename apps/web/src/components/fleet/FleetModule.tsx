@@ -80,7 +80,7 @@ export function FleetModule({ model, link, send, onEditConnection, initialTab = 
           ) : tab === "chats" ? (
             <ChatsView model={model} send={send} selectedId={chatId} onSelect={setChatId} />
           ) : (
-            <AgentsView model={model} send={send} />
+            <AgentsView model={model} send={send} onOpenChat={openChat} />
           )}
         </div>
       </div>

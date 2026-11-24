@@ -4,7 +4,7 @@ import { AppToastProvider } from "../AppToast.js";
 import { FleetConnectForm, FleetLinkBadge, FleetModule } from "./FleetModule.js";
 import { InboxCard, InboxView } from "./InboxView.js";
 import { ChatPane } from "./ChatsView.js";
-import { AgentCard, AgentsView } from "./AgentsView.js";
+import { AgentCard, AgentsView, InlineRuns } from "./AgentsView.js";
 import { addAgentModes } from "./AddAgentDialog.js";
 import { GuideCard, GuidePicker } from "./GuideCard.js";
 import type { FleetChat, FleetGuideSession, FleetModel, FleetTask } from "./fleet-types.js";
@@ -162,7 +162,7 @@ describe("ChatPane", () => {
 });
 
 describe("AgentsView", () => {
-  const view = (m: FleetModel) => wrap(<AgentsView model={m} send={noop} />);
+  const view = (m: FleetModel) => wrap(<AgentsView model={m} send={noop} onOpenChat={() => {}} />);
 
   it("groups agents under their runner with its location", () => {
     const html = view(model);
@@ -242,7 +242,7 @@ describe("Add agent", () => {
 
 describe("AgentCard", () => {
   const card = (m: FleetModel) =>
-    wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} />);
+    wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} onOpenChat={() => {}} />);
 
   it("has a delete button that names what it does", () => {
     const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true } } };
@@ -255,7 +255,7 @@ describe("AgentCard", () => {
   });
 
   it("shows that it's being removed, without actions", () => {
-    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} removing />);
+    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} onOpenChat={() => {}} removing />);
     expect([html.includes("Removing…"), html.includes("fleet-agent-delete")]).toEqual([true, false]);
   });
 
@@ -280,6 +280,18 @@ describe("AgentCard", () => {
 
   it("says when an agent isn't scheduled", () => {
     expect(card(model)).toContain("Not scheduled");
+  });
+});
+
+describe("InlineRuns", () => {
+  const rows = (runs: FleetTask[]) => wrap(<InlineRuns model={model} runs={runs} onOpen={() => {}} />);
+
+  it("lets a finished run be opened, read or not", () => {
+    expect(rows([jokes, { ...jokes, id: "t2", ackedAt: NOW }]).match(/<button[^>]*title="Open the result"/g)?.length).toBe(2);
+  });
+
+  it("doesn't open a run that is still going", () => {
+    expect(rows([{ ...jokes, state: "working" }])).not.toContain("Open the result");
   });
 });
 
@@ -356,7 +368,7 @@ describe("runner guides", () => {
   });
 
   it("lists a guide in progress on the Agents view with what it waits for", () => {
-    expect(wrap(<AgentsView model={withGuides(session())} send={noop} />)).toContain("Waiting for you: Where should the runner go?");
+    expect(wrap(<AgentsView model={withGuides(session())} send={noop} onOpenChat={() => {}} />)).toContain("Waiting for you: Where should the runner go?");
   });
 
   it("shows where the guide is in its steps", () => {
