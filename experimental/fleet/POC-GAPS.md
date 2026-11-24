@@ -36,7 +36,7 @@ What the POC skips or does the simplest way. Each item needs a real decision bef
 
 ## UI simplified
 - The Fleet page keeps its own copy of the Model types (`fleet-types.ts`); no shared package or generated client, by design of the import boundary.
-- The pizza-bot screen gets the full Model on every change and re-renders; no patches.
+- The pizza-bot screen gets the full Model on every change and re-renders; no patches. Quiet Ticks send nothing; the page ticks `now` itself (`use-fleet-clock.ts`).
 - Inbox cards have generic actions only (Ok got it, Continue in chat, Run again). Agent-specific actions from the mockups ("ok, merge", "Open in browser") need a way for agents to declare actions (e.g. artifact metadata); not designed.
 - `[evals]` on agent cards is a disabled stub. "Disabled" agents from the mockup map to unreachable runners; there is no enable/disable intent.
 

@@ -78,6 +78,7 @@ in `localStorage` under `pizza.fleet.connection`, and defaults to `http://127.0.
 
 **Behaviour.**
 - Every SSE event carries the **full** public Model; the page replaces its copy and re-renders.
+  Quiet Ticks send no event, so the page advances `now` on its own 1 s clock.
 - Reconnects every 2 s; stops on 401/403 and shows the exact fix.
 - The stream is open app-wide, for the rail's unread count and desktop notifications.
 - `fleet-types.ts` is a hand-kept mirror of the Controller's public Model.

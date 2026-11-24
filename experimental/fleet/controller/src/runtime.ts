@@ -227,7 +227,8 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
   const dispatch = (msgId: string, msg: Msg): { version: number; duplicate: boolean } => {
     if (log.has(msgId)) return { version, duplicate: true };
     const result = update(model, msg);
-    if (msg.type === "Tick" && isQuietTick(model, result)) {
+    const quiet = msg.type === "Tick" && isQuietTick(model, result);
+    if (quiet) {
       unloggedTick = { msgId, msg };
     } else {
       if (unloggedTick) log.append(unloggedTick.msgId, unloggedTick.msg);
@@ -238,7 +239,8 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
     model = next;
     effects.forEach(runEffect);
     reconcile();
-    listeners.forEach((l) => l(version, model));
+    // UIs keep their own clock, so a change of `now` alone isn't worth a full Model frame.
+    if (!quiet) listeners.forEach((l) => l(version, model));
     return { version, duplicate: false };
   };
 

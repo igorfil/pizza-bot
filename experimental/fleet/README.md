@@ -193,7 +193,7 @@ All endpoints need `Authorization: Bearer <token from ~/.agent-fleet/token>`. Bo
 |---|---|
 | `POST /msg {msg_id, type, payload}` | Send an intent. `202 {accepted_at_version}`; a repeated `msg_id` is a no-op (`200, duplicate: true`). |
 | `GET /model` | `{version, model}` |
-| `GET /model/stream` | SSE. Each event is the full `{version, model}`; keepalive comment every 15s. |
+| `GET /model/stream` | SSE. Each event is the full `{version, model}`, sent on every change except quiet Ticks (UIs run their own clock); keepalive comment every 15s. |
 
 Intents (only these are accepted over the API; world Msgs are rejected):
 

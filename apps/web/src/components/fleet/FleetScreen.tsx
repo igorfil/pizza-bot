@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { FleetConnectForm, FleetModule } from "./FleetModule.js";
 import type { Fleet } from "./use-fleet.js";
+import { useFleetClock } from "./use-fleet-clock.js";
 
 export function FleetScreen({ fleet }: { fleet: Fleet }) {
   const [editing, setEditing] = useState(false);
+  const model = useFleetClock(fleet.model);
 
   if (editing || fleet.link.kind === "unconfigured" || fleet.link.kind === "rejected") {
     return (
@@ -18,5 +20,5 @@ export function FleetScreen({ fleet }: { fleet: Fleet }) {
       />
     );
   }
-  return <FleetModule model={fleet.model} link={fleet.link} send={fleet.send} onEditConnection={() => setEditing(true)} />;
+  return <FleetModule model={model} link={fleet.link} send={fleet.send} onEditConnection={() => setEditing(true)} />;
 }
