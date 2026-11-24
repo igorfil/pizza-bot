@@ -235,7 +235,8 @@ export type LocalClock = { day: string; minute: number };
 
 export type WorldMsg =
   | { type: "Booted"; now: number; guides: GuideInfo[] }
-  | { type: "Tick"; now: number; local?: LocalClock }
+  /** `since`: the Model's `now` when the runtime sent it, so wake detection replays exactly though quiet Ticks aren't logged. */
+  | { type: "Tick"; now: number; local?: LocalClock; since?: number }
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
   | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }

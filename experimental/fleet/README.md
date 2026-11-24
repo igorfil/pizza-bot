@@ -253,8 +253,10 @@ Msg ──▶ update(Model, Msg) ──▶ (Model, [Effect])        pure; time a
 - Effects: `CheckRunner` (fetch agent card), `Dispatch` (SendMessage, returnImmediately),
   `GetTask`, `Cancel`, `ChatComplete` (Bedrock).
 - Sub: `TaskStream` keyed `taskId#epoch`. Bumping the epoch forces a reconnect.
-- Every Msg is logged before `update` runs. On start the log is replayed with effects dropped, then
-  `Booted` is dispatched.
+- Every Msg is logged before its effects run, except quiet Ticks (no effects, nothing changed but
+  the clock): the latest one is held back and logged just before the next Msg, and each Tick
+  carries `since` (the Model's `now` when it was sent) so wake detection replays exactly. On start
+  the log is replayed with effects dropped, then `Booted` is dispatched.
 
 Timing constants (`controller/src/update.ts`): tick 2s, health check 15s, backoff `2^(n-1)` s capped
 at 30s, resync of open runs every 30s, a tick gap over 10s counts as wake.

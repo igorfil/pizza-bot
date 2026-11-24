@@ -213,8 +213,9 @@ const dueSchedules = (model: Model): Result => {
   );
 };
 
-const tick = (model: Model, now: number, local: LocalClock | undefined): Result => {
-  const woke = model.now !== 0 && now - model.now > WAKE_GAP_MS;
+const tick = (model: Model, now: number, local: LocalClock | undefined, since: number | undefined): Result => {
+  const prev = since ?? model.now;
+  const woke = prev !== 0 && now - prev > WAKE_GAP_MS;
   const ticked = { ...model, now, local: local ?? model.local };
   const afterWake = woke ? resyncAll(notify(ticked, "info", "wake detected, resyncing")) : ticked;
   const [afterChecks, checkEffects] = dueRunnerChecks(afterWake);
@@ -443,6 +444,10 @@ const withTask = (model: Model, taskId: string, f: (task: Task) => Result): Resu
   return task ? f(task) : [model, []];
 };
 
+/** A Tick that only moved the clock; it can stay out of the log if the latest one is logged before the next Msg. */
+export const isQuietTick = (before: Model, [after, effects]: Result): boolean =>
+  effects.length === 0 && (Object.keys(after) as (keyof Model)[]).every((k) => k === "now" || k === "local" || after[k] === before[k]);
+
 export const update = (model: Model, msg: Msg): Result => {
   switch (msg.type) {
     case "AddRunner": {
@@ -482,7 +487,7 @@ export const update = (model: Model, msg: Msg): Result => {
       return [resyncAll(interruptGuides(failInterruptedChats(markLostDispatches({ ...model, now: msg.now, guideCatalog: msg.guides })))), []];
 
     case "Tick":
-      return tick(model, msg.now, msg.local);
+      return tick(model, msg.now, msg.local, msg.since);
 
     case "RunnerOk":
       return runnerOk(model, msg.name, msg);

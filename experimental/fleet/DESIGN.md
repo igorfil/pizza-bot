@@ -233,21 +233,22 @@ chain.
 
 ### 3.5 Msg log
 
-**Role.** Durable history of every Msg, including Ticks and world results. Replaying it rebuilds the
-exact Model.
+**Role.** Durable history of every Msg (intents, world results, and the Ticks that matter).
+Replaying it rebuilds the exact Model.
 
 **Storage.** `better-sqlite3` in WAL mode, table `msgs(seq, msg_id UNIQUE, at, body JSON)`. Each Msg
-is appended before `update` runs. On start: replay with effects dropped, then `Booted`. `msg_id`
+is appended before its effects run. A quiet Tick (no effects, only `now`/`local` changed) is held
+back; the latest one is logged right before the next Msg, so later Msgs replay at the right time,
+and `Tick.since` keeps wake detection exact. On start: replay with effects dropped, then `Booted`. `msg_id`
 uniqueness gives API idempotency forever.
 
-**Observed.** On the dev laptop: 5,650 rows, of which 4,509 (80 %) are `Tick`. A Controller running
-all day writes about 43,000 Ticks.
+**Observed.** Before quiet Ticks were held back, 80 % of the dev laptop's 5,650 rows were `Tick`
+(about 43,000 a day). Now an idle Controller logs about two Ticks per health check (every 15 s).
 
 **Open questions.**
 - Q-LOG-1 **Snapshots and compaction.** Replay reads the whole log on every boot. When do we add
-  periodic Model snapshots (SPEC D6 rule 6) and drop or compact older Msgs? Should most Ticks be
-  logged at all? Only the time they carry matters for replay, so an option is to log a Tick only
-  when it changes the Model.
+  periodic Model snapshots (SPEC D6 rule 6) and drop or compact older Msgs? Old logs still hold
+  every Tick from before quiet Ticks were held back.
 - Q-LOG-2 **Msg versioning.** Changing the Model's shape broke replay once (the old log was set
   aside as `controller.db.v1-runner-per-agent`, not migrated). What is the versioning scheme:
   version per Msg type, upcasters, or "snapshot then truncate" on upgrade?

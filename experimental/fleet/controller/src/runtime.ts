@@ -9,7 +9,7 @@ import { errorText, type Outcome } from "./outcome.js";
 import { vaultKeys } from "./runners.js";
 import type { Transport } from "./transport.js";
 import type { Effect, Endpoint, LocalClock, Model, Msg, Sub, TransportSpec } from "./types.js";
-import { initialModel, subscriptions, TICK_MS, update } from "./update.js";
+import { initialModel, isQuietTick, subscriptions, TICK_MS, update } from "./update.js";
 import { reveal, type SecretStore } from "./vault.js";
 
 export type Runtime = {
@@ -222,10 +222,19 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
       if (msg) world(msg);
     });
 
+  let unloggedTick: { msgId: string; msg: Msg } | null = null;
+
   const dispatch = (msgId: string, msg: Msg): { version: number; duplicate: boolean } => {
     if (log.has(msgId)) return { version, duplicate: true };
-    version = log.append(msgId, msg);
-    const [next, effects] = update(model, msg);
+    const result = update(model, msg);
+    if (msg.type === "Tick" && isQuietTick(model, result)) {
+      unloggedTick = { msgId, msg };
+    } else {
+      if (unloggedTick) log.append(unloggedTick.msgId, unloggedTick.msg);
+      unloggedTick = null;
+      version = log.append(msgId, msg);
+    }
+    const [next, effects] = result;
     model = next;
     effects.forEach(runEffect);
     reconcile();
@@ -236,7 +245,7 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
   world({ type: "Booted", now: Date.now(), guides: catalog(deps.guides) });
   setInterval(() => {
     const now = Date.now();
-    world({ type: "Tick", now, local: localClock(new Date(now)) });
+    world({ type: "Tick", now, local: localClock(new Date(now)), since: model.now });
   }, TICK_MS);
 
   return {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentInfo, GuideResult, Model, Msg, Sub, TaskSnapshot } from "./types.js";
-import { inboxOf, initialModel, subscriptions, update, WAKE_GAP_MS } from "./update.js";
+import { inboxOf, initialModel, isQuietTick, subscriptions, update, WAKE_GAP_MS } from "./update.js";
 
 const run = (msgs: Msg[], start: Model = initialModel()) =>
   msgs.reduce<[Model, ReturnType<typeof update>[1]]>(([m], msg) => update(m, msg), [start, []]);
@@ -655,5 +655,49 @@ describe("guide sessions", () => {
       { type: "CancelGuide", sessionId: "g1" },
     ]);
     expect([model.guideSessions, effects]).toEqual([{}, [{ type: "DeleteSecrets", keys: ["guide/g1/token/a"] }]]);
+  });
+});
+
+describe("quiet Ticks", () => {
+  const [ready] = run(withRunningTask);
+  const tickAt = (now: number, since = now - 2_000): Msg => ({ type: "Tick", now, since });
+
+  test("a Tick with nothing due only moves the clock", () => {
+    expect(isQuietTick(ready, update(ready, tickAt(3_000)))).toBe(true);
+  });
+
+  test("a Tick that makes a health check due is not quiet", () => {
+    expect(isQuietTick(ready, update(ready, tickAt(1_000 + 15_000)))).toBe(false);
+  });
+
+  test("a Tick that detects a wake is not quiet", () => {
+    expect(isQuietTick(ready, update(ready, tickAt(3_000, 3_000 - WAKE_GAP_MS - 1)))).toBe(false);
+  });
+
+  test("wake detection follows the Tick's since, not the Model's clock", () => {
+    const [stale] = update(ready, tickAt(1_000 + WAKE_GAP_MS + 1_000));
+    expect(stale.notifications.some((n) => n.text === "wake detected, resyncing")).toBe(false);
+  });
+
+  test("replaying only the logged Msgs rebuilds the live Model", () => {
+    const ticks = Array.from({ length: 40 }, (_, i) => 1_000 + (i + 1) * 2_000);
+    const live: Msg[] = [
+      ...withRunningTask,
+      ...ticks.slice(0, 20).map((now) => tickAt(now)),
+      { type: "CreateChat", chatId: "c1", fromTaskId: null, text: "hi" },
+      ...ticks.slice(20).map((now) => tickAt(now)),
+      { type: "AckInbox", taskId: "t1" },
+    ];
+    // Mirrors the runtime: quiet Ticks are held back, and the latest one is logged before the next Msg.
+    const { model, logged } = live.reduce<{ model: Model; logged: Msg[]; held: Msg | null }>(
+      (acc, msg) => {
+        const result = update(acc.model, msg);
+        return msg.type === "Tick" && isQuietTick(acc.model, result)
+          ? { ...acc, model: result[0], held: msg }
+          : { model: result[0], logged: [...acc.logged, ...(acc.held ? [acc.held] : []), msg], held: null };
+      },
+      { model: initialModel(), logged: [], held: null },
+    );
+    expect([run(logged)[0], logged.length < live.length]).toEqual([model, true]);
   });
 });

@@ -20,7 +20,7 @@ What the POC skips or does the simplest way. Each item needs a real decision bef
 - No CLI; the Fleet page is the only UI and talks to the API directly.
 
 ## Behaviour simplified
-- Msg log: every Msg including `Tick` is logged, no snapshots, no compaction. Replay reads the full log.
+- Msg log: every Msg is logged except quiet Ticks; no snapshots, no compaction. Replay reads the full log.
 - Artifacts: text artifacts stored inline in the Model. No blob store, no `/artifacts/{id}`.
 - Dispatch idempotency: if the Controller dies mid-dispatch, the task is marked `lost` on boot. No dedupe by `messageId`.
 - Runner restart mid-task: orphaned `submitted` / `working` tasks are marked `failed` on startup. No resume.
