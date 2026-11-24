@@ -1,0 +1,12 @@
+name = "Web research"
+description = "Reads web pages and answers from them (Pizza Bot runtime, fetch MCP, Claude Haiku 5.5)."
+harness = "pizza-bot"
+timeout_secs = 300
+
+[input]
+label = "Question"
+hint = "a question, ideally with the URLs to read"
+example = "What's on the Hacker News front page?"
+
+[env]
+MODEL = "us.anthropic.claude-haiku-5-5"

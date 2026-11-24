@@ -19,11 +19,19 @@ struct Manifest {
     name: String,
     #[serde(default)]
     description: String,
-    command: String,
+    command: Option<String>,
+    harness: Option<String>,
     timeout_secs: Option<u64>,
     input: Option<InputSpec>,
     #[serde(default)]
     env: BTreeMap<String, String>,
+}
+
+/// How a run starts: the agent's own command, or a harness the runner provides (e.g. `pizza-bot`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Launch {
+    Command(String),
+    Harness(String),
 }
 
 /// One agent folder, as the runner serves it. See agents/README.md for the contract.
@@ -33,7 +41,7 @@ pub struct AgentSpec {
     pub dir: PathBuf,
     pub name: String,
     pub description: String,
-    pub command: String,
+    pub launch: Launch,
     pub timeout_secs: u64,
     pub input: Option<InputSpec>,
     pub env: BTreeMap<String, String>,
@@ -48,12 +56,17 @@ pub fn parse(id: &str, dir: &Path, toml_text: &str) -> Result<AgentSpec, String>
         return Err(format!("agent folder {id:?} must be lowercase letters, digits, - or _"));
     }
     let m: Manifest = toml::from_str(toml_text).map_err(|e| format!("{id}/agent.toml: {e}"))?;
+    let launch = match (m.command, m.harness) {
+        (Some(command), None) => Launch::Command(command),
+        (None, Some(harness)) => Launch::Harness(harness),
+        _ => return Err(format!("{id}/agent.toml needs either command or harness")),
+    };
     Ok(AgentSpec {
         id: id.to_string(),
         dir: dir.to_path_buf(),
         name: m.name,
         description: m.description,
-        command: m.command,
+        launch,
         timeout_secs: m.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
         input: m.input,
         env: m.env,
@@ -117,6 +130,17 @@ MODEL = "m"
     #[test]
     fn requires_a_command() {
         assert!(parse("x", Path::new("/a"), "name = \"X\"").is_err());
+    }
+
+    #[test]
+    fn takes_a_harness_instead_of_a_command() {
+        let s = parse("x", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").unwrap();
+        assert_eq!(s.launch, Launch::Harness("pizza-bot".into()));
+    }
+
+    #[test]
+    fn refuses_both_a_command_and_a_harness() {
+        assert!(parse("x", Path::new("/a"), "name = \"X\"\ncommand = \"true\"\nharness = \"pizza-bot\"").is_err());
     }
 
     #[test]

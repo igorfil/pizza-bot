@@ -6,3 +6,4 @@ target-linux/
 *.db-wal
 .DS_Store
 __pycache__/
+.state/

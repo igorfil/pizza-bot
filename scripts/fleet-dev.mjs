@@ -34,6 +34,10 @@ export function fleetProcesses({ root, webOrigins }) {
     return { skip: `the runner didn't build (${built.error?.message ?? `cargo exited ${built.status}`}); install Rust or set PIZZA_FLEET=0` };
   }
 
+  // `npm run build` bundles it; without it, pizza-bot agents fail with a hint instead of the runner refusing to start.
+  const pizzaBotHarness = path.join(root, "apps", "fleet-agent", "dist", "main.js");
+  if (!existsSync(pizzaBotHarness)) console.warn(`[fleet] no pizza-bot harness at ${pizzaBotHarness}; run npm run build`);
+
   mkdirSync(home, { recursive: true });
   writeFileSync(path.join(home, "token"), FLEET_DEV_TOKEN, { mode: 0o600 });
   chmodSync(path.join(home, "token"), 0o600);
@@ -58,10 +62,11 @@ export function fleetProcesses({ root, webOrigins }) {
         RUNNER_TOKEN: LOCAL_RUNNER.token,
         RUNNER_LOCATION: "this laptop",
         RUNNER_AGENTS_DIR: "agents",
-        RUNNER_AGENTS: "sysreport,morningbrief,slow",
+        RUNNER_AGENTS: "sysreport,morningbrief,slow,webresearch",
         RUNNER_DB: path.join(home, "laptop-runner.db"),
         RUNNER_BIND: "127.0.0.1:9301",
         AWS_REGION: process.env.AWS_REGION ?? "us-west-2",
+        ...(existsSync(pizzaBotHarness) ? { RUNNER_HARNESS_PIZZA_BOT: `'${process.execPath}' '${pizzaBotHarness}'` } : {}),
       },
     },
   ];

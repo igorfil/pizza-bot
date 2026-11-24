@@ -41,7 +41,7 @@ export default tseslint.config(
   },
   {
     files: [
-      "apps/{api-server,cli,agent-daemon,desktop-shell}/**/*.{ts,mjs,js}",
+      "apps/{api-server,cli,agent-daemon,desktop-shell,fleet-agent}/**/*.{ts,mjs,js}",
       "packages/**/*.{ts,mjs}",
       "plugins/**/*.{js,mjs,ts}",
       "scripts/**/*.{js,mjs}",
@@ -50,7 +50,7 @@ export default tseslint.config(
   },
   {
     // Two backends side by side: the fleet talks to pizza-bot only over HTTP, never through imports.
-    files: ["apps/{api-server,cli,agent-daemon,desktop-shell}/**/*.{ts,mjs,js}", "packages/**/*.{ts,mjs}", "plugins/**/*.{js,mjs,ts}"],
+    files: ["apps/{api-server,cli,agent-daemon,desktop-shell,fleet-agent}/**/*.{ts,mjs,js}", "packages/**/*.{ts,mjs}", "plugins/**/*.{js,mjs,ts}"],
     rules: {
       "no-restricted-imports": [
         "error",

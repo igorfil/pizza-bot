@@ -1,6 +1,7 @@
 mod created;
 mod events;
 mod exec;
+mod harness;
 mod manifest;
 mod store;
 
@@ -21,7 +22,8 @@ use axum::routing::{any, delete, get};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use manifest::AgentSpec;
+use harness::{Harnesses, PIZZA_BOT};
+use manifest::{AgentSpec, Launch};
 
 struct Config {
     name: String,
@@ -34,6 +36,7 @@ struct Config {
     created_dir: PathBuf,
     only: Option<Vec<String>>,
     location: Option<String>,
+    harnesses: Arc<Harnesses>,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -55,6 +58,7 @@ fn load_config() -> Result<Config, String> {
             .ok()
             .map(|s| s.split(',').map(|id| id.trim().to_string()).filter(|id| !id.is_empty()).collect()),
         location: std::env::var("RUNNER_LOCATION").ok().filter(|l| !l.is_empty()),
+        harnesses: Arc::new(Harnesses::from_vars(std::env::vars())),
         bind,
     })
 }
@@ -117,6 +121,7 @@ fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
         "input": s.input,
         "url": agent_url(cfg, s),
         "created": is_created(cfg, s),
+        "harness": match &s.launch { Launch::Harness(name) => Some(name), Launch::Command(_) => None },
     });
     if is_created(cfg, s) {
         v["model"] = json!(s.env.get("MODEL"));
@@ -157,7 +162,7 @@ struct App {
 
 impl App {
     fn agent_router(&self, spec: &AgentSpec) -> axum::Router {
-        let executor = exec::ExecAgent { spec: Arc::new(spec.clone()), runs: self.runs.clone() };
+        let executor = exec::ExecAgent { spec: Arc::new(spec.clone()), runs: self.runs.clone(), harnesses: self.cfg.harnesses.clone() };
         let handler = Arc::new(DefaultRequestHandler::new(executor, self.store.clone()).with_capabilities(capabilities()));
         let bearer = self.bearer.clone();
         let rpc = jsonrpc_router(handler).layer(middleware::from_fn(move |req, next| require_bearer(bearer.clone(), req, next)));
@@ -178,6 +183,7 @@ impl App {
             "agents": on.iter().map(|s| agent_json(&self.cfg, s)).collect::<Vec<_>>(),
             "available": off.iter().map(|s| agent_json(&self.cfg, s)).collect::<Vec<_>>(),
             "canCreate": true,
+            "harnesses": self.cfg.harnesses.names(),
         })
     }
 
@@ -206,14 +212,18 @@ impl App {
         Ok(self.index())
     }
 
+    fn pizza_bot(&self) -> bool {
+        self.cfg.harnesses.has(PIZZA_BOT)
+    }
+
     /// Writes a new prompt agent into the created-agents folder and serves it right away.
     fn create(&self, body: &Value) -> Result<Value, ApiError> {
         let agent = created::parse_request(body).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
         if self.agents.read().unwrap().specs.iter().any(|s| s.id == agent.id) {
             return Err(api_error(StatusCode::CONFLICT, format!("this runner already has an agent {:?}", agent.id)));
         }
-        let folder = created::write(&self.cfg.created_dir, &agent).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        let spec = manifest::parse(&agent.id, &folder, &created::manifest_toml(&agent)).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let folder = created::write(&self.cfg.created_dir, &agent, self.pizza_bot()).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let spec = manifest::parse(&agent.id, &folder, &created::manifest_toml(&agent, self.pizza_bot())).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         let router = self.agent_router(&spec);
         let served = {
             let mut agents = self.agents.write().unwrap();
@@ -243,8 +253,8 @@ impl App {
         let mut request = body.as_object().cloned().unwrap_or_default();
         request.insert("id".into(), json!(id));
         let agent = created::parse_request(&Value::Object(request)).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
-        created::rewrite(&folder, &agent).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        let spec = manifest::parse(id, &folder, &created::manifest_toml(&agent)).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        created::rewrite(&folder, &agent, self.pizza_bot()).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let spec = manifest::parse(id, &folder, &created::manifest_toml(&agent, self.pizza_bot())).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         let router = self.agent_router(&spec);
         {
             let mut agents = self.agents.write().unwrap();
@@ -399,6 +409,6 @@ async fn main() -> Result<(), String> {
 
     let listener = tokio::net::TcpListener::bind(&app.cfg.bind).await.map_err(|e| e.to_string())?;
     let ids: Vec<String> = app.agents.read().unwrap().served.iter().cloned().collect();
-    tracing::info!(name = %app.cfg.name, agents = ?ids, bind = %app.cfg.bind, public_url = %app.cfg.public_url, "runner listening");
+    tracing::info!(name = %app.cfg.name, agents = ?ids, harnesses = ?app.cfg.harnesses.names(), bind = %app.cfg.bind, public_url = %app.cfg.public_url, "runner listening");
     axum::serve(listener, router).await.map_err(|e| e.to_string())
 }

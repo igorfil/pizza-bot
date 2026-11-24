@@ -1,0 +1,25 @@
+{
+  "name": "@pizza-bot/fleet-agent",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs one fleet agent folder (system prompt, MCP servers, skills) on the Pizza Bot runtime, speaking the fleet runner's stdin/stdout contract.",
+  "scripts": {
+    "build": "node scripts/bundle.mjs dist",
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@pizza-bot/core": "*",
+    "@pizza-bot/inference-providers": "*",
+    "@pizza-bot/plugin-sdk": "*",
+    "@pizza-bot/runtime-langgraph": "*",
+    "@pizza-bot/storage": "*"
+  }
+}

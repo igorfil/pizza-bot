@@ -13,6 +13,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::Notify;
 
 use crate::events::{artifact, prompt_text, status};
+use crate::harness::Harnesses;
 use crate::manifest::AgentSpec;
 
 const KILL_GRACE: Duration = Duration::from_secs(5);
@@ -79,6 +80,7 @@ impl Runs {
 pub struct ExecAgent {
     pub spec: Arc<AgentSpec>,
     pub runs: Runs,
+    pub harnesses: Arc<Harnesses>,
 }
 
 fn signal_group(child: &Child, signal: i32) {
@@ -98,10 +100,10 @@ async fn stop(child: &mut Child) {
     }
 }
 
-fn spawn(spec: &AgentSpec, task_id: &str) -> std::io::Result<Child> {
+fn spawn(spec: &AgentSpec, command: &str, task_id: &str) -> std::io::Result<Child> {
     Command::new("sh")
         .arg("-c")
-        .arg(&spec.command)
+        .arg(command)
         .current_dir(&spec.dir)
         .envs(&spec.env)
         .env("FLEET_TASK_ID", task_id)
@@ -119,12 +121,20 @@ impl AgentExecutor for ExecAgent {
         let input = prompt_text(&ctx);
         let spec = self.spec.clone();
         let runs = self.runs.clone();
+        let command = self.harnesses.command(&spec.launch);
 
         Box::pin(async_stream::stream! {
-            let mut child = match spawn(&spec, &task_id) {
+            let command = match command {
                 Ok(c) => c,
                 Err(e) => {
-                    yield Ok(status(&task_id, &context_id, TaskState::Failed, &format!("could not start {:?}: {e}", spec.command)));
+                    yield Ok(status(&task_id, &context_id, TaskState::Failed, &e));
+                    return;
+                }
+            };
+            let mut child = match spawn(&spec, &command, &task_id) {
+                Ok(c) => c,
+                Err(e) => {
+                    yield Ok(status(&task_id, &context_id, TaskState::Failed, &format!("could not start {command:?}: {e}")));
                     return;
                 }
             };
