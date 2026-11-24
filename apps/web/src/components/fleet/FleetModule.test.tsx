@@ -112,7 +112,16 @@ describe("Inbox layouts", () => {
 
   it("offers every layout, with the current one pressed", () => {
     const html = view("feed");
-    expect([html.match(/aria-pressed="(true|false)"/g)?.length, /aria-pressed="true"[^>]*title="Every result in full/.test(html)]).toEqual([5, true]);
+    expect([html.match(/aria-pressed="(true|false)"/g)?.length, /aria-pressed="true"[^>]*title="Every result in full/.test(html)]).toEqual([6, true]);
+  });
+
+  it("overview: a page thumbnail per result, each opening it, with a size control", () => {
+    const html = view("overview");
+    expect([html.match(/class="fleet-thumb-open"/g)?.length, html.includes(", completed, unread"), html.includes('aria-label="Thumbnail size"')]).toEqual([2, true, true]);
+  });
+
+  it("overview: previews are hidden from assistive tech and can't take focus", () => {
+    expect(view("overview")).toMatch(/class="fleet-thumb-page" aria-hidden="true" inert=""/);
   });
 
   it("keeps the switcher when there is nothing to review", () => {

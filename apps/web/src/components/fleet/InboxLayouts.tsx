@@ -3,7 +3,7 @@ import { CheckCheck, RotateCcw } from "lucide-react";
 import { useAppToast } from "../AppToast.js";
 import type { FleetModel, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
-import { InboxCard, RunDialog, type OpenChat } from "./RunCard.js";
+import { InboxCard, RunDialog, RunResult, type OpenChat } from "./RunCard.js";
 import { agentName, ago, groupByAgent, groupByDay, runTitle, selectedOrNext, taskAgentKey, taskTone } from "./fleet-view-model.js";
 
 type LayoutProps = { model: FleetModel; tasks: FleetTask[]; send: FleetSend; onOpenChat: OpenChat };
@@ -150,6 +150,57 @@ export function AgentsLayout({ model, tasks, send, onOpenChat }: LayoutProps) {
       })}
       {open && <RunDialog model={model} task={open} send={send} onOpenChat={onOpenChat} onClose={() => setOpenId(null)} />}
     </div>
+  );
+}
+
+export type ThumbSize = "s" | "m" | "l";
+
+export const THUMB_SIZES: { id: ThumbSize; label: string }[] = [
+  { id: "s", label: "Small" },
+  { id: "m", label: "Medium" },
+  { id: "l", label: "Large" },
+];
+
+/** Page thumbnails, like a PDF viewer's: each result scaled down whole, opened in a dialog. */
+export function OverviewLayout({ model, tasks, send, onOpenChat, size = "m" }: LayoutProps & { size?: ThumbSize }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = openId ? model.tasks[openId] : undefined;
+  return (
+    <>
+      <ul className={`fleet-thumbs fleet-thumbs-${size}`} aria-label="Results overview">
+        {tasks.map((t) => {
+          const failed = taskTone(t.state) === "bad";
+          const unread = t.ackedAt == null;
+          return (
+            <li key={t.id} className={`fleet-thumb${failed ? " failed" : ""}${unread ? " unread" : ""}`}>
+              <div className="fleet-thumb-page" aria-hidden="true" inert>
+                <div className="fleet-thumb-content">
+                  <p className="fleet-thumb-heading">{runTitle(model, t)}</p>
+                  <RunResult task={t} />
+                </div>
+              </div>
+              <div className="fleet-thumb-caption" aria-hidden="true">
+                <span className="fleet-thumb-title">
+                  {unread && <span className="fleet-thumb-dot" />}
+                  {runTitle(model, t)}
+                </span>
+                <span className="fleet-run-line-sub">
+                  {agentName(model, t)} · {ago(model.now, t.updatedAt)}
+                  {failed && ` · ${t.state}`}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="fleet-thumb-open"
+                onClick={() => setOpenId(t.id)}
+                aria-label={`${runTitle(model, t)}, ${agentName(model, t)}, ${t.state}${unread ? ", unread" : ""}`}
+              />
+            </li>
+          );
+        })}
+      </ul>
+      {open && <RunDialog model={model} task={open} send={send} onOpenChat={onOpenChat} onClose={() => setOpenId(null)} />}
+    </>
   );
 }
 

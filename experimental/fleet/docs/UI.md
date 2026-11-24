@@ -16,12 +16,16 @@ Three views inside the one screen, as tabs under the header (from the Inbox / Ch
 mockups). The header has the link status (Live / Connecting… / Reconnecting… / Not connected) and a
 Connection button.
 
-### Inbox: five layouts
+### Inbox: six layouts
 
-A switcher in the Inbox bar (Stack · List · Feed · By agent · Table) changes the layout; the choice
+A switcher in the Inbox bar (Overview · Stack · List · Feed · By agent · Table) changes the layout; the choice
 is saved per device in `localStorage` (`pizza.fleet.inboxLayout`). Every layout shows the same
 result body (`RunResult`) and actions (Run again, Continue in chat, Ok, got it), from `RunCard.tsx`.
 
+- **Overview**: page thumbnails, like a PDF viewer's: each result rendered whole and scaled down
+  (the preview is `inert`), with unread and failed marked on the page edge. Small / Medium / Large
+  sizes (saved as `pizza.fleet.thumbSize`); "Show read" adds read results. A thumbnail opens the
+  result dialog.
 - **Stack** (default): one big card at a time, the next ones peeking out behind it; Ok, got it has focus.
 - **List**: results on the left, the selected one in full on the right; ↑/↓ or j/k move, and
   marking one read selects the one that took its place. Stacks vertically on narrow screens.
@@ -109,7 +113,7 @@ New, all in `apps/web/src/components/fleet/`:
 | `fleet-view-model.ts` | pure helpers: inbox, chats, runs per agent, run strip, titles, location, tones, time formats |
 | `FleetModule.tsx` | hub: header, `ModuleTabs` (Inbox / Chats / Agents), `FleetLinkBadge`, `FleetConnectForm` |
 | `InboxView.tsx` | Inbox bar, layout switcher, Stack |
-| `InboxLayouts.tsx` | List, Feed, By agent, Table |
+| `InboxLayouts.tsx` | Overview, List, Feed, By agent, Table |
 | `RunCard.tsx` | `InboxCard` (stack / detail / compact), `RunResult`, `RunDialog`, shared run actions |
 | `ChatsView.tsx` | chat list + `ChatPane` |
 | `AgentsView.tsx` | grid + `AgentCard`, inline runs, add-agent card |
