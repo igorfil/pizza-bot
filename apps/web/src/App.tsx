@@ -41,6 +41,9 @@ import { adminVisibility, type AppView } from "./admin-visibility.js";
 import { AppNavigation } from "./components/AppNavigation.js";
 import { LogsModule } from "./components/logs/LogsModule.js";
 import { FleetScreen } from "./components/fleet/FleetScreen.js";
+import { inboxOf } from "./components/fleet/fleet-view-model.js";
+import { useFleet } from "./components/fleet/use-fleet.js";
+import { useFleetNotifications } from "./components/fleet/use-fleet-notifications.js";
 import { useDesktopConnection } from "./use-desktop-connection.js";
 import { useDesktopNotifications } from "./desktop-notifications.js";
 import { initialThreadId } from "./initial-thread-selection.js";
@@ -224,6 +227,16 @@ export function App() {
     activeThreadId,
   );
 
+  // Connected app-wide, so the rail count and notifications work from any view.
+  const fleet = useFleet({ background: view !== "fleet" });
+  const openFleet = useCallback(() => setView("fleet"), []);
+  useFleetNotifications(fleet.model, {
+    enabled: desktopNotifications?.notifyOnRunCompletion ?? true,
+    watching: view === "fleet",
+    onOpen: openFleet,
+  });
+  const fleetUnread = fleet.model ? inboxOf(fleet.model).length : 0;
+
   const onSelectThread = useCallback((threadId: string) => {
     setSearchTarget(null);
     setActiveThreadId(threadId);
@@ -386,6 +399,7 @@ export function App() {
             enableAutomations={features.enableAutomations}
             enableMemories={features.enableMemories}
             onViewChange={setView}
+            counts={{ fleet: fleetUnread }}
           />
 
           {view === "automations" ? (
@@ -460,7 +474,7 @@ export function App() {
             </div>
           ) : view === "fleet" ? (
             <div className="module-hub">
-              <FleetScreen />
+              <FleetScreen fleet={fleet} />
             </div>
           ) : view === "logs" ? (
             <div className="module-hub">

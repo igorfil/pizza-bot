@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   loadFleetConnection,
   saveFleetConnection,
@@ -19,6 +19,7 @@ export type FleetLink =
   | { kind: "rejected"; error: string };
 
 const RETRY_MS = 2_000;
+const BACKGROUND_RETRY_MS = 30_000;
 
 const describe = (e: unknown): string => {
   if (e instanceof FleetError && e.status === 401) return "The Controller rejected the token.";
@@ -31,10 +32,20 @@ const describe = (e: unknown): string => {
 /** Auth and origin failures won't fix themselves, so they stop the retry loop. */
 const isFatal = (e: unknown) => e instanceof FleetError && (e.status === 401 || e.status === 403);
 
-export function useFleet() {
+/** `background`: nobody is looking at the Fleet page, so a missing Controller is retried slowly. */
+export function useFleet({ background = false }: { background?: boolean } = {}) {
   const [connection, setConnection] = useState<FleetConnection | null>(loadFleetConnection);
   const [model, setModel] = useState<FleetModel | null>(null);
   const [link, setLink] = useState<FleetLink>({ kind: "connecting" });
+  const [attempt, setAttempt] = useState(0);
+  const retryMs = useRef(RETRY_MS);
+  retryMs.current = background ? BACKGROUND_RETRY_MS : RETRY_MS;
+  const retrying = useRef(false);
+  retrying.current = link.kind === "retrying";
+
+  useEffect(() => {
+    if (!background && retrying.current) setAttempt((n) => n + 1);
+  }, [background]);
 
   useEffect(() => {
     if (!connection) return;
@@ -53,16 +64,16 @@ export function useFleet() {
         if (isFatal(e)) return setLink({ kind: "rejected", error: describe(e) });
         setLink({ kind: "retrying", error: describe(e) });
       }
-      if (!abort.signal.aborted) timer = setTimeout(() => void follow(), RETRY_MS);
+      if (!abort.signal.aborted) timer = setTimeout(() => void follow(), retryMs.current);
     };
 
-    setLink({ kind: "connecting" });
+    setLink((prev) => (prev.kind === "retrying" ? prev : { kind: "connecting" }));
     void follow();
     return () => {
       abort.abort();
       clearTimeout(timer);
     };
-  }, [connection]);
+  }, [connection, attempt]);
 
   const connect = useCallback((next: FleetConnection | null) => {
     saveFleetConnection(next);
@@ -85,3 +96,5 @@ export function useFleet() {
 
   return { connection, model, link, connect, send };
 }
+
+export type Fleet = ReturnType<typeof useFleet>;

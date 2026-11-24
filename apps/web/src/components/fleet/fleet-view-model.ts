@@ -113,6 +113,10 @@ export const inboxOf = (model: FleetModel): FleetTask[] =>
     .filter((t) => isFinished(t) && !t.ackedAt)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
+/** Runs that finished between two Models; none for the first Model, so connecting doesn't replay old results. */
+export const finishedSince = (prev: FleetModel | null, next: FleetModel): FleetTask[] =>
+  prev ? inboxOf(next).filter((t) => !prev.tasks[t.id] || !isFinished(prev.tasks[t.id]!)) : [];
+
 export const chatsOf = (model: FleetModel): FleetChat[] =>
   Object.values(model.chats ?? {}).sort((a, b) => b.updatedAt - a.updatedAt);
 

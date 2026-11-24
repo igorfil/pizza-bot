@@ -6,6 +6,7 @@ import {
   artifactsNewestFirst,
   defaultInput,
   duration,
+  finishedSince,
   inboxOf,
   initialDraft,
   runnerHealth,
@@ -213,3 +214,27 @@ describe("initialDraft", () => {
   });
 });
 
+
+describe("finishedSince", () => {
+  const working = task({ state: "working" });
+
+  it("reports a run that finished since the last Model", () => {
+    expect(finishedSince(model([working]), model([task({})])).map((t) => t.id)).toEqual(["t1"]);
+  });
+
+  it("reports a run that arrived already finished", () => {
+    expect(finishedSince(model([]), model([task({})])).map((t) => t.id)).toEqual(["t1"]);
+  });
+
+  it("doesn't report a run again", () => {
+    expect(finishedSince(model([task({})]), model([task({})]))).toEqual([]);
+  });
+
+  it("reports nothing for the first Model, so connecting stays quiet", () => {
+    expect(finishedSince(null, model([task({})]))).toEqual([]);
+  });
+
+  it("leaves out runs already marked read", () => {
+    expect(finishedSince(model([working]), model([task({ ackedAt: NOW })]))).toEqual([]);
+  });
+});

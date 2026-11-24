@@ -40,6 +40,13 @@ body {
   color: var(--brand);
 }
 .iconrail-btn.active:hover { background: color-mix(in oklch, var(--brand) 20%, transparent); }
+.iconrail-btn, .mobile-nav-btn { position: relative; }
+.iconrail-count {
+  position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 999px; background: var(--brand); color: var(--brand-fg); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+}
+.mobile-nav-btn .iconrail-count { right: calc(50% - 20px); }
+.mobile-nav-menu-count { margin-left: auto; font-size: 11px; font-weight: 650; color: var(--brand); }
 
 .mobile-nav { display: none; }
 

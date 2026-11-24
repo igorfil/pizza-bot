@@ -28,6 +28,8 @@ interface AppNavigationProps {
   enableAutomations: boolean;
   enableMemories: boolean;
   onViewChange: (view: AppView) => void;
+  /** Unread counts shown on a destination, e.g. Fleet results to review. */
+  counts?: Partial<Record<AppView, number>>;
 }
 
 interface NavDestination {
@@ -91,14 +93,20 @@ const logsDestination: NavDestination = {
   icon: ScrollText,
 };
 
+const countLabel = (label: string, count: number) => (count > 0 ? `${label}, ${count} unread` : label);
+
+const countText = (count: number) => (count > 99 ? "99+" : String(count));
+
 function RailButton({
   destination,
   view,
   onViewChange,
+  count = 0,
 }: {
   destination: NavDestination;
   view: AppView;
   onViewChange: (view: AppView) => void;
+  count?: number;
 }) {
   const Icon = destination.icon;
   const active = view === destination.view;
@@ -106,12 +114,17 @@ function RailButton({
   return (
     <button
       className={`iconrail-btn${active ? " active" : ""}`}
-      title={destination.label}
-      aria-label={destination.label}
+      title={countLabel(destination.label, count)}
+      aria-label={countLabel(destination.label, count)}
       aria-current={active ? "page" : undefined}
       onClick={() => onViewChange(destination.view)}
     >
       <Icon size={20} />
+      {count > 0 && (
+        <span className="iconrail-count" aria-hidden="true">
+          {countText(count)}
+        </span>
+      )}
     </button>
   );
 }
@@ -146,6 +159,7 @@ export function AppNavigation({
   enableAutomations,
   enableMemories,
   onViewChange,
+  counts = {},
 }: AppNavigationProps) {
   const desktopDestinations = [
     inboxDestination,
@@ -172,6 +186,7 @@ export function AppNavigation({
   ];
   const moreDestinations = [...mobileFeatureDestinations, ...utilityDestinations];
   const moreActive = moreDestinations.some((destination) => destination.view === view);
+  const moreCount = moreDestinations.reduce((sum, destination) => sum + (counts[destination.view] ?? 0), 0);
 
   return (
     <>
@@ -185,6 +200,7 @@ export function AppNavigation({
             destination={destination}
             view={view}
             onViewChange={onViewChange}
+            count={counts[destination.view]}
           />
         ))}
         <div className="iconrail-spacer" />
@@ -211,10 +227,11 @@ export function AppNavigation({
           <DropdownMenuTrigger asChild>
             <button
               className={`mobile-nav-btn${moreActive ? " active" : ""}`}
-              aria-label="More destinations"
+              aria-label={countLabel("More destinations", moreCount)}
               aria-current={moreActive ? "page" : undefined}
             >
               <MoreHorizontal size={20} />
+              {moreCount > 0 && <span className="iconrail-count" aria-hidden="true">{countText(moreCount)}</span>}
               <span>More</span>
             </button>
           </DropdownMenuTrigger>
@@ -238,6 +255,9 @@ export function AppNavigation({
                   >
                     <Icon />
                     {destination.label}
+                    {(counts[destination.view] ?? 0) > 0 && (
+                      <span className="mobile-nav-menu-count">{countText(counts[destination.view]!)}</span>
+                    )}
                   </DropdownMenuItem>
                 </Fragment>
               );

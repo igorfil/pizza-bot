@@ -79,7 +79,7 @@ in `localStorage` under `pizza.fleet.connection`, and defaults to `http://127.0.
 **Behaviour.**
 - Every SSE event carries the **full** public Model; the page replaces its copy and re-renders.
 - Reconnects every 2 s; stops on 401/403 and shows the exact fix.
-- The stream is open only while the page is mounted.
+- The stream is open app-wide, for the rail's unread count and desktop notifications.
 - `fleet-types.ts` is a hand-kept mirror of the Controller's public Model.
 
 **Limits today.** No approval UI (`input-required` is shown as a state only). Inbox actions are

@@ -74,8 +74,12 @@ Connection button.
   `FLEET_ALLOWED_ORIGINS=<this origin>`). The choice is saved in `localStorage`
   (`pizza.fleet.connection`); otherwise the dev connection is used.
 - Live updates over the Controller's SSE stream, read with `fetch` (EventSource can't send the
-  Authorization header). Reconnects every 2s; stops on 401/403 because retrying won't fix those.
-  The stream is open only while the screen is mounted.
+  Authorization header). Reconnects every 2s on the Fleet page and every 30s elsewhere; stops on
+  401/403 because retrying won't fix those.
+- The stream is open app-wide (`useFleet` in `App.tsx`), so the Fleet rail icon shows the unread
+  Inbox count from any view, and a run that finishes while you're elsewhere (or the window is
+  hidden) raises a desktop notification that opens Fleet. Notifications follow the "run completes"
+  desktop setting and need the browser's notification permission (Electron grants it).
 
 ## Files
 
