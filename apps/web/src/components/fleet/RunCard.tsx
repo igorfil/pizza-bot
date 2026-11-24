@@ -5,11 +5,11 @@ import { useAppToast } from "../AppToast.js";
 import type { FleetModel, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { FleetDialog } from "./GuideCard.js";
-import { agentName, ago, artifactsNewestFirst, runTitle, taskAgentKey, taskTone } from "./fleet-view-model.js";
+import { agentName, ago, artifactsNewestFirst, canFollowUp, earlierRuns, runTitle, taskAgentKey, taskTone } from "./fleet-view-model.js";
 
 export type OpenChat = (chatId: string) => void;
 
-/** Run again, Continue in chat and Ok, got it, shared by every place a result is shown. */
+/** Run again, Continue in chat, Follow up and Ok, got it, shared by every place a result is shown. */
 export const useRunActions = (model: FleetModel, task: FleetTask, send: FleetSend, onOpenChat: OpenChat) => {
   const notify = useAppToast();
   const [busy, setBusy] = useState(false);
@@ -41,7 +41,15 @@ export const useRunActions = (model: FleetModel, task: FleetTask, send: FleetSen
 
   const ack = () => act("mark it read", () => send("AckInbox", { taskId: task.id }));
 
-  return { busy, continueInChat, runAgain, ack };
+  /** Answering a result is dealing with it, so the run it answers leaves the inbox. */
+  const followUp = (text: string) =>
+    act("send the follow-up", async () => {
+      await send("CreateTask", { followUpOf: task.id, prompt: text });
+      if (task.ackedAt == null) await send("AckInbox", { taskId: task.id });
+      notify({ title: `Asked ${agentName(model, task)}`, description: "The answer lands in your inbox.", tone: "success" });
+    });
+
+  return { busy, continueInChat, runAgain, ack, followUp };
 };
 
 export function RunMeta({ model, task }: { model: FleetModel; task: FleetTask }) {
@@ -55,6 +63,31 @@ export function RunMeta({ model, task }: { model: FleetModel; task: FleetTask })
       <span className={`fleet-state fleet-tone-${taskTone(task.state)}`}>{task.state}</span>
       <span className="fleet-muted">· {ago(model.now, task.updatedAt)}</span>
     </>
+  );
+}
+
+/** What a follow-up continues: each earlier question and the agent's answer. */
+export function EarlierRuns({ model, task }: { model: FleetModel; task: FleetTask }) {
+  const earlier = earlierRuns(model, task);
+  if (earlier.length === 0) return null;
+  return (
+    <details className="fleet-inbox-extra fleet-earlier">
+      <summary>Earlier in this conversation ({earlier.length})</summary>
+      <ol className="fleet-earlier-list">
+        {earlier.map((t) => (
+          <li key={t.id}>
+            <p className="fleet-earlier-prompt">{t.prompt || "(no input)"}</p>
+            {artifactsNewestFirst(t)[0] ? (
+              <div className="fleet-inbox-result">
+                <MessageResponse>{artifactsNewestFirst(t)[0]!.text}</MessageResponse>
+              </div>
+            ) : (
+              <p className="fleet-muted">{t.statusText ?? t.state}</p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 
@@ -101,14 +134,17 @@ export function InboxCard({
   variant?: InboxCardVariant;
 }) {
   const [question, setQuestion] = useState("");
-  const { busy, continueInChat, runAgain, ack } = useRunActions(model, task, send, onOpenChat);
+  const { busy, continueInChat, runAgain, ack, followUp } = useRunActions(model, task, send, onOpenChat);
   const failed = taskTone(task.state) === "bad";
   const read = task.ackedAt != null;
   const small = variant === "compact";
+  const toAgent = canFollowUp(model, task);
 
   const ask = (event: FormEvent) => {
     event.preventDefault();
-    if (question.trim()) void continueInChat(question.trim());
+    const text = question.trim();
+    if (!text) return;
+    void (toAgent ? followUp(text) : continueInChat(text)).then((ok) => ok && setQuestion(""));
   };
 
   return (
@@ -124,6 +160,7 @@ export function InboxCard({
       </header>
       <h2 className="fleet-inbox-title">{runTitle(model, task)}</h2>
 
+      <EarlierRuns model={model} task={task} />
       <RunResult task={task} />
 
       {!small && (
@@ -132,11 +169,16 @@ export function InboxCard({
             className="field-input"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask a follow-up about this result…"
+            placeholder={toAgent ? `Ask ${agentName(model, task)} a follow-up…` : "Ask a follow-up about this result…"}
             aria-label="Ask a follow-up"
             disabled={busy}
           />
-          <button type="submit" className="btn-secondary fleet-icon-btn" disabled={busy || !question.trim()} aria-label="Ask in chat">
+          <button
+            type="submit"
+            className="btn-secondary fleet-icon-btn"
+            disabled={busy || !question.trim()}
+            aria-label={toAgent ? `Send to ${agentName(model, task)}` : "Ask in chat"}
+          >
             <SendHorizontal size={15} />
           </button>
         </form>
@@ -189,6 +231,7 @@ export function RunDialog({
         </span>
         <RunMeta model={model} task={task} />
       </p>
+      <EarlierRuns model={model} task={task} />
       <RunResult task={task} />
       <div className="fleet-guide-actions">
         <span className="fleet-agent-links-spacer" />

@@ -83,6 +83,7 @@ const getTaskEffect = (model: Model, task: Task & { remoteId: string }): Effect[
 const applySnapshot = (task: Task, snapshot: TaskSnapshot, now: number): Task => ({
   ...task,
   remoteId: snapshot.remoteId,
+  contextId: snapshot.contextId || task.contextId,
   state: snapshot.state,
   statusText: snapshot.statusText,
   artifacts: snapshot.artifacts,
@@ -155,7 +156,21 @@ const dueResyncs = (model: Model): Result => {
   return [next, due.flatMap((t) => getTaskEffect(model, t))];
 };
 
-const createTask = (model: Model, taskId: string, key: string, prompt: string, trigger: Task["trigger"]): Result => {
+type Conversation = { contextId: string | null; followUpOf: string | null };
+
+const NEW_CONVERSATION: Conversation = { contextId: null, followUpOf: null };
+
+/** A follow-up goes to the earlier run's agent in its context, once nothing else in that context is running. */
+const followUp = (model: Model, taskId: string, fromId: string, prompt: string): Result => {
+  const from = model.tasks[fromId];
+  if (!from) return [notify(model, "error", `unknown run ${fromId}`), []];
+  if (!isTerminal(from) || !from.contextId) return [notify(model, "error", "a follow-up has to wait until the run has finished"), []];
+  const busy = Object.values(model.tasks).some((t) => t.contextId === from.contextId && t.runner === from.runner && !isTerminal(t));
+  if (busy) return [notify(model, "error", "this conversation already has a run in progress"), []];
+  return createTask(model, taskId, agentKey(from.runner, from.agent), prompt, "manual", { contextId: from.contextId, followUpOf: from.id });
+};
+
+const createTask = (model: Model, taskId: string, key: string, prompt: string, trigger: Task["trigger"], conversation = NEW_CONVERSATION): Result => {
   const agent = model.agents[key];
   const runner = agent ? model.runners[agent.runner] : undefined;
   if (!agent || !runner) return [notify(model, "error", `unknown agent ${key}`), []];
@@ -167,6 +182,7 @@ const createTask = (model: Model, taskId: string, key: string, prompt: string, t
     agent: agent.id,
     prompt,
     remoteId: null,
+    ...conversation,
     state: ep ? "dispatching" : "queued",
     statusText: ep ? null : `waiting for runner ${runner.name}`,
     artifacts: [],
@@ -179,7 +195,7 @@ const createTask = (model: Model, taskId: string, key: string, prompt: string, t
     streamFailures: 0,
     streamRetryAt: 0,
   };
-  return [setTask(model, task), ep ? [{ type: "Dispatch", taskId, endpoint: ep, prompt }] : []];
+  return [setTask(model, task), ep ? [{ type: "Dispatch", taskId, endpoint: ep, prompt, contextId: task.contextId }] : []];
 };
 
 /** Runs created while the runner was away go out once it answers again. */
@@ -190,7 +206,7 @@ const dispatchQueued = (model: Model, runner: Runner): Result =>
       ([m, effects], t) => {
         const ep = endpoint(runner, t.agent);
         if (!ep) return [m, effects];
-        return [setTask(m, { ...t, state: "dispatching", statusText: null }), [...effects, { type: "Dispatch", taskId: t.id, endpoint: ep, prompt: t.prompt }]];
+        return [setTask(m, { ...t, state: "dispatching", statusText: null }), [...effects, { type: "Dispatch", taskId: t.id, endpoint: ep, prompt: t.prompt, contextId: t.contextId }]];
       },
       [model, []],
     );
@@ -473,7 +489,7 @@ export const update = (model: Model, msg: Msg): Result => {
       return [linkDown(model, msg.runner, msg.epoch, msg.error), []];
 
     case "CreateTask":
-      return createTask(model, msg.taskId, msg.agent, msg.prompt, "manual");
+      return msg.followUpOf ? followUp(model, msg.taskId, msg.followUpOf, msg.prompt) : createTask(model, msg.taskId, msg.agent, msg.prompt, "manual");
 
     case "CancelTask":
       return withTask(model, msg.taskId, (task) => {

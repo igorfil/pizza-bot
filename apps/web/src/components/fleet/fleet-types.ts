@@ -53,6 +53,8 @@ export interface FleetAgent {
   description: string;
   input: { label: string; hint: string; example: string } | null;
   schedule: { at: string; prompt: string } | null;
+  /** The runner harness that runs it; `pizza-bot` agents remember a conversation across follow-ups. */
+  harness?: string | null;
   /** Made with Create new; deleting it deletes it, while a shipped agent is only turned off. */
   created?: boolean;
   /** Only on created agents, for editing. */
@@ -87,6 +89,10 @@ export interface FleetTask {
   runner: string;
   agent: string;
   prompt: string;
+  /** The conversation the run belongs to; a follow-up continues it. */
+  contextId?: string | null;
+  /** The run this one follows up on. */
+  followUpOf?: string | null;
   state: FleetTaskState;
   statusText: string | null;
   artifacts: FleetArtifact[];

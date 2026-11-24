@@ -30,7 +30,7 @@ describe("update", () => {
   test("CreateTask emits a Dispatch effect for the runner", () => {
     const [, effects] = run(withRunningTask.slice(0, 5));
     expect(effects).toEqual([
-      { type: "Dispatch", taskId: "t1", endpoint: ep, prompt: "steps=3 hi" },
+      { type: "Dispatch", taskId: "t1", endpoint: ep, prompt: "steps=3 hi", contextId: null },
     ]);
   });
 
@@ -119,6 +119,36 @@ describe("update", () => {
 
 const done: TaskSnapshot = { remoteId: "r1", state: "completed", statusText: "done", artifacts: [{ id: "jokes", name: "jokes", text: "1. ha" }] };
 const finished: Msg[] = [...withRunningTask, { type: "TaskSnapshot", taskId: "t1", snapshot: done }];
+
+describe("follow-ups", () => {
+  const inContext: Msg[] = [...withRunningTask, { type: "TaskSnapshot", taskId: "t1", snapshot: { ...done, contextId: "c1" } }];
+  const followUp = (taskId = "t2"): Msg => ({ type: "CreateTask", taskId, agent: "", prompt: "and now?", followUpOf: "t1" });
+
+  test("a follow-up goes to the same agent in the earlier run's context", () => {
+    const [, effects] = run([...inContext, followUp()]);
+    expect(effects).toEqual([{ type: "Dispatch", taskId: "t2", endpoint: ep, prompt: "and now?", contextId: "c1" }]);
+  });
+
+  test("a follow-up remembers which run it follows", () => {
+    const [model] = run([...inContext, followUp()]);
+    expect(model.tasks.t2?.followUpOf).toBe("t1");
+  });
+
+  test("a second follow-up waits until the first has finished", () => {
+    const [model] = run([...inContext, followUp("t2"), followUp("t3")]);
+    expect([model.tasks.t3, model.notifications.at(-1)?.text]).toEqual([undefined, "this conversation already has a run in progress"]);
+  });
+
+  test("a run that hasn't finished can't be followed up", () => {
+    const [model] = run([...withRunningTask, followUp()]);
+    expect(model.tasks.t2).toBeUndefined();
+  });
+
+  test("a queued follow-up keeps its context when the runner comes back", () => {
+    const [, effects] = run([...inContext, { type: "RunnerFailed", name: "local", error: "x" }, followUp(), healthy()]);
+    expect(effects.filter((e) => e.type === "Dispatch")).toEqual([{ type: "Dispatch", taskId: "t2", endpoint: ep, prompt: "and now?", contextId: "c1" }]);
+  });
+});
 
 describe("inbox", () => {
   test("a finished run lands in the inbox", () => {

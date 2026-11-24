@@ -2091,6 +2091,8 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
 .fleet-inbox-extra[open] summary { margin-bottom: 6px; }
 .fleet-inbox-ask { display: flex; gap: 8px; }
 .fleet-inbox-ask .field-input { flex: 1; min-width: 0; }
+.fleet-earlier-list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.fleet-earlier-prompt { margin: 0 0 4px; font-weight: 600; color: var(--text); }
 .fleet-inbox-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .fleet-inbox-actions button { gap: 6px; }
 .fleet-inbox-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--dim); }

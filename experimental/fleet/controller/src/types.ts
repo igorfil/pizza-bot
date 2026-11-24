@@ -48,6 +48,8 @@ export type AgentSkill = { id: string; content: string };
 /** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model`, `systemPrompt`, `mcpServers` and `skills`. */
 export type AgentInfo = {
   id: string;
+  /** The runner harness that runs it; `pizza-bot` agents remember a conversation across follow-ups. */
+  harness?: string | null;
   name: string;
   description: string;
   input: AgentInput | null;
@@ -116,6 +118,10 @@ export type Task = {
   agent: string;
   prompt: string;
   remoteId: string | null;
+  /** The A2A context the run belongs to; a follow-up reuses it, so the agent sees the conversation. */
+  contextId: string | null;
+  /** The run this one follows up on. */
+  followUpOf: string | null;
   state: TaskState;
   statusText: string | null;
   artifacts: Artifact[];
@@ -217,6 +223,7 @@ export type Model = {
 /** Runtime-neutral view of a remote task. The A2A adapter maps into this. */
 export type TaskSnapshot = {
   remoteId: string;
+  contextId?: string;
   state: Exclude<TaskState, "queued" | "dispatching" | "lost">;
   statusText: string | null;
   artifacts: Artifact[];
@@ -236,7 +243,7 @@ export type IntentMsg =
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
   | { type: "DeleteAgent"; agent: string }
   | { type: "EditAgent"; agent: string; spec: NewAgentSpec }
-  | { type: "CreateTask"; taskId: string; agent: string; prompt: string }
+  | { type: "CreateTask"; taskId: string; agent: string; prompt: string; followUpOf?: string | null }
   | { type: "CancelTask"; taskId: string }
   | { type: "AckInbox"; taskId: string }
   | { type: "AckAllInbox" }
@@ -286,7 +293,7 @@ export type Effect =
   | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
   | { type: "DeleteRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string }
   | { type: "EditRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string; agent: NewAgentSpec }
-  | { type: "Dispatch"; taskId: string; endpoint: Endpoint; prompt: string }
+  | { type: "Dispatch"; taskId: string; endpoint: Endpoint; prompt: string; contextId: string | null }
   | { type: "GetTask"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "Cancel"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "ChatComplete"; chatId: string; system: string; turns: LlmTurn[] }

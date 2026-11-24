@@ -55,6 +55,10 @@ result body (`RunResult`) and actions (Run again, Continue in chat, Ok, got it),
 - Ok, got it → `AckInbox`; Mark all read → `AckAllInbox` (per agent and bulk send one `AckInbox`
   each); Run again → `CreateTask` with the same input; Continue in chat / follow-up → `CreateChat
   {fromTaskId, text}` and switches to Chats with that chat open.
+- On a `pizza-bot` agent the follow-up box asks the agent itself: `CreateTask {followUpOf, prompt}`
+  runs in the earlier run's A2A context, so the agent sees the conversation and keeps its tools.
+  The answered run is marked read and the answer lands as a new card, with "Earlier in this
+  conversation" holding the runs before it.
 - Failed runs show the reason in a red banner. Empty state: "All caught up" (the switcher stays).
 - The result dialog (from By agent, Table, or an agent's run history) offers Ok, got it for unread runs.
 

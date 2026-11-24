@@ -13,6 +13,16 @@ export const agentOfTask = (model: FleetModel, task: FleetTask): FleetAgent | un
 
 export const agentName = (model: FleetModel, task: FleetTask): string => agentOfTask(model, task)?.name ?? task.agent;
 
+/** Follow-ups reach the agent itself only when it keeps the conversation, which the pizza-bot harness does. */
+export const canFollowUp = (model: FleetModel, task: FleetTask): boolean =>
+  agentOfTask(model, task)?.harness === "pizza-bot" && Boolean(task.contextId) && isFinished(task);
+
+/** The runs a follow-up continues, oldest first. */
+export const earlierRuns = (model: FleetModel, task: FleetTask): FleetTask[] => {
+  const earlier = task.followUpOf ? model.tasks[task.followUpOf] : undefined;
+  return earlier ? [...earlierRuns(model, earlier), earlier] : [];
+};
+
 export const runsOf = (model: FleetModel, agentKey: string): FleetTask[] =>
   Object.values(model.tasks)
     .filter((t) => taskAgentKey(t) === agentKey)

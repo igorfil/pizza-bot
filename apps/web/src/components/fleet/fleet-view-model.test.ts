@@ -4,9 +4,11 @@ import {
   activeRun,
   ago,
   artifactsNewestFirst,
+  canFollowUp,
   defaultInput,
   dayLabel,
   duration,
+  earlierRuns,
   finishedSince,
   groupByAgent,
   groupByDay,
@@ -282,5 +284,29 @@ describe("inbox layout helpers", () => {
 
   it("moves to the last result when the last one was marked read", () => {
     expect(selectedOrNext([task({ id: "a" })], "b", 1)?.id).toBe("a");
+  });
+});
+
+describe("follow-ups", () => {
+  const pizzaBot = (tasks: FleetTask[]): FleetModel => {
+    const m = model(tasks);
+    return { ...m, agents: { [KEY]: { ...m.agents![KEY]!, harness: "pizza-bot" } } };
+  };
+
+  it("go to an agent that keeps the conversation", () => {
+    expect(canFollowUp(pizzaBot([]), task({ contextId: "c1" }))).toBe(true);
+  });
+
+  it("don't go to an agent that forgets it", () => {
+    expect(canFollowUp(model([]), task({ contextId: "c1" }))).toBe(false);
+  });
+
+  it("wait for the run to finish", () => {
+    expect(canFollowUp(pizzaBot([]), task({ contextId: "c1", state: "working" }))).toBe(false);
+  });
+
+  it("show the runs they continue, oldest first", () => {
+    const runs = [task({ id: "a" }), task({ id: "b", followUpOf: "a" }), task({ id: "c", followUpOf: "b" })];
+    expect(earlierRuns(model(runs), runs[2]!).map((t) => t.id)).toEqual(["a", "b"]);
   });
 });

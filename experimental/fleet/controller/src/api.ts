@@ -181,9 +181,12 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
     case "CancelGuide":
       return str(p.sessionId) ? { type, sessionId: p.sessionId } : "CancelGuide needs sessionId";
     case "CreateTask":
+      if (str(p.followUpOf)) {
+        return str(p.prompt) ? { type, taskId: crypto.randomUUID(), agent: "", prompt: p.prompt, followUpOf: p.followUpOf } : "a follow-up needs a prompt";
+      }
       return str(p.agent) && typeof p.prompt === "string"
         ? { type, taskId: crypto.randomUUID(), agent: p.agent, prompt: p.prompt }
-        : "CreateTask needs agent (<runner>/<id>), prompt";
+        : "CreateTask needs agent (<runner>/<id>), prompt (or followUpOf, prompt)";
     case "CancelTask":
       return str(p.taskId) ? { type, taskId: p.taskId } : "CancelTask needs taskId";
     case "AckInbox":

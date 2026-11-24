@@ -99,7 +99,7 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
       }
       case "Dispatch": {
         const ep = await withToken(effect.endpoint);
-        const r = ep.ok ? await a2a.dispatch(ep.value, effect.prompt) : ep;
+        const r = ep.ok ? await a2a.dispatch(ep.value, effect.prompt, effect.contextId) : ep;
         return r.ok ? { type: "Dispatched", taskId: effect.taskId, snapshot: r.value } : { type: "DispatchFailed", taskId: effect.taskId, error: r.error };
       }
       case "GetTask": {

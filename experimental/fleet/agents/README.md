@@ -49,6 +49,9 @@ The runner offers a harness when `RUNNER_HARNESS_<NAME>` holds the command that 
    ```json
    {"taskId": "…", "contextId": "…", "input": "kubernetes"}
    ```
+   A follow-up from the Fleet page is a new task with the earlier run's `contextId`. The `pizza-bot`
+   harness keeps each context's conversation under `.state/` in the folder (or `FLEET_AGENT_STATE`),
+   so it answers with what was said before; an agent that keeps nothing just sees a new input.
 3. **Events.** One JSON object per line on stdout. Anything that isn't a JSON object is ignored.
    | Line | Meaning |
    |---|---|

@@ -35,6 +35,7 @@ const toArtifact = (a: A2AArtifact): Artifact => ({ id: a.artifactId, name: a.na
 
 export const toSnapshot = (task: A2ATask): TaskSnapshot => ({
   remoteId: task.id,
+  ...(task.contextId ? { contextId: task.contextId } : {}),
   state: toState(task.status?.state),
   statusText: statusText(task.status),
   artifacts: task.artifacts.map(toArtifact),
@@ -93,6 +94,7 @@ type IndexJson = {
     id?: unknown;
     name?: unknown;
     description?: unknown;
+    harness?: unknown;
     created?: unknown;
     model?: unknown;
     systemPrompt?: unknown;
@@ -119,6 +121,7 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
         name: str(a.name) || str(a.id),
         description: str(a.description),
         input: a.input ? { label: str(a.input.label), hint: str(a.input.hint), example: str(a.input.example) } : null,
+        harness: str(a.harness) || null,
         ...(a.created === true ? { created: true } : {}),
         ...(a.created === true && typeof a.model === "string"
           ? { model: a.model, systemPrompt: str(a.systemPrompt), mcpServers: mcpServersOf(a.mcpServers), skills: skillsOf(a.skills) }
@@ -211,7 +214,8 @@ const asTask = (result: unknown): A2ATask => {
   throw new Error("agent replied with a message, not a task");
 };
 
-export const dispatch = (endpoint: AgentEndpoint, prompt: string): Promise<Outcome<TaskSnapshot>> =>
+/** A `contextId` continues that conversation; empty lets the agent start a new one. */
+export const dispatch = (endpoint: AgentEndpoint, prompt: string, contextId: string | null): Promise<Outcome<TaskSnapshot>> =>
   attempt(async () => {
     const client = await clientFor(endpoint);
     const result = await client.sendMessage(
@@ -220,7 +224,7 @@ export const dispatch = (endpoint: AgentEndpoint, prompt: string): Promise<Outco
         metadata: undefined,
         message: {
           messageId: crypto.randomUUID(),
-          contextId: "",
+          contextId: contextId ?? "",
           taskId: "",
           role: Role.ROLE_USER,
           parts: [{ content: { $case: "text", value: prompt }, metadata: undefined, filename: "", mediaType: "text/plain" }],
