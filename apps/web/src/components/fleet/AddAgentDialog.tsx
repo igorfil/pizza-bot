@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
-import type { FleetModel, FleetRunner } from "./fleet-types.js";
+import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { ChoiceCard, FleetDialog } from "./GuideCard.js";
 
@@ -64,18 +64,29 @@ function ErrorLine({ error }: { error: string | null }) {
   ) : null;
 }
 
+type AgentSpec = { name: string; model: string; systemPrompt: string };
+
 /** The bare-minimum agent: a name, a model and a system prompt, run by the runner's built-in harness. */
-function CreateAgentForm({ model, runner, send, onClose }: { model: FleetModel; runner: FleetRunner; send: FleetSend; onClose: () => void }) {
+function AgentSpecForm({
+  model,
+  initial,
+  label,
+  onSave,
+  onClose,
+}: {
+  model: FleetModel;
+  initial?: AgentSpec;
+  label: string;
+  onSave: (spec: AgentSpec) => Promise<unknown>;
+  onClose: () => void;
+}) {
   const models = model.agentModels ?? [];
-  const [name, setName] = useState("");
-  const [picked, setPicked] = useState(models[0]?.id ?? "");
-  const [systemPrompt, setSystemPrompt] = useState("");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [picked, setPicked] = useState(models.find((m) => m.id === initial?.model)?.id ?? models[0]?.id ?? "");
+  const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? "");
   const { saving, error, submit } = useSubmit(onClose);
   return (
-    <form
-      className="fleet-guide"
-      onSubmit={(e) => void submit(e, () => send("CreateAgent", { runner: runner.name, name: name.trim(), model: picked, systemPrompt }))}
-    >
+    <form className="fleet-guide" onSubmit={(e) => void submit(e, () => onSave({ name: name.trim(), model: picked, systemPrompt }))}>
       <label className="field">
         <span className="field-label">Name</span>
         <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="e.g. Release notes writer" autoFocus />
@@ -100,8 +111,22 @@ function CreateAgentForm({ model, runner, send, onClose }: { model: FleetModel; 
         <span className="field-hint">Each run sends the message you type to the model with this prompt and returns its reply.</span>
       </label>
       <ErrorLine error={error} />
-      <Actions saving={saving} disabled={name.trim() === "" || picked === ""} label="Create agent" onClose={onClose} />
+      <Actions saving={saving} disabled={name.trim() === "" || picked === ""} label={label} onClose={onClose} />
     </form>
+  );
+}
+
+export function EditAgentDialog({ model, agent, send, onClose }: { model: FleetModel; agent: FleetAgent; send: FleetSend; onClose: () => void }) {
+  return (
+    <FleetDialog title={`Edit ${agent.name}`} onClose={onClose}>
+      <AgentSpecForm
+        model={model}
+        initial={{ name: agent.name, model: agent.model ?? "", systemPrompt: agent.systemPrompt ?? "" }}
+        label="Save changes"
+        onSave={(spec) => send("EditAgent", { agent: agent.key, ...spec })}
+        onClose={onClose}
+      />
+    </FleetDialog>
   );
 }
 
@@ -171,7 +196,12 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
             </div>
           )}
           {mode === "create" ? (
-            <CreateAgentForm model={model} runner={runner} send={send} onClose={onClose} />
+            <AgentSpecForm
+              model={model}
+              label="Create agent"
+              onSave={(spec) => send("CreateAgent", { runner: runner.name, ...spec })}
+              onClose={onClose}
+            />
           ) : (
             <ExistingAgentsForm runner={runner} send={send} onClose={onClose} />
           )}

@@ -39,8 +39,8 @@ export type Link = { state: "down"; error: string | null } | { state: "up"; url:
 export type AgentInput = { label: string; hint: string; example: string };
 
 /** What a runner's `GET /agents` reports for one agent. */
-/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. */
-export type AgentInfo = { id: string; name: string; description: string; input: AgentInput | null; created?: boolean };
+/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model` and `systemPrompt`. */
+export type AgentInfo = { id: string; name: string; description: string; input: AgentInput | null; created?: boolean; model?: string; systemPrompt?: string };
 
 /** A host process: one per machine. Health and reconnect are per runner; the link comes first. */
 export type Runner = NewRunner & {
@@ -66,7 +66,7 @@ export type Runner = NewRunner & {
 export type NewAgentSpec = { name: string; model: string; systemPrompt: string };
 
 /** In flight while `error` is null; `agents` are names or ids, for display. */
-export type AgentsChange = { action: "add" | "remove"; agents: string[]; error: string | null };
+export type AgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
 
 /** An agent hosted by a runner; the unit users run, schedule and see. Key: `<runner>/<id>`. */
 export type Agent = AgentInfo & {
@@ -217,6 +217,7 @@ export type IntentMsg =
   | { type: "AddAgents"; runner: string; agents: string[] }
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
   | { type: "DeleteAgent"; agent: string }
+  | { type: "EditAgent"; agent: string; spec: NewAgentSpec }
   | { type: "CreateTask"; taskId: string; agent: string; prompt: string }
   | { type: "CancelTask"; taskId: string }
   | { type: "AckInbox"; taskId: string }
@@ -238,7 +239,7 @@ export type WorldMsg =
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
   | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
-  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
+  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean }
   | { type: "AgentsSetFailed"; runner: string; error: string }
   | { type: "RunnerFailed"; name: string; error: string }
   | { type: "RunnerRetired"; name: string; text: string; ok: boolean }
@@ -265,6 +266,7 @@ export type Effect =
   | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[] }
   | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
   | { type: "DeleteRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string }
+  | { type: "EditRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string; agent: NewAgentSpec }
   | { type: "Dispatch"; taskId: string; endpoint: Endpoint; prompt: string }
   | { type: "GetTask"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "Cancel"; taskId: string; endpoint: Endpoint; remoteId: string }
@@ -284,6 +286,7 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "AddAgents",
   "CreateAgent",
   "DeleteAgent",
+  "EditAgent",
   "CreateTask",
   "CancelTask",
   "AckInbox",

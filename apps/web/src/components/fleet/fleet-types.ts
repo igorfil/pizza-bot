@@ -40,7 +40,7 @@ export interface FleetAgentInfo {
 }
 
 /** In flight while `error` is null. */
-export type FleetAgentsChange = { action: "add" | "remove"; agents: string[]; error: string | null };
+export type FleetAgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
 
 /** What users run, schedule and see. Key: `<runner>/<id>`. */
 export interface FleetAgent {
@@ -53,6 +53,9 @@ export interface FleetAgent {
   schedule: { at: string; prompt: string } | null;
   /** Made with Create new; deleting it deletes it, while a shipped agent is only turned off. */
   created?: boolean;
+  /** Only on created agents, for editing. */
+  model?: string;
+  systemPrompt?: string;
 }
 
 export type FleetTaskState =

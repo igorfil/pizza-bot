@@ -52,6 +52,7 @@ export type FleetIntent =
   | "AddAgents"
   | "CreateAgent"
   | "DeleteAgent"
+  | "EditAgent"
   | "CreateTask"
   | "CancelTask"
   | "AckInbox"

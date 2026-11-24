@@ -104,15 +104,25 @@ fn agent_card(cfg: &Config, spec: &AgentSpec) -> AgentCard {
     }
 }
 
+fn is_created(cfg: &Config, s: &AgentSpec) -> bool {
+    s.dir.starts_with(&cfg.created_dir)
+}
+
+/// Created agents also carry their model and system prompt, so a UI can edit them.
 fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
-    json!({
+    let mut v = json!({
         "id": s.id,
         "name": s.name,
         "description": s.description,
         "input": s.input,
         "url": agent_url(cfg, s),
-        "created": s.dir.starts_with(&cfg.created_dir),
-    })
+        "created": is_created(cfg, s),
+    });
+    if is_created(cfg, s) {
+        v["model"] = json!(s.env.get("MODEL"));
+        v["systemPrompt"] = json!(std::fs::read_to_string(s.dir.join("system.md")).unwrap_or_default());
+    }
+    v
 }
 
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {
@@ -220,12 +230,39 @@ impl App {
         Ok(index)
     }
 
+    /// Rewrites a created agent under the same id, so its URL and run history stay; runs in flight keep the old spec.
+    fn edit(&self, id: &str, body: &Value) -> Result<Value, ApiError> {
+        let folder = {
+            let agents = self.agents.read().unwrap();
+            let spec = agents.specs.iter().find(|s| s.id == id).ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("this runner has no agent {id:?}")))?;
+            if !is_created(&self.cfg, spec) {
+                return Err(api_error(StatusCode::CONFLICT, format!("{id:?} ships with the runner; only agents created here can be edited")));
+            }
+            spec.dir.clone()
+        };
+        let mut request = body.as_object().cloned().unwrap_or_default();
+        request.insert("id".into(), json!(id));
+        let agent = created::parse_request(&Value::Object(request)).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+        created::rewrite(&folder, &agent).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let spec = manifest::parse(id, &folder, &created::manifest_toml(&agent)).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let router = self.agent_router(&spec);
+        {
+            let mut agents = self.agents.write().unwrap();
+            agents.routers.insert(spec.id.clone(), router);
+            agents.specs.retain(|s| s.id != id);
+            agents.specs.push(spec);
+            agents.specs.sort_by(|a, b| a.id.cmp(&b.id));
+        }
+        tracing::info!(agent = %id, model = %agent.model, "agent edited");
+        Ok(self.index())
+    }
+
     /// A created agent's folder is deleted; a shipped one is only turned off, so it can be added back.
     fn delete(&self, id: &str) -> Result<Value, ApiError> {
         let folder = {
             let agents = self.agents.read().unwrap();
             let spec = agents.specs.iter().find(|s| s.id == id).ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("this runner has no agent {id:?}")))?;
-            spec.dir.starts_with(&self.cfg.created_dir).then(|| spec.dir.clone())
+            is_created(&self.cfg, spec).then(|| spec.dir.clone())
         };
         if let Some(folder) = &folder {
             std::fs::remove_dir_all(folder).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{}: {e}", folder.display())))?;
@@ -257,6 +294,13 @@ async fn post_agents(State(app): State<Arc<App>>, headers: HeaderMap, Json(body)
         return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
     }
     app.create(&body).map(|index| (StatusCode::CREATED, Json(index)))
+}
+
+async fn put_agent(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    if !authorized(&headers, &app.bearer) {
+        return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    app.edit(&id, &body).map(Json)
 }
 
 async fn delete_agent(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
@@ -349,7 +393,7 @@ async fn main() -> Result<(), String> {
 
     let router = axum::Router::new()
         .route("/agents", get(|State(app): State<Arc<App>>| async move { Json(app.index()) }).put(put_agents).post(post_agents))
-        .route("/agents/{id}", delete(delete_agent))
+        .route("/agents/{id}", delete(delete_agent).put(put_agent))
         .route("/agents/{id}/{*rest}", any(agent_request))
         .with_state(app.clone());
 

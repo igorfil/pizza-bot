@@ -168,6 +168,16 @@ describe("creating agents", () => {
     expect(body.error).toContain("model must be one of");
   });
 
+  it("EditAgent carries the agent and its new spec", async () => {
+    const sent: Msg[] = [];
+    await post({ msg_id: "m1", type: "EditAgent", payload: { agent: "laptop/poet", name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: " Two haiku. " } }, sent);
+    expect(sent[0]).toEqual({ type: "EditAgent", agent: "laptop/poet", spec: { name: "Poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "Two haiku." } });
+  });
+
+  it("refuses an edit without a name", async () => {
+    expect((await post({ msg_id: "m1", type: "EditAgent", payload: { agent: "laptop/poet", name: " ", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "" } })).status).toBe(400);
+  });
+
   it("lists the models UIs can offer", async () => {
     const body = (await (await api().request("/model", { headers: auth })).json()) as { model: { agentModels: { id: string }[] } };
     expect(body.model.agentModels.map((m) => m.id)).toContain("us.anthropic.claude-haiku-5-5");

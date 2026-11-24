@@ -386,6 +386,17 @@ const deleteAgent = (model: Model, key: string): Result => {
   );
 };
 
+/** Same id, new name, model or prompt; runs already going finish with the old ones. */
+const editAgent = (model: Model, key: string, spec: NewAgentSpec): Result => {
+  const agent = model.agents[key];
+  if (!agent) return [notify(model, "error", `unknown agent ${key}`), []];
+  return changeAgents(model, agent.runner, "edit", [agent.name], ({ runner, url, fail, start }) =>
+    agent.created
+      ? start({ type: "EditRunnerAgent", runner: runner.name, endpoint: { url, token: runner.token }, agentId: agent.id, agent: spec })
+      : fail(`${agent.name} ships with ${runner.name}; only agents created here can be edited`),
+  );
+};
+
 const agentsSet = (model: Model, msg: Extract<Msg, { type: "AgentsSet" }>): Result => {
   const runner = model.runners[msg.runner];
   if (!runner) return [model, []];
@@ -396,8 +407,13 @@ const agentsSet = (model: Model, msg: Extract<Msg, { type: "AgentsSet" }>): Resu
     .filter((t) => t.runner === msg.runner && removed.includes(t.agent) && t.state === "queued")
     .reduce((m, t) => setTask(m, { ...t, state: "canceled", statusText: "the agent was deleted" }), setRunner(model, { ...runner, agentsChange: null }));
   const [next, effects] = runnerOk(canceled, msg.runner, msg);
-  const names = msg.agents.filter((a) => msg.added.includes(a.id)).map((a) => a.name);
-  const text = removed.length > 0 ? `removed ${removedNames.join(", ")} from ${msg.runner}` : `added ${names.join(", ")} to ${msg.runner}`;
+  const namesOf = (ids: string[]) => msg.agents.filter((a) => ids.includes(a.id)).map((a) => a.name).join(", ");
+  const text =
+    removed.length > 0
+      ? `removed ${removedNames.join(", ")} from ${msg.runner}`
+      : msg.edited?.length
+        ? `updated ${namesOf(msg.edited)} on ${msg.runner}`
+        : `added ${namesOf(msg.added)} to ${msg.runner}`;
   return [notify(next, "info", text), effects];
 };
 
@@ -479,6 +495,9 @@ export const update = (model: Model, msg: Msg): Result => {
 
     case "DeleteAgent":
       return deleteAgent(model, msg.agent);
+
+    case "EditAgent":
+      return editAgent(model, msg.agent, msg.spec);
 
     case "AgentsSet":
       return agentsSet(model, msg);

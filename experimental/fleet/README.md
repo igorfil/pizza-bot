@@ -203,6 +203,7 @@ Intents (only these are accepted over the API; world Msgs are rejected):
 | `AddAgents` | `runner`, `agents` (ids from the runner's `available`); the runner starts serving them |
 | `DeleteAgent` | `agent` (`<runner>/<id>`); a created agent is deleted from its runner, a shipped one turned off. Refused while it has a run in progress |
 | `CreateAgent` | `runner`, `name`, `model` (one of the model's `agentModels`), `systemPrompt`; the runner creates and serves a prompt agent |
+| `EditAgent` | `agent` (`<runner>/<id>`), `name`, `model`, `systemPrompt`; rewrites a created agent under the same id. Runs in progress finish with the old spec |
 | `UpdateRunner` | `name`, plus any of `url`/`transport`, `token`; the link reopens with the new config |
 | `RemoveRunner` | `name` |
 | `CreateTask` | `agent` (`<runner>/<id>`), `prompt` (may be empty) |
@@ -296,6 +297,9 @@ Endpoints:
   (`agent.toml`, `system.md`, and the built-in `agent.py` harness) into `RUNNER_CREATED_AGENTS_DIR`,
   serves it at once, and answers with the new index plus `created: <id>`. The index's `canCreate`
   says a runner supports it.
+- `PUT /agents/<id>`: bearer token required; `{name, model, systemPrompt}` rewrites a created agent
+  in place (same id, so its URL and runs stay) and answers with the new index. Shipped agents
+  answer 409. Created agents' index entries carry `model` and `systemPrompt` for editing.
 - `DELETE /agents/<id>`: bearer token required; deletes a created agent's folder, or turns a
   shipped agent off (it stays in `available`), and answers with the new index. Each index entry's
   `created` tells the two apart.

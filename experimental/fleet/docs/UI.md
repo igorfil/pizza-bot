@@ -62,7 +62,8 @@ Connection button.
   Save / turn off / cancel (`SetSchedule`). Scheduled runs show a "scheduled" chip on their inbox
   card; runs without input are titled "Your <agent> report".
 - Run opens an inline input on the card (labelled and hinted from the agent card, pre-filled with
-  the last input); the result lands in the Inbox. Trash icon removes the agent after confirmation.
+  the last input); the result lands in the Inbox. Trash icon removes the agent after confirmation;
+  agents created from the page also get a pencil that edits their name, model and system prompt.
 - Unreachable runners are greyed out with "UNREACHABLE · retry in Ns" and the error.
 - A dashed "Add runner" card turns into the add form (name, runner URL as the Controller sees it,
   runner token); the runner's agents appear once it answers.

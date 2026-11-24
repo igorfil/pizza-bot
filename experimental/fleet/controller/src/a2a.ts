@@ -88,7 +88,7 @@ type IndexJson = {
   canCreate?: unknown;
   created?: unknown;
   available?: NonNullable<IndexJson["agents"]>;
-  agents?: { id?: unknown; name?: unknown; description?: unknown; created?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
+  agents?: { id?: unknown; name?: unknown; description?: unknown; created?: unknown; model?: unknown; systemPrompt?: unknown; input?: { label?: unknown; hint?: unknown; example?: unknown } | null }[];
 };
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -101,6 +101,7 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
         description: str(a.description),
         input: a.input ? { label: str(a.input.label), hint: str(a.input.hint), example: str(a.input.example) } : null,
         ...(a.created === true ? { created: true } : {}),
+        ...(a.created === true && typeof a.model === "string" ? { model: a.model, systemPrompt: str(a.systemPrompt) } : {}),
       }
     : null;
 
@@ -149,6 +150,21 @@ export const deleteAgent = (url: string, token: string, id: string): Promise<Out
     });
     const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
     if (res.status === 405) throw new Error("this runner can't delete agents; update the runner");
+    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
+    return toIndex(body);
+  });
+
+/** Rewrites a created agent under the same id; the runner answers with its new index. */
+export const editAgent = (url: string, token: string, id: string, agent: NewAgentSpec): Promise<Outcome<RunnerIndex>> =>
+  attempt(async () => {
+    const res = await fetch(`${url}/agents/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(agent),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
+    if (res.status === 405) throw new Error("this runner can't edit agents; update the runner");
     if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
     return toIndex(body);
   });

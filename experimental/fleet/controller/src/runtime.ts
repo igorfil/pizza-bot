@@ -151,6 +151,13 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
           ? { type: "AgentsSet", runner: effect.runner, added: [], removed: [effect.agentId], ...indexFields(r.value) }
           : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
       }
+      case "EditRunnerAgent": {
+        const ep = await withToken(effect.endpoint);
+        const r = ep.ok ? await a2a.editAgent(ep.value.url, ep.value.token, effect.agentId, effect.agent) : ep;
+        return r.ok
+          ? { type: "AgentsSet", runner: effect.runner, added: [], edited: [effect.agentId], ...indexFields(r.value) }
+          : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
+      }
       case "RetireRunner": {
         const { runner } = effect;
         const guide = runner.origin ? guideById(runner.origin.guide, deps.guides) : undefined;

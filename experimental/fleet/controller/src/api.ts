@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { AGENT_MODELS } from "./agent-models.js";
-import { INTENT_TYPES, type GuideInput, type IntentMsg, type Model, type TransportSpec } from "./types.js";
+import { INTENT_TYPES, type GuideInput, type IntentMsg, type Model, type NewAgentSpec, type TransportSpec } from "./types.js";
 import type { Runtime } from "./runtime.js";
 import type { SecretStore } from "./vault.js";
 
@@ -117,6 +117,17 @@ export const transportOf = (p: Record<string, unknown>): TransportSpec | string 
   }
 };
 
+const agentSpecOf = (type: string, p: Record<string, unknown>): NewAgentSpec | string => {
+  const name = typeof p.name === "string" ? p.name.trim() : "";
+  const model = typeof p.model === "string" ? p.model : "";
+  const systemPrompt = typeof p.systemPrompt === "string" ? p.systemPrompt.trim() : "";
+  if (!name) return `${type} needs name, model, systemPrompt`;
+  if (name.length > 60) return "the agent name must be at most 60 characters";
+  if (!AGENT_MODELS.some((m) => m.id === model)) return `model must be one of ${AGENT_MODELS.map((m) => m.id).join(", ")}`;
+  if (systemPrompt.length > 20_000) return "the system prompt must be at most 20000 characters";
+  return { name, model, systemPrompt };
+};
+
 /** Ids are minted here, not by UIs, so `update` stays pure and replayable. */
 export const toIntent = async (type: string, p: Record<string, unknown>, ctx: IntentContext): Promise<IntentMsg | string> => {
   switch (type) {
@@ -143,14 +154,14 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
         ? { type, runner: p.runner, agents: p.agents as string[] }
         : "AddAgents needs runner and agents (a non-empty list of agent ids)";
     case "CreateAgent": {
-      const name = typeof p.name === "string" ? p.name.trim() : "";
-      const model = typeof p.model === "string" ? p.model : "";
-      const systemPrompt = typeof p.systemPrompt === "string" ? p.systemPrompt.trim() : "";
-      if (!str(p.runner) || !name) return "CreateAgent needs runner, name, model, systemPrompt";
-      if (name.length > 60) return "the agent name must be at most 60 characters";
-      if (!AGENT_MODELS.some((m) => m.id === model)) return `model must be one of ${AGENT_MODELS.map((m) => m.id).join(", ")}`;
-      if (systemPrompt.length > 20_000) return "the system prompt must be at most 20000 characters";
-      return { type, runner: p.runner, agent: { name, model, systemPrompt } };
+      if (!str(p.runner)) return "CreateAgent needs runner, name, model, systemPrompt";
+      const agent = agentSpecOf(type, p);
+      return typeof agent === "string" ? agent : { type, runner: p.runner, agent };
+    }
+    case "EditAgent": {
+      if (!str(p.agent)) return "EditAgent needs agent (<runner>/<id>), name, model, systemPrompt";
+      const spec = agentSpecOf(type, p);
+      return typeof spec === "string" ? spec : { type, agent: p.agent, spec };
     }
     case "DeleteAgent":
       return str(p.agent) ? { type, agent: p.agent } : "DeleteAgent needs agent (<runner>/<id>)";

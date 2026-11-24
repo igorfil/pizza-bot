@@ -412,6 +412,38 @@ describe("creating an agent", () => {
   });
 });
 
+describe("editing an agent", () => {
+  const poet = { id: "poet", name: "Poet", description: "", input: null, created: true, model: "m", systemPrompt: "One haiku." };
+  const spec = { name: "Haiku poet", model: "m2", systemPrompt: "Two haiku." };
+  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), { type: "RunnerOk", name: "local", agents: [poet, sys], location: "laptop", available: [], canCreate: true }];
+  const edited: Msg = { type: "AgentsSet", runner: "local", added: [], edited: ["poet"], agents: [{ ...poet, ...spec }, sys], location: "laptop", available: [], canCreate: true };
+
+  test("asks the runner to rewrite it and shows it as being edited", () => {
+    const [model, effects] = run([...ready, { type: "EditAgent", agent: "local/poet", spec }]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([
+      { action: "edit", agents: ["Poet"], error: null },
+      [{ type: "EditRunnerAgent", runner: "local", endpoint: { url: "http://x", token }, agentId: "poet", agent: spec }],
+    ]);
+  });
+
+  test("the runner's answer shows the new spec and keeps the schedule", () => {
+    const [model] = run([...ready, { type: "SetSchedule", agent: "local/poet", at: "07:30", prompt: "" }, { type: "EditAgent", agent: "local/poet", spec }, edited]);
+    const agent = model.agents["local/poet"];
+    expect([agent?.name, agent?.systemPrompt, agent?.schedule?.at, model.runners.local?.agentsChange, model.notifications.at(-1)?.text]).toEqual([
+      "Haiku poet",
+      "Two haiku.",
+      "07:30",
+      null,
+      "updated Haiku poet on local",
+    ]);
+  });
+
+  test("an agent that ships with the runner is refused without calling it", () => {
+    const [model, effects] = run([...ready, { type: "EditAgent", agent: "local/sys", spec }]);
+    expect([model.runners.local?.agentsChange?.error, effects]).toEqual(["System report ships with local; only agents created here can be edited", []]);
+  });
+});
+
 describe("deleting an agent", () => {
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy()];
   const deleted: Msg = { type: "AgentsSet", runner: "local", added: [], removed: ["sys"], agents: [], location: "laptop", available: [] };

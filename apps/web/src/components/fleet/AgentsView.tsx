@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Play, Plus, RotateCcw, Server, Square, Trash2, X } from "lucide-react";
-import { AddAgentDialog } from "./AddAgentDialog.js";
+import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Pencil, Play, Plus, RotateCcw, Server, Square, Trash2, X } from "lucide-react";
+import { AddAgentDialog, EditAgentDialog } from "./AddAgentDialog.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
@@ -244,6 +244,7 @@ export function AgentCard({
 }) {
   const notify = useAppToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
   const [running, setRunning] = useState(false);
   const [input, setInput] = useState("");
@@ -296,6 +297,18 @@ export function AgentCard({
           {agent.name}
         </h3>
       </header>
+      {!down && !removing && agent.created && agent.model !== undefined && (
+        <button
+          type="button"
+          className="fleet-agent-edit"
+          onClick={() => setEditing(true)}
+          aria-label={`Edit agent ${agent.name}`}
+          title="Edit name, model and system prompt"
+        >
+          <Pencil size={14} />
+        </button>
+      )}
+      {editing && <EditAgentDialog model={model} agent={agent} send={send} onClose={() => setEditing(false)} />}
       {!down && !removing && (
         <button
           type="button"

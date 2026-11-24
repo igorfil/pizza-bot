@@ -77,12 +77,18 @@ pub fn write(dir: &Path, agent: &NewAgent) -> Result<PathBuf, String> {
     if folder.exists() {
         return Err(format!("an agent folder {} already exists", folder.display()));
     }
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    rewrite(&folder, agent)?;
+    Ok(folder)
+}
+
+/// Replaces the manifest, system prompt and harness of an existing agent folder.
+pub fn rewrite(folder: &Path, agent: &NewAgent) -> Result<(), String> {
     let io = |e: std::io::Error| format!("{}: {e}", folder.display());
-    std::fs::create_dir_all(&folder).map_err(io)?;
     std::fs::write(folder.join("agent.toml"), manifest_toml(agent)).map_err(io)?;
     std::fs::write(folder.join("system.md"), &agent.system_prompt).map_err(io)?;
     std::fs::write(folder.join("agent.py"), HARNESS).map_err(io)?;
-    Ok(folder)
+    Ok(())
 }
 
 /// Brings every created agent's `agent.py` up to the harness in this binary; returns how many changed.
@@ -150,5 +156,18 @@ mod tests {
         let again = write(&dir, &a).is_err();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!((files, again), ([true, true, true], true));
+    }
+
+    #[test]
+    fn rewrites_an_agent_in_place() {
+        let dir = std::env::temp_dir().join(format!("fleet-rewrite-{}", std::process::id()));
+        let a = parse_request(&json!({"name": "Tester", "model": "m", "systemPrompt": "Be kind."})).unwrap();
+        let folder = write(&dir, &a).unwrap();
+        let b = parse_request(&json!({"id": "tester", "name": "Renamed", "model": "m2", "systemPrompt": "Be brief."})).unwrap();
+        rewrite(&folder, &b).unwrap();
+        let spec = manifest::parse("tester", &folder, &std::fs::read_to_string(folder.join("agent.toml")).unwrap()).unwrap();
+        let prompt = std::fs::read_to_string(folder.join("system.md")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((spec.name.as_str(), spec.env["MODEL"].as_str(), prompt.as_str()), ("Renamed", "m2", "Be brief."));
     }
 }

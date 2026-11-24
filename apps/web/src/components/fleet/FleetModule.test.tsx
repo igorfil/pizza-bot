@@ -249,6 +249,11 @@ describe("AgentCard", () => {
     expect([card(model).includes('aria-label="Remove agent Dad jokes"'), card(created).includes('aria-label="Delete agent Dad jokes"')]).toEqual([true, true]);
   });
 
+  it("offers editing only for an agent created here", () => {
+    const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true, model: "m", systemPrompt: "" } } };
+    expect([card(model).includes('aria-label="Edit agent Dad jokes"'), card(created).includes('aria-label="Edit agent Dad jokes"')]).toEqual([false, true]);
+  });
+
   it("can't be deleted while it runs", () => {
     const running = { ...model, tasks: { a: { ...jokes, id: "a", state: "working" as const } } };
     expect(card(running)).toMatch(/<button[^>]*class="fleet-agent-delete"[^>]*disabled=""/);
