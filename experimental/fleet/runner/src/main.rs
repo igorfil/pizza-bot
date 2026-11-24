@@ -3,6 +3,7 @@ mod events;
 mod exec;
 mod harness;
 mod manifest;
+mod mcp;
 mod store;
 
 use std::collections::{BTreeSet, HashMap};
@@ -18,7 +19,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, delete, get};
+use axum::routing::{any, delete, get, put};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -37,6 +38,8 @@ struct Config {
     only: Option<Vec<String>>,
     location: Option<String>,
     harnesses: Arc<Harnesses>,
+    /// The runner's MCP library; beside the task store unless `RUNNER_MCP_CONFIG` says otherwise.
+    mcp_config: PathBuf,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -46,7 +49,8 @@ fn env_or(key: &str, default: &str) -> String {
 fn load_config() -> Result<Config, String> {
     let bind = env_or("RUNNER_BIND", "127.0.0.1:9000");
     let db = env_or("RUNNER_DB", "runner.db");
-    let beside_db = FsPath::new(&db).parent().unwrap_or(FsPath::new(".")).join("created-agents");
+    let data_dir = FsPath::new(&db).parent().unwrap_or(FsPath::new(".")).to_path_buf();
+    let beside_db = data_dir.join("created-agents");
     Ok(Config {
         name: env_or("RUNNER_NAME", "runner"),
         public_url: env_or("RUNNER_PUBLIC_URL", &format!("http://{bind}")),
@@ -59,6 +63,7 @@ fn load_config() -> Result<Config, String> {
             .map(|s| s.split(',').map(|id| id.trim().to_string()).filter(|id| !id.is_empty()).collect()),
         location: std::env::var("RUNNER_LOCATION").ok().filter(|l| !l.is_empty()),
         harnesses: Arc::new(Harnesses::from_vars(std::env::vars())),
+        mcp_config: std::env::var("RUNNER_MCP_CONFIG").map(PathBuf::from).unwrap_or_else(|_| data_dir.join("mcp.json")),
         bind,
     })
 }
@@ -122,13 +127,12 @@ fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
         "url": agent_url(cfg, s),
         "created": is_created(cfg, s),
         "harness": match &s.launch { Launch::Harness(name) => Some(name), Launch::Command(_) => None },
+        "mcp": s.mcp,
     });
     if is_created(cfg, s) {
         v["model"] = json!(s.env.get("MODEL"));
         v["systemPrompt"] = json!(std::fs::read_to_string(s.dir.join("system.md")).unwrap_or_default());
-        let tools = created::tools_json(&s.dir);
-        v["mcpServers"] = tools["mcpServers"].clone();
-        v["skills"] = tools["skills"].clone();
+        v["skills"] = created::skills_json(&s.dir);
     }
     v
 }
@@ -159,13 +163,19 @@ struct App {
     sqlite: Arc<store::SqliteTaskStore>,
     store: store::SharedStore,
     runs: exec::Runs,
+    mcp: mcp::McpLibrary,
     bearer: Arc<String>,
     agents: RwLock<Agents>,
 }
 
 impl App {
     fn agent_router(&self, spec: &AgentSpec) -> axum::Router {
-        let executor = exec::ExecAgent { spec: Arc::new(spec.clone()), runs: self.runs.clone(), harnesses: self.cfg.harnesses.clone() };
+        let executor = exec::ExecAgent {
+            spec: Arc::new(spec.clone()),
+            runs: self.runs.clone(),
+            harnesses: self.cfg.harnesses.clone(),
+            mcp_config: Arc::new(self.cfg.mcp_config.clone()),
+        };
         let handler = Arc::new(DefaultRequestHandler::new(executor, self.store.clone()).with_capabilities(capabilities()));
         let bearer = self.bearer.clone();
         let rpc = jsonrpc_router(handler).layer(middleware::from_fn(move |req, next| require_bearer(bearer.clone(), req, next)));
@@ -187,6 +197,7 @@ impl App {
             "available": off.iter().map(|s| agent_json(&self.cfg, s)).collect::<Vec<_>>(),
             "canCreate": true,
             "harnesses": self.cfg.harnesses.names(),
+            "mcpServers": self.mcp.servers(),
         })
     }
 
@@ -223,6 +234,10 @@ impl App {
         let agent = created::parse_request(body).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
         if agent.needs_pizza_bot() && !self.pizza_bot() {
             return Err(api_error(StatusCode::BAD_REQUEST, "MCP servers and skills need the pizza-bot harness, which this runner doesn't have"));
+        }
+        let known = self.mcp.ids();
+        if let Some(missing) = agent.mcp.iter().find(|id| !known.contains(id)) {
+            return Err(api_error(StatusCode::BAD_REQUEST, format!("this runner has no MCP server {missing:?}")));
         }
         Ok(agent)
     }
@@ -301,6 +316,27 @@ impl App {
         tracing::info!(agent = %id, deleted = folder.is_some(), "agent removed");
         Ok(self.index())
     }
+}
+
+async fn put_mcp_server(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    if !authorized(&headers, &app.bearer) {
+        return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    app.mcp.put(&id, &body).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+    tracing::info!(server = %id, "MCP server saved");
+    Ok(Json(app.index()))
+}
+
+/// Agents that name a removed server still run; the harness reports it as unavailable.
+async fn delete_mcp_server(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
+    if !authorized(&headers, &app.bearer) {
+        return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    if !app.mcp.remove(&id).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))? {
+        return Err(api_error(StatusCode::NOT_FOUND, format!("this runner has no MCP server {id:?}")));
+    }
+    tracing::info!(server = %id, "MCP server removed");
+    Ok(Json(app.index()))
 }
 
 async fn put_agents(State(app): State<Arc<App>>, headers: HeaderMap, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
@@ -402,6 +438,7 @@ async fn main() -> Result<(), String> {
         store: store::SharedStore(sqlite.clone()),
         sqlite,
         runs: exec::Runs::default(),
+        mcp: mcp::McpLibrary::new(cfg.mcp_config.clone()),
         agents: RwLock::new(Agents { specs: vec![], served, routers: HashMap::new() }),
         cfg,
     });
@@ -415,6 +452,7 @@ async fn main() -> Result<(), String> {
     let router = axum::Router::new()
         .route("/agents", get(|State(app): State<Arc<App>>| async move { Json(app.index()) }).put(put_agents).post(post_agents))
         .route("/agents/{id}", delete(delete_agent).put(put_agent))
+        .route("/mcp-servers/{id}", put(put_mcp_server).delete(delete_mcp_server))
         .route("/agents/{id}/{*rest}", any(agent_request))
         .with_state(app.clone());
 

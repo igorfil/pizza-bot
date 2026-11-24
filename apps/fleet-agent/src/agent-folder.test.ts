@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SkillCatalogEntry } from "@pizza-bot/core";
-import { mcpStates, qualifyModel, withServerSkills } from "./agent-folder.js";
+import { mcpStates, pickServers, qualifyModel, serverIds, withServerSkills } from "./agent-folder.js";
 
 const providers = new Set(["bedrock", "anthropic"]);
 
@@ -48,5 +48,20 @@ describe("withServerSkills", () => {
 describe("mcpStates", () => {
   it("reports why a server that didn't connect is unavailable", () => {
     expect(mcpStates(["github"], {}, { github: "spawn ENOENT" }).get("github")).toEqual({ status: "unavailable", detail: "spawn ENOENT" });
+  });
+});
+
+describe("pickServers", () => {
+  it("takes the picked servers from the runner's library and names the ones it lacks", () => {
+    expect(pickServers({ fetch: { command: "uvx" }, github: { url: "x" } }, ["fetch", "gone"])).toEqual({
+      servers: { fetch: { command: "uvx" } },
+      missing: ["gone"],
+    });
+  });
+});
+
+describe("serverIds", () => {
+  it("splits the comma list and drops blanks", () => {
+    expect(serverIds(" fetch,,github ")).toEqual(["fetch", "github"]);
   });
 });

@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { AGENT_MODELS } from "./agent-models.js";
-import { mcpServersFrom, skillsFrom } from "./agent-tools.js";
+import { mcpEntryFrom, mcpIdFrom, mcpIdsFrom, skillCopiesFrom } from "./agent-tools.js";
 import { INTENT_TYPES, type GuideInput, type IntentMsg, type Model, type NewAgentSpec, type TransportSpec } from "./types.js";
 import type { Runtime } from "./runtime.js";
 import type { SecretStore } from "./vault.js";
@@ -126,11 +126,11 @@ const agentSpecOf = (type: string, p: Record<string, unknown>): NewAgentSpec | s
   if (name.length > 60) return "the agent name must be at most 60 characters";
   if (!AGENT_MODELS.some((m) => m.id === model)) return `model must be one of ${AGENT_MODELS.map((m) => m.id).join(", ")}`;
   if (systemPrompt.length > 20_000) return "the system prompt must be at most 20000 characters";
-  const mcpServers = mcpServersFrom(p.mcpServers);
-  if (typeof mcpServers === "string") return mcpServers;
-  const skills = skillsFrom(p.skills);
+  const mcp = mcpIdsFrom(p.mcp);
+  if (typeof mcp === "string") return mcp;
+  const skills = skillCopiesFrom(p.skills);
   if (typeof skills === "string") return skills;
-  return { name, model, systemPrompt, mcpServers, skills };
+  return { name, model, systemPrompt, mcp, skills };
 };
 
 /** Ids are minted here, not by UIs, so `update` stays pure and replayable. */
@@ -162,6 +162,16 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
       if (!str(p.runner)) return "CreateAgent needs runner, name, model, systemPrompt";
       const agent = agentSpecOf(type, p);
       return typeof agent === "string" ? agent : { type, runner: p.runner, agent };
+    }
+    case "SetMcpServer": {
+      const id = mcpIdFrom(p.id);
+      if (!str(p.runner) || !id) return "SetMcpServer needs runner and id (lowercase letters, digits, - or _), entry";
+      const entry = mcpEntryFrom(p.entry);
+      return typeof entry === "string" ? entry : { type, runner: p.runner, id, entry };
+    }
+    case "RemoveMcpServer": {
+      const id = mcpIdFrom(p.id);
+      return str(p.runner) && id ? { type, runner: p.runner, id } : "RemoveMcpServer needs runner, id";
     }
     case "EditAgent": {
       if (!str(p.agent)) return "EditAgent needs agent (<runner>/<id>), name, model, systemPrompt";

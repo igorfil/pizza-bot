@@ -1,9 +1,11 @@
 //! Agents made over `POST /agents`: a folder with agent.toml and system.md, run by the `pizza-bot`
 //! harness when the runner has one, else by the built-in single-call prompt script.
 
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
+use std::path::{Component, Path, PathBuf};
 
-use serde_json::{Map, Value, json};
+use base64::Engine;
+use serde_json::{Value, json};
 
 use crate::harness::PIZZA_BOT;
 use crate::manifest;
@@ -12,15 +14,32 @@ const HARNESS: &str = include_str!("prompt_agent.py");
 const MAX_NAME: usize = 60;
 const MAX_PROMPT: usize = 20_000;
 const MAX_SKILLS: usize = 20;
-const MAX_SKILL: usize = 50_000;
-const MCP_FILE: &str = ".mcp.json";
+const MAX_SKILL_BYTES: usize = 2_000_000;
+/// Agents written before the runner kept an MCP library had their own; agents now pick from the runner's.
+const LEGACY_MCP_FILE: &str = ".mcp.json";
 const SKILLS_DIR: &str = "skills";
 const SKILL_FILE: &str = "SKILL.md";
 
+/// One file of a skill copy, relative to the skill folder.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Skill {
-    pub id: String,
-    pub content: String,
+pub struct SkillFile {
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
+/// An agent's skills are copies: a new copy carries its files, an attached one is kept as it is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SkillCopy {
+    Keep(String),
+    Copy { id: String, files: Vec<SkillFile> },
+}
+
+impl SkillCopy {
+    fn id(&self) -> &str {
+        match self {
+            SkillCopy::Keep(id) | SkillCopy::Copy { id, .. } => id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,15 +49,15 @@ pub struct NewAgent {
     pub description: String,
     pub model: String,
     pub system_prompt: String,
-    /// The `mcpServers` map of a Claude-format `.mcp.json`.
-    pub mcp_servers: Map<String, Value>,
-    pub skills: Vec<Skill>,
+    /// Ids of the runner's MCP servers.
+    pub mcp: Vec<String>,
+    pub skills: Vec<SkillCopy>,
 }
 
 impl NewAgent {
     /// Only the `pizza-bot` harness can use MCP servers and skills.
     pub fn needs_pizza_bot(&self) -> bool {
-        !self.mcp_servers.is_empty() || !self.skills.is_empty()
+        !self.mcp.is_empty() || !self.skills.is_empty()
     }
 }
 
@@ -56,7 +75,7 @@ fn valid_model(model: &str) -> bool {
     !model.is_empty() && model.len() <= 200 && model.chars().all(|c| c.is_ascii_alphanumeric() || "._:-".contains(c))
 }
 
-/// `{name, model, systemPrompt, id?, description?}`; the id defaults to the name's slug.
+/// `{name, model, systemPrompt, id?, description?, mcp?, skills?}`; the id defaults to the name's slug.
 pub fn parse_request(body: &Value) -> Result<NewAgent, String> {
     let name = text(body, "name");
     let model = text(body, "model");
@@ -75,65 +94,95 @@ pub fn parse_request(body: &Value) -> Result<NewAgent, String> {
         return Err(format!("the system prompt is longer than {MAX_PROMPT} characters"));
     }
     let description = Some(text(body, "description")).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("Answers with {model}."));
-    let mcp_servers = parse_mcp_servers(body.get("mcpServers"))?;
+    let mcp = parse_mcp(body.get("mcp"))?;
     let skills = parse_skills(body.get("skills"))?;
-    Ok(NewAgent { id, name, description, model, system_prompt, mcp_servers, skills })
+    Ok(NewAgent { id, name, description, model, system_prompt, mcp, skills })
 }
 
-/// Each server must be an object; the harness checks the rest when it connects.
-fn parse_mcp_servers(value: Option<&Value>) -> Result<Map<String, Value>, String> {
-    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(Map::new()) };
-    let servers = value.as_object().ok_or("mcpServers must be an object of servers")?;
-    match servers.iter().find(|(id, server)| id.trim().is_empty() || !server.is_object()) {
-        Some((id, _)) => Err(format!("MCP server {id:?} must be an object with a command or url")),
-        None => Ok(servers.clone()),
+fn parse_mcp(value: Option<&Value>) -> Result<Vec<String>, String> {
+    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(vec![]) };
+    let ids: Vec<String> = value
+        .as_array()
+        .and_then(|a| a.iter().map(|v| v.as_str().map(str::to_string)).collect())
+        .ok_or("mcp must be a list of the runner's MCP server ids")?;
+    match ids.iter().find(|id| !manifest::valid_id(id)) {
+        Some(id) => Err(format!("MCP server id {id:?} must be lowercase letters, digits, - or _")),
+        None => Ok(ids.into_iter().collect::<BTreeSet<_>>().into_iter().collect()),
     }
 }
 
-fn parse_skills(value: Option<&Value>) -> Result<Vec<Skill>, String> {
+/// A path that stays inside the skill folder.
+fn relative_path(path: &str) -> Option<PathBuf> {
+    let p = PathBuf::from(path);
+    let inside = !path.is_empty() && p.components().all(|c| matches!(c, Component::Normal(_)));
+    inside.then_some(p)
+}
+
+fn parse_file(file: &Value) -> Result<SkillFile, String> {
+    let path = file.get("path").and_then(Value::as_str).unwrap_or_default();
+    let rel = relative_path(path).ok_or_else(|| format!("skill file path {path:?} must stay inside the skill folder"))?;
+    let content = file.get("content").and_then(Value::as_str).unwrap_or_default();
+    let bytes = match file.get("encoding").and_then(Value::as_str) {
+        Some("base64") => base64::engine::general_purpose::STANDARD.decode(content).map_err(|e| format!("{path}: {e}"))?,
+        _ => content.as_bytes().to_vec(),
+    };
+    Ok(SkillFile { path: rel, bytes })
+}
+
+/// `{id}` keeps the agent's copy; `{id, files: [{path, content, encoding?}]}` replaces it.
+fn parse_skill(value: &Value) -> Result<SkillCopy, String> {
+    let id = text(value, "id");
+    if !manifest::valid_id(&id) {
+        return Err(format!("skill id {id:?} must be lowercase letters, digits, - or _"));
+    }
+    let Some(files) = value.get("files").and_then(Value::as_array) else { return Ok(SkillCopy::Keep(id)) };
+    let files: Vec<SkillFile> = files.iter().map(parse_file).collect::<Result<_, _>>()?;
+    if !files.iter().any(|f| f.path == Path::new(SKILL_FILE)) {
+        return Err(format!("skill {id:?} has no {SKILL_FILE}"));
+    }
+    if files.iter().map(|f| f.bytes.len()).sum::<usize>() > MAX_SKILL_BYTES {
+        return Err(format!("skill {id:?} is larger than {MAX_SKILL_BYTES} bytes"));
+    }
+    Ok(SkillCopy::Copy { id, files })
+}
+
+fn parse_skills(value: Option<&Value>) -> Result<Vec<SkillCopy>, String> {
     let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(vec![]) };
-    let list = value.as_array().ok_or("skills must be a list of {id, content}")?;
+    let list = value.as_array().ok_or("skills must be a list")?;
     if list.len() > MAX_SKILLS {
         return Err(format!("an agent can have at most {MAX_SKILLS} skills"));
     }
-    let skills: Vec<Skill> = list
-        .iter()
-        .map(|s| {
-            let skill = Skill { id: text(s, "id"), content: s.get("content").and_then(Value::as_str).unwrap_or_default().to_string() };
-            if !manifest::valid_id(&skill.id) {
-                return Err(format!("skill id {:?} must be lowercase letters, digits, - or _", skill.id));
-            }
-            if skill.content.trim().is_empty() || skill.content.len() > MAX_SKILL {
-                return Err(format!("skill {:?} must have 1-{MAX_SKILL} bytes of SKILL.md", skill.id));
-            }
-            Ok(skill)
-        })
-        .collect::<Result<_, _>>()?;
-    match skills.iter().enumerate().find(|(i, s)| skills[..*i].iter().any(|t| t.id == s.id)) {
-        Some((_, s)) => Err(format!("two skills are named {:?}", s.id)),
+    let skills: Vec<SkillCopy> = list.iter().map(parse_skill).collect::<Result<_, _>>()?;
+    match skills.iter().enumerate().find(|(i, s)| skills[..*i].iter().any(|t| t.id() == s.id())) {
+        Some((_, s)) => Err(format!("two skills are named {:?}", s.id())),
         None => Ok(skills),
     }
 }
 
-/// What a created agent's folder holds beyond its manifest, for UIs to edit.
-pub fn tools_json(folder: &Path) -> Value {
-    let servers = std::fs::read_to_string(folder.join(MCP_FILE))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|v| v.get("mcpServers").cloned())
-        .unwrap_or_else(|| json!({}));
+/// `name` and `description` from a SKILL.md's frontmatter, for listing.
+fn frontmatter_field(skill_md: &str, key: &str) -> String {
+    let Some(rest) = skill_md.strip_prefix("---") else { return String::new() };
+    rest.lines()
+        .take_while(|line| line.trim() != "---")
+        .find_map(|line| line.strip_prefix(&format!("{key}:")))
+        .map(|v| v.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+        .unwrap_or_default()
+}
+
+/// The skills a created agent holds, for UIs to list and keep.
+pub fn skills_json(folder: &Path) -> Value {
     let mut skills: Vec<Value> = std::fs::read_dir(folder.join(SKILLS_DIR))
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let id = e.file_name().to_str()?.to_string();
-            let content = std::fs::read_to_string(e.path().join(SKILL_FILE)).ok()?;
-            Some(json!({ "id": id, "content": content }))
+            let skill_md = std::fs::read_to_string(e.path().join(SKILL_FILE)).ok()?;
+            Some(json!({ "id": id, "name": frontmatter_field(&skill_md, "name"), "description": frontmatter_field(&skill_md, "description") }))
         })
         .collect();
     skills.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
-    json!({ "mcpServers": servers, "skills": skills })
+    Value::Array(skills)
 }
 
 /// `pizza_bot`: run with the `pizza-bot` harness instead of the `agent.py` prompt script.
@@ -152,6 +201,9 @@ pub fn manifest_toml(agent: &NewAgent, pizza_bot: bool) -> String {
         doc.insert("command".into(), "uv run --quiet agent.py".into());
     }
     doc.insert("timeout_secs".into(), 300.into());
+    if !agent.mcp.is_empty() {
+        doc.insert("mcp".into(), toml::Value::Array(agent.mcp.iter().cloned().map(Into::into).collect()));
+    }
     doc.insert("input".into(), input.into());
     doc.insert("env".into(), env.into());
     toml::to_string(&doc).unwrap_or_default()
@@ -164,16 +216,23 @@ pub fn write(dir: &Path, agent: &NewAgent, pizza_bot: bool) -> Result<PathBuf, S
         return Err(format!("an agent folder {} already exists", folder.display()));
     }
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    rewrite(&folder, agent, pizza_bot)?;
+    if let Err(e) = rewrite(&folder, agent, pizza_bot) {
+        let _ = std::fs::remove_dir_all(&folder);
+        return Err(e);
+    }
     Ok(folder)
 }
 
-/// Replaces the manifest, system prompt and harness of an existing agent folder.
+/// Replaces the manifest, system prompt, skills and harness of an existing agent folder.
 pub fn rewrite(folder: &Path, agent: &NewAgent, pizza_bot: bool) -> Result<(), String> {
     let io = |e: std::io::Error| format!("{}: {e}", folder.display());
+    write_skills(folder, &agent.skills)?;
     std::fs::write(folder.join("agent.toml"), manifest_toml(agent, pizza_bot)).map_err(io)?;
     std::fs::write(folder.join("system.md"), &agent.system_prompt).map_err(io)?;
-    write_tools(folder, agent).map_err(io)?;
+    let legacy = folder.join(LEGACY_MCP_FILE);
+    if legacy.exists() {
+        std::fs::remove_file(&legacy).map_err(io)?;
+    }
     let script = folder.join("agent.py");
     if pizza_bot {
         if script.exists() {
@@ -185,25 +244,46 @@ pub fn rewrite(folder: &Path, agent: &NewAgent, pizza_bot: bool) -> Result<(), S
     Ok(())
 }
 
-/// Replaces `.mcp.json` and `skills/` wholesale, so a removed server or skill is gone.
-fn write_tools(folder: &Path, agent: &NewAgent) -> std::io::Result<()> {
-    let mcp = folder.join(MCP_FILE);
-    if agent.mcp_servers.is_empty() {
-        if mcp.exists() {
-            std::fs::remove_file(&mcp)?;
+/// Builds the new `skills/` beside the old one, then swaps, so a failed write leaves the agent as it was.
+fn write_skills(folder: &Path, skills: &[SkillCopy]) -> Result<(), String> {
+    let current = folder.join(SKILLS_DIR);
+    let next = folder.join("skills.next");
+    let io = |e: std::io::Error| format!("{}: {e}", next.display());
+    if let Some(missing) = skills.iter().find(|s| matches!(s, SkillCopy::Keep(id) if !current.join(id).join(SKILL_FILE).is_file())) {
+        return Err(format!("this agent has no skill {:?} to keep; attach it again", missing.id()));
+    }
+    if next.exists() {
+        std::fs::remove_dir_all(&next).map_err(io)?;
+    }
+    std::fs::create_dir_all(&next).map_err(io)?;
+    for skill in skills {
+        match skill {
+            SkillCopy::Keep(id) => copy_dir(&current.join(id), &next.join(id)).map_err(io)?,
+            SkillCopy::Copy { id, files } => {
+                for file in files {
+                    let target = next.join(id).join(&file.path);
+                    std::fs::create_dir_all(target.parent().unwrap_or(&next)).map_err(io)?;
+                    std::fs::write(&target, &file.bytes).map_err(io)?;
+                }
+            }
         }
-    } else {
-        let text = serde_json::to_string_pretty(&json!({ "mcpServers": agent.mcp_servers })).unwrap_or_default();
-        std::fs::write(&mcp, text)?;
     }
-    let skills = folder.join(SKILLS_DIR);
-    if skills.exists() {
-        std::fs::remove_dir_all(&skills)?;
+    if current.exists() {
+        std::fs::remove_dir_all(&current).map_err(io)?;
     }
-    for skill in &agent.skills {
-        let dir = skills.join(&skill.id);
-        std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(SKILL_FILE), &skill.content)?;
+    std::fs::rename(&next, &current).map_err(io)
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
     }
     Ok(())
 }
@@ -252,40 +332,71 @@ mod tests {
         assert_eq!((spec.name.as_str(), spec.env["MODEL"].as_str()), ("Say \"hi\"", "us.openai.gpt-5.5"));
     }
 
-    #[test]
-    fn reads_back_the_mcp_servers_and_skills_it_wrote() {
-        let dir = std::env::temp_dir().join(format!("fleet-tools-{}", std::process::id()));
-        let body = json!({
-            "name": "Researcher", "model": "m", "systemPrompt": "",
-            "mcpServers": {"fetch": {"command": "uvx", "args": ["mcp-server-fetch"]}},
-            "skills": [{"id": "brief", "content": "---\nname: brief\ndescription: d\n---\nBe brief."}]
-        });
-        let folder = write(&dir, &parse_request(&body).unwrap(), true).unwrap();
-        let tools = tools_json(&folder);
-        let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(tools, json!({"mcpServers": body["mcpServers"], "skills": body["skills"]}));
+    fn skill_md(name: &str) -> String {
+        format!("---\nname: {name}\ndescription: Briefs on pages.\n---\nBe brief.")
+    }
+
+    fn copy(id: &str) -> Value {
+        json!({"id": id, "files": [{"path": "SKILL.md", "content": skill_md(id)}, {"path": "references/style.md", "content": "short"}]})
+    }
+
+    fn agent(skills: Value, mcp: Value) -> NewAgent {
+        parse_request(&json!({"id": "r", "name": "R", "model": "m", "systemPrompt": "", "skills": skills, "mcp": mcp})).unwrap()
     }
 
     #[test]
-    fn an_edit_without_skills_removes_them() {
-        let dir = std::env::temp_dir().join(format!("fleet-untools-{}", std::process::id()));
-        let with = json!({"name": "R", "model": "m", "systemPrompt": "", "mcpServers": {"f": {"url": "http://x"}}, "skills": [{"id": "a", "content": "x"}]});
-        let folder = write(&dir, &parse_request(&with).unwrap(), true).unwrap();
-        rewrite(&folder, &parse_request(&json!({"id": "r", "name": "R", "model": "m", "systemPrompt": ""})).unwrap(), true).unwrap();
-        let tools = tools_json(&folder);
+    fn writes_a_skill_copy_with_its_files() {
+        let dir = std::env::temp_dir().join(format!("fleet-skillcopy-{}", std::process::id()));
+        let folder = write(&dir, &agent(json!([copy("brief")]), json!([])), true).unwrap();
+        let reference = std::fs::read_to_string(folder.join("skills/brief/references/style.md")).unwrap();
+        let listed = skills_json(&folder);
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(tools, json!({"mcpServers": {}, "skills": []}));
+        assert_eq!((reference.as_str(), listed), ("short", json!([{"id": "brief", "name": "brief", "description": "Briefs on pages."}])));
     }
 
     #[test]
-    fn rejects_two_skills_with_one_id() {
-        let body = json!({"name": "R", "model": "m", "systemPrompt": "", "skills": [{"id": "a", "content": "x"}, {"id": "a", "content": "y"}]});
+    fn keeps_an_attached_copy_and_drops_a_detached_one() {
+        let dir = std::env::temp_dir().join(format!("fleet-skillkeep-{}", std::process::id()));
+        let folder = write(&dir, &agent(json!([copy("brief"), copy("other")]), json!([])), true).unwrap();
+        rewrite(&folder, &agent(json!([{"id": "brief"}]), json!([])), true).unwrap();
+        let ids: Vec<String> = skills_json(&folder).as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect();
+        let reference = folder.join("skills/brief/references/style.md").is_file();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((ids, reference), (vec!["brief".to_string()], true));
+    }
+
+    #[test]
+    fn refuses_to_keep_a_skill_the_agent_doesnt_have() {
+        let dir = std::env::temp_dir().join(format!("fleet-skillmissing-{}", std::process::id()));
+        let result = write(&dir, &agent(json!([{"id": "brief"}]), json!([])), true);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn refuses_a_skill_file_outside_its_folder() {
+        let body = json!({"name": "R", "model": "m", "systemPrompt": "", "skills": [{"id": "a", "files": [{"path": "SKILL.md", "content": "x"}, {"path": "../../agent.toml", "content": "x"}]}]});
         assert!(parse_request(&body).is_err());
     }
 
     #[test]
-    fn rejects_a_server_that_isnt_an_object() {
-        assert!(parse_request(&json!({"name": "R", "model": "m", "systemPrompt": "", "mcpServers": {"f": "uvx"}})).is_err());
+    fn decodes_a_binary_skill_file() {
+        let body = json!({"name": "R", "model": "m", "systemPrompt": "", "skills": [{"id": "a", "files": [{"path": "SKILL.md", "content": "x"}, {"path": "logo.png", "content": "AAE=", "encoding": "base64"}]}]});
+        let SkillCopy::Copy { files, .. } = &parse_request(&body).unwrap().skills[0] else { panic!("expected a copy") };
+        assert_eq!(files[1].bytes, vec![0u8, 1u8]);
+    }
+
+    #[test]
+    fn rejects_two_skills_with_one_id() {
+        let body = json!({"name": "R", "model": "m", "systemPrompt": "", "skills": [copy("a"), {"id": "a"}]});
+        assert!(parse_request(&body).is_err());
+    }
+
+    #[test]
+    fn names_the_runner_mcp_servers_it_uses_in_the_manifest() {
+        let a = agent(json!([]), json!(["fetch", "github"]));
+        let spec = manifest::parse("r", Path::new("/x"), &manifest_toml(&a, true)).unwrap();
+        assert_eq!(spec.mcp, vec!["fetch".to_string(), "github".to_string()]);
     }
 
     #[test]

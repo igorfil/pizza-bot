@@ -120,6 +120,26 @@ describe("update", () => {
 const done: TaskSnapshot = { remoteId: "r1", state: "completed", statusText: "done", artifacts: [{ id: "jokes", name: "jokes", text: "1. ha" }] };
 const finished: Msg[] = [...withRunningTask, { type: "TaskSnapshot", taskId: "t1", snapshot: done }];
 
+describe("runner MCP servers", () => {
+  const up = withRunningTask.slice(0, 4);
+  const fetchServer = { command: "uvx", args: ["mcp-server-fetch"] };
+
+  test("SetMcpServer asks the runner to save the server", () => {
+    const [, effects] = run([...up, { type: "SetMcpServer", runner: "local", id: "fetch", entry: fetchServer }]);
+    expect(effects).toEqual([{ type: "PutRunnerMcpServer", runner: "local", endpoint: { url: "http://x", token }, id: "fetch", entry: fetchServer }]);
+  });
+
+  test("the runner's answer becomes its server list", () => {
+    const [model] = run([...up, { type: "McpServersSet", runner: "local", text: "saved", agents: [sys], location: "laptop", available: null, mcpServers: { fetch: fetchServer } }]);
+    expect(model.runners.local?.mcpServers).toEqual({ fetch: fetchServer });
+  });
+
+  test("an unreachable runner can't take a server", () => {
+    const [model, effects] = run([...up, { type: "RunnerFailed", name: "local", error: "x" }, { type: "SetMcpServer", runner: "local", id: "fetch", entry: fetchServer }]);
+    expect([effects, model.notifications.at(-1)?.text]).toEqual([[], "local isn't reachable right now"]);
+  });
+});
+
 describe("follow-ups", () => {
   const inContext: Msg[] = [...withRunningTask, { type: "TaskSnapshot", taskId: "t1", snapshot: { ...done, contextId: "c1" } }];
   const followUp = (taskId = "t2"): Msg => ({ type: "CreateTask", taskId, agent: "", prompt: "and now?", followUpOf: "t1" });
@@ -417,7 +437,7 @@ describe("adding agents", () => {
 });
 
 describe("creating an agent", () => {
-  const poet = { name: "Haiku poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku.", mcpServers: {}, skills: [] };
+  const poet = { name: "Haiku poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku.", mcp: [], skills: [] };
   const creator: Msg = { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: [], canCreate: true };
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), creator];
   const made = { id: "haiku-poet", name: "Haiku poet", description: "", input: null };
@@ -444,7 +464,7 @@ describe("creating an agent", () => {
 
 describe("editing an agent", () => {
   const poet = { id: "poet", name: "Poet", description: "", input: null, created: true, model: "m", systemPrompt: "One haiku." };
-  const spec = { name: "Haiku poet", model: "m2", systemPrompt: "Two haiku.", mcpServers: {}, skills: [] };
+  const spec = { name: "Haiku poet", model: "m2", systemPrompt: "Two haiku.", mcp: [], skills: [] };
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), { type: "RunnerOk", name: "local", agents: [poet, sys], location: "laptop", available: [], canCreate: true }];
   const edited: Msg = { type: "AgentsSet", runner: "local", added: [], edited: ["poet"], agents: [{ ...poet, ...spec }, sys], location: "laptop", available: [], canCreate: true };
 

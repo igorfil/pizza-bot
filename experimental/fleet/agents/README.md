@@ -35,8 +35,12 @@ MODEL = "us.openai.gpt-6.1-terra"
 
 Instead of `command`, an agent can name a `harness` the runner provides. `harness = "pizza-bot"` runs
 the folder on pizza-bot's agent runtime (`apps/fleet-agent`): `system.md` is the system prompt,
-`MODEL` in `[env]` the model (a Bedrock id, or `<provider>:<id>`), `.mcp.json` (Claude format) the MCP
-servers and `skills/<id>/SKILL.md` the skills. A server that no skill grants gets a skill of its own.
+`MODEL` in `[env]` the model (a Bedrock id, or `<provider>:<id>`) and `skills/<id>/` the skills.
+MCP servers run on the runner's machine, so they belong to the runner: its library is one
+Claude-format `mcp.json` beside the task store (`RUNNER_MCP_CONFIG`), managed over
+`PUT`/`DELETE /mcp-servers/<id>`, and `mcp = ["fetch", …]` in `agent.toml` picks from it. The runner
+passes the library and the picks as `FLEET_MCP_CONFIG` and `FLEET_MCP_SERVERS`. A shipped agent may
+also bring its own `.mcp.json`. A server that no skill grants gets a skill of its own.
 The runner offers a harness when `RUNNER_HARNESS_<NAME>` holds the command that starts it;
 `npm run dev` sets `RUNNER_HARNESS_PIZZA_BOT` for the laptop runner. See `agents/webresearch`.
 
@@ -106,8 +110,9 @@ from then on.
 
 Add agent → Create new on the Fleet page makes the bare-minimum agent: a name, a Bedrock model and a
 system prompt. On a runner with the `pizza-bot` harness it is written as `harness = "pizza-bot"`, and
-the dialog also takes MCP servers and skills, which the runner writes as the folder's `.mcp.json` and
-`skills/<name>/SKILL.md` (and returns in `GET /agents`, so they can be edited). Otherwise it runs the single-call script below. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR`
+the dialog also picks the runner's MCP servers and skills from Pizza Bot's skill library. The agent
+holds a copy of each skill under `skills/<id>/`; an edit that keeps a skill sends only its id, so the
+copy stays as it was until the skill is picked again. Otherwise it runs the single-call script below. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR`
 (`agent.toml` with `MODEL` in `[env]`, `system.md`, and `agent.py`, a copy of the harness built into
 the runner from `runner/src/prompt_agent.py`). Each run sends the input to the model with the system
 prompt through Bedrock Converse and returns the reply as a `reply` artifact; an empty input is sent

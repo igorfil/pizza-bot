@@ -32,6 +32,8 @@ export interface FleetRunner {
   canCreateAgents?: boolean;
   /** Harnesses the runner offers; `pizza-bot` lets created agents have MCP servers and skills. */
   harnesses?: string[];
+  /** The MCP servers on the runner's machine, which its agents pick from. */
+  mcpServers?: Record<string, Record<string, unknown>>;
   agentsChange?: FleetAgentsChange | null;
 }
 
@@ -60,10 +62,10 @@ export interface FleetAgent {
   /** Only on created agents, for editing. */
   model?: string;
   systemPrompt?: string;
-  /** The `mcpServers` map of the agent's `.mcp.json`. */
-  mcpServers?: Record<string, Record<string, unknown>>;
-  /** Each skill's folder id and SKILL.md. */
-  skills?: { id: string; content: string }[];
+  /** Ids of the runner's MCP servers the agent uses. */
+  mcp?: string[];
+  /** The skills the agent holds copies of; only on created agents. */
+  skills?: { id: string; name: string; description: string }[];
 }
 
 export type FleetTaskState =

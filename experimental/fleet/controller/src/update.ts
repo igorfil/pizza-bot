@@ -13,6 +13,7 @@ import type {
   NewAgentSpec,
   NewRunner,
   Runner,
+  RunnerIndexFields,
   SecretRef,
   Sub,
   Task,
@@ -285,9 +286,7 @@ const syncAgents = (model: Model, runner: string, infos: AgentInfo[]): Model => 
   return { ...model, agents: { ...others, ...mine } };
 };
 
-type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[] };
-
-const runnerOk = (model: Model, name: string, { agents, location, available, canCreate, harnesses }: RunnerIndex): Result => {
+const runnerOk = (model: Model, name: string, { agents, location, available, canCreate, harnesses, mcpServers }: RunnerIndexFields): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
   const recovered = runner.status !== "healthy";
@@ -303,6 +302,7 @@ const runnerOk = (model: Model, name: string, { agents, location, available, can
       available: available ?? null,
       canCreateAgents: canCreate === true,
       harnesses: harnesses ?? [],
+      mcpServers: mcpServers ?? {},
     }),
     name,
     agents,
@@ -415,6 +415,14 @@ const editAgent = (model: Model, key: string, spec: NewAgentSpec): Result => {
   );
 };
 
+/** MCP servers are changed on a reachable runner; it answers with its new index. */
+const changeMcpServer = (model: Model, name: string, effect: (endpoint: Endpoint) => Effect): Result => {
+  const runner = model.runners[name];
+  if (!runner) return [notify(model, "error", `unknown runner ${name}`), []];
+  if (runner.status !== "healthy" || runner.link.state !== "up") return [notify(model, "error", `${name} isn't reachable right now`), []];
+  return [model, [effect({ url: runner.link.url, token: runner.token })]];
+};
+
 const agentsSet = (model: Model, msg: Extract<Msg, { type: "AgentsSet" }>): Result => {
   const runner = model.runners[msg.runner];
   if (!runner) return [model, []];
@@ -523,6 +531,20 @@ export const update = (model: Model, msg: Msg): Result => {
 
     case "AgentsSet":
       return agentsSet(model, msg);
+
+    case "SetMcpServer":
+      return changeMcpServer(model, msg.runner, (endpoint) => ({ type: "PutRunnerMcpServer", runner: msg.runner, endpoint, id: msg.id, entry: msg.entry }));
+
+    case "RemoveMcpServer":
+      return changeMcpServer(model, msg.runner, (endpoint) => ({ type: "DeleteRunnerMcpServer", runner: msg.runner, endpoint, id: msg.id }));
+
+    case "McpServersSet": {
+      const [next, effects] = runnerOk(model, msg.runner, msg);
+      return [notify(next, "info", msg.text), effects];
+    }
+
+    case "McpServerFailed":
+      return [notify(model, "error", msg.text), []];
 
     case "AgentsSetFailed":
       return [agentsSetFailed(model, msg.runner, msg.error), []];

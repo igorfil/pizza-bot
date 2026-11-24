@@ -8,7 +8,7 @@ import { registerBuiltinProviders } from "@pizza-bot/inference-providers";
 import { connectMcpServers, expandMcpEnvVars, loadUserMcpServers, loadUserSkills } from "@pizza-bot/plugin-sdk";
 import { createPizzaBotAgent } from "@pizza-bot/runtime-langgraph";
 import { openPersistence } from "@pizza-bot/storage";
-import { mcpStates, qualifyModel, systemPromptFor, withServerSkills } from "./agent-folder.js";
+import { mcpStates, pickServers, qualifyModel, serverIds as parseServerIds, systemPromptFor, withServerSkills } from "./agent-folder.js";
 import { finalReply, parseInput, statusFor, type ContractEvent } from "./contract.js";
 
 // Created agents run with no input ("random fact"); the model still needs a user turn.
@@ -45,10 +45,13 @@ const run = async (signal: AbortSignal): Promise<number> => {
   const modelId = qualifyModel(modelSetting, new Set(registry.listProviders().map((p) => p.id)));
   const model = await registry.buildModel(modelId);
 
-  const servers = expandMcpEnvVars(
-    await loadUserMcpServers(path.join(dir, ".mcp.json"), (file, err) => log(`[mcp] skipping ${file}: ${String(err)}`)),
-  );
-  const serverIds = Object.keys(servers);
+  const skip = (file: string, err: unknown) => log(`[mcp] skipping ${file}: ${String(err)}`);
+  const library = process.env.FLEET_MCP_CONFIG ? await loadUserMcpServers(process.env.FLEET_MCP_CONFIG, skip) : {};
+  const picked = pickServers(library, parseServerIds(process.env.FLEET_MCP_SERVERS));
+  picked.missing.forEach((id) => log(`[mcp] ${id} is no longer on this runner`));
+  // A shipped agent may bring its own servers in its folder.
+  const servers = expandMcpEnvVars({ ...picked.servers, ...(await loadUserMcpServers(path.join(dir, ".mcp.json"), skip)) });
+  const serverIds = [...Object.keys(servers), ...picked.missing];
   if (serverIds.length > 0) emit({ status: `connecting ${serverIds.join(", ")}` });
   const mcp = await connectMcpServers(servers, undefined, (m) => log(`[mcp] ${m}`), "pipe", registry.collectProcessEnv(), {
     connectionTimeoutMs: MCP_CONNECT_TIMEOUT_MS,

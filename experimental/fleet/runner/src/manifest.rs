@@ -25,6 +25,8 @@ struct Manifest {
     input: Option<InputSpec>,
     #[serde(default)]
     env: BTreeMap<String, String>,
+    #[serde(default)]
+    mcp: Vec<String>,
 }
 
 /// How a run starts: the agent's own command, or a harness the runner provides (e.g. `pizza-bot`).
@@ -45,6 +47,8 @@ pub struct AgentSpec {
     pub timeout_secs: u64,
     pub input: Option<InputSpec>,
     pub env: BTreeMap<String, String>,
+    /// Ids of the runner's MCP servers the agent uses.
+    pub mcp: Vec<String>,
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -70,6 +74,7 @@ pub fn parse(id: &str, dir: &Path, toml_text: &str) -> Result<AgentSpec, String>
         timeout_secs: m.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
         input: m.input,
         env: m.env,
+        mcp: m.mcp,
     })
 }
 

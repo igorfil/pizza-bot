@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -81,6 +82,7 @@ pub struct ExecAgent {
     pub spec: Arc<AgentSpec>,
     pub runs: Runs,
     pub harnesses: Arc<Harnesses>,
+    pub mcp_config: Arc<PathBuf>,
 }
 
 fn signal_group(child: &Child, signal: i32) {
@@ -100,13 +102,16 @@ async fn stop(child: &mut Child) {
     }
 }
 
-fn spawn(spec: &AgentSpec, command: &str, task_id: &str) -> std::io::Result<Child> {
+/// Harness agents find the runner's MCP library and their picks from it in the environment.
+fn spawn(spec: &AgentSpec, command: &str, task_id: &str, mcp_config: &Path) -> std::io::Result<Child> {
     Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(&spec.dir)
         .envs(&spec.env)
         .env("FLEET_TASK_ID", task_id)
+        .env("FLEET_MCP_CONFIG", mcp_config)
+        .env("FLEET_MCP_SERVERS", spec.mcp.join(","))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -122,6 +127,7 @@ impl AgentExecutor for ExecAgent {
         let spec = self.spec.clone();
         let runs = self.runs.clone();
         let command = self.harnesses.command(&spec.launch);
+        let mcp_config = self.mcp_config.clone();
 
         Box::pin(async_stream::stream! {
             let command = match command {
@@ -131,7 +137,7 @@ impl AgentExecutor for ExecAgent {
                     return;
                 }
             };
-            let mut child = match spawn(&spec, &command, &task_id) {
+            let mut child = match spawn(&spec, &command, &task_id, &mcp_config) {
                 Ok(c) => c,
                 Err(e) => {
                     yield Ok(status(&task_id, &context_id, TaskState::Failed, &format!("could not start {command:?}: {e}")));

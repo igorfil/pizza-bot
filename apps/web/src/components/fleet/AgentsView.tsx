@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Pencil, Play, Plus, RotateCcw, Server, Square, Trash2, X } from "lucide-react";
-import { AddAgentDialog, EditAgentDialog } from "./AddAgentDialog.js";
+import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Pencil, Play, Plug, Plus, RotateCcw, Server, Square, Trash2, X } from "lucide-react";
+import { AddAgentDialog, EditAgentDialog, runsTools } from "./AddAgentDialog.js";
+import { McpServersDialog } from "./McpServersDialog.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
@@ -140,6 +141,8 @@ export function RunnerGroup({
   const notify = useAppToast();
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [addingAgent, setAddingAgent] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const mcpCount = Object.keys(runner.mcpServers ?? {}).length;
   const Where = placeIcon(runner);
   const down = runner.status === "unreachable";
   const change = runner.agentsChange ?? null;
@@ -156,6 +159,17 @@ export function RunnerGroup({
         </span>
         {down && runner.lastError && <span className="fleet-runner-error">{runner.lastError}</span>}
         <span className="fleet-agent-links-spacer" />
+        {runsTools(runner) && (
+          <button
+            type="button"
+            className="btn-secondary fleet-small-btn"
+            onClick={() => setMcpOpen(true)}
+            disabled={runner.status !== "healthy"}
+            aria-label={`MCP servers on ${runner.name}`}
+          >
+            <Plug size={13} aria-hidden="true" /> MCP servers{mcpCount > 0 ? ` (${mcpCount})` : ""}
+          </button>
+        )}
         {!runner.local && (
           <button
             type="button"
@@ -201,6 +215,7 @@ export function RunnerGroup({
           </button>
         </div>
       )}
+      {mcpOpen && <McpServersDialog runner={runner} agents={agents} send={send} onClose={() => setMcpOpen(false)} />}
       {addingAgent && <AddAgentDialog model={model} runner={runner} send={send} onClose={() => setAddingAgent(false)} />}
       {confirmRemove && (
         <RemoveRunnerDialog

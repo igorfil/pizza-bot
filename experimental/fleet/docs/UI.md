@@ -88,8 +88,11 @@ result body (`RunResult`) and actions (Run again, Continue in chat, Ok, got it),
 - Run opens an inline input on the card (labelled and hinted from the agent card, pre-filled with
   the last input); the result lands in the Inbox. Trash icon removes the agent after confirmation;
   agents created from the page also get a pencil that edits their name, model and system prompt.
-  On a runner with the `pizza-bot` harness, create and edit also take MCP servers (`.mcp.json` text,
-  checked as JSON while typing) and skills (one SKILL.md each, named by its frontmatter).
+  On a runner with the `pizza-bot` harness, create and edit also pick from the runner's MCP servers
+  and from Pizza Bot's skills (read from the api-server's `/skills`, copied into the agent on save).
+- A runner with the `pizza-bot` harness has an "MCP servers" button: its servers with what uses them,
+  remove, and an add form (an id and one entry, or a whole pasted `.mcp.json`; `SetMcpServer`,
+  `RemoveMcpServer`).
 - Unreachable runners are greyed out with "UNREACHABLE · retry in Ns" and the error.
 - A dashed "Add runner" card turns into the add form (name, runner URL as the Controller sees it,
   runner token); the runner's agents appear once it answers.

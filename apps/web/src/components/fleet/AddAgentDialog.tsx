@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { LoaderCircle, Plus, Trash2 } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
+import type { FleetPayload } from "./fleet-client.js";
+import { useSkillLibrary, type FleetSkillLibrary, type LibrarySkill, type SkillsState } from "./fleet-skills.js";
 import type { FleetSend } from "./FleetModule.js";
 import { ChoiceCard, FleetDialog } from "./GuideCard.js";
 
@@ -64,134 +66,154 @@ function ErrorLine({ error }: { error: string | null }) {
   ) : null;
 }
 
-/** `mcpServers` is `.mcp.json` text and each skill a whole SKILL.md; the Controller parses both. */
-type AgentSpec = { name: string; model: string; systemPrompt: string; mcpServers: string; skills: string[] };
+type AgentSpec = { name: string; model: string; systemPrompt: string; mcp: string[]; skills: string[] };
 
 /** MCP servers and skills need the runner's pizza-bot harness. */
 export const runsTools = (runner: FleetRunner | undefined): boolean => runner?.harnesses?.includes("pizza-bot") ?? false;
 
-const MCP_EXAMPLE = '{\n  "mcpServers": {\n    "fetch": { "command": "uvx", "args": ["mcp-server-fetch"] }\n  }\n}';
+/** One line saying what starts the server: its command and arguments, or its URL. */
+export const mcpServerSummary = (entry: Record<string, unknown>): string =>
+  typeof entry.url === "string"
+    ? entry.url
+    : [entry.command, ...(Array.isArray(entry.args) ? entry.args : [])].filter((p): p is string => typeof p === "string").join(" ");
 
-const SKILL_TEMPLATE = "---\nname: my-skill\ndescription: What this skill does, and when to use it.\ntools:\n  - mcp:fetch:*\n---\nHow to do the work, step by step, and what to report back.\n";
+const toggled = (list: readonly string[], id: string): string[] => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
-/** Null when the text is empty or valid JSON. */
-const jsonProblem = (text: string): string | null => {
-  if (text.trim() === "") return null;
-  try {
-    JSON.parse(text);
-    return null;
-  } catch (e) {
-    return e instanceof Error ? e.message : "not valid JSON";
-  }
-};
-
-const skillName = (content: string): string | null => /^---\r?\n[\s\S]*?^name:\s*["']?([^"'\r\n]+)/m.exec(content)?.[1]?.trim() ?? null;
-
-export const mcpServersText = (agent: FleetAgent): string =>
-  agent.mcpServers && Object.keys(agent.mcpServers).length > 0 ? JSON.stringify({ mcpServers: agent.mcpServers }, null, 2) : "";
-
-function ToolsFields({
-  mcpServers,
-  setMcpServers,
-  skills,
-  setSkills,
-}: {
-  mcpServers: string;
-  setMcpServers: (text: string) => void;
-  skills: string[];
-  setSkills: (skills: string[]) => void;
-}) {
-  const problem = jsonProblem(mcpServers);
+function McpPicker({ runner, picked, onToggle }: { runner: FleetRunner; picked: readonly string[]; onToggle: (id: string) => void }) {
+  const servers = Object.entries(runner.mcpServers ?? {});
+  const gone = picked.filter((id) => !(id in (runner.mcpServers ?? {})));
   return (
-    <>
-      <label className="field">
-        <span className="field-label">MCP servers</span>
-        <textarea
-          className="field-input fleet-prompt fleet-code"
-          value={mcpServers}
-          onChange={(e) => setMcpServers(e.target.value)}
-          rows={6}
-          spellCheck={false}
-          placeholder={MCP_EXAMPLE}
-          aria-invalid={problem !== null}
-        />
-        {problem ? (
-          <span className="schedule-editor-error" role="alert">
-            Not valid JSON: {problem}
-          </span>
-        ) : (
-          <span className="field-hint">
-            The <code>.mcp.json</code> an MCP server documents. Commands run on the runner&apos;s machine; write tokens as <code>{"${VAR}"}</code> and set them in
-            the runner&apos;s environment.
-          </span>
-        )}
-      </label>
-      <fieldset className="fleet-choice-field">
-        <legend className="field-label fleet-choice-legend">Skills</legend>
-        <div className="fleet-skill-list">
-          {skills.map((content, i) => (
-            <div key={i} className="fleet-skill">
-              <div className="fleet-skill-head">
-                <span>{skillName(content) ?? `Skill ${i + 1}`}</span>
-                <button
-                  type="button"
-                  className="fleet-icon-btn fleet-link-danger"
-                  onClick={() => setSkills(skills.filter((_, j) => j !== i))}
-                  aria-label={`Remove ${skillName(content) ?? `skill ${i + 1}`}`}
-                  title="Remove skill"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-              <textarea
-                className="field-input fleet-prompt fleet-code"
-                value={content}
-                onChange={(e) => setSkills(skills.map((s, j) => (j === i ? e.target.value : s)))}
-                rows={8}
-                spellCheck={false}
-                aria-label={`SKILL.md of ${skillName(content) ?? `skill ${i + 1}`}`}
-              />
-            </div>
+    <fieldset className="fleet-choice-field">
+      <legend className="field-label fleet-choice-legend">MCP servers on {runner.name}</legend>
+      {servers.length === 0 ? (
+        <p className="field-hint">{runner.name} has no MCP servers yet. Add them with MCP servers on the runner, then pick them here.</p>
+      ) : (
+        <div className="fleet-choice-grid">
+          {servers.map(([id, entry]) => (
+            <ChoiceCard key={id} type="checkbox" name="mcp" value={id} checked={picked.includes(id)} title={id} detail={mcpServerSummary(entry)} onChange={() => onToggle(id)} />
           ))}
-          <button type="button" className="btn-secondary fleet-small-btn fleet-skill-add" onClick={() => setSkills([...skills, SKILL_TEMPLATE])}>
-            <Plus size={13} aria-hidden="true" />
-            Add skill
-          </button>
         </div>
-        <span className="field-hint">
-          Each skill is a SKILL.md. Its <code>tools</code> list grants MCP tools, like <code>mcp:fetch:*</code>. A server no skill grants gets a skill of its own.
-        </span>
-      </fieldset>
-    </>
+      )}
+      {gone.length > 0 && (
+        <p className="schedule-editor-error" role="alert">
+          {gone.join(", ")} {gone.length === 1 ? "is" : "are"} no longer on {runner.name}. Saving drops {gone.length === 1 ? "it" : "them"}.
+        </p>
+      )}
+    </fieldset>
   );
 }
+
+/** Skills come from Pizza Bot's library; the agent keeps a copy, made when the skill is first picked. */
+function SkillPicker({
+  state,
+  attached,
+  picked,
+  mcp,
+  onToggle,
+}: {
+  state: SkillsState;
+  attached: FleetAgent["skills"];
+  picked: readonly string[];
+  mcp: readonly string[];
+  onToggle: (id: string) => void;
+}) {
+  const library = state.kind === "ready" ? state.skills : [];
+  const onlyOnAgent = (attached ?? []).filter((s) => !library.some((l) => l.id === s.id));
+  const missing = (s: LibrarySkill) => s.mcpServers.filter((id) => !mcp.includes(id));
+  return (
+    <fieldset className="fleet-choice-field">
+      <legend className="field-label fleet-choice-legend">Skills</legend>
+      {state.kind === "loading" && <p className="field-hint">Loading Pizza Bot&apos;s skills…</p>}
+      {state.kind === "failed" && <p className="schedule-editor-error">Couldn&apos;t load Pizza Bot&apos;s skills: {state.error}</p>}
+      {state.kind === "none" && <p className="field-hint">Skills come from Pizza Bot, which this page can&apos;t reach.</p>}
+      <div className="fleet-choice-grid fleet-skill-grid">
+        {library.map((s) => (
+          <ChoiceCard
+            key={s.id}
+            type="checkbox"
+            name="skills"
+            value={s.id}
+            checked={picked.includes(s.id)}
+            title={s.name}
+            detail={picked.includes(s.id) && missing(s).length > 0 ? `Needs MCP server ${missing(s).join(", ")}, which this agent doesn't use. ${s.description}` : s.description}
+            onChange={() => onToggle(s.id)}
+          />
+        ))}
+        {onlyOnAgent.map((s) => (
+          <ChoiceCard
+            key={s.id}
+            type="checkbox"
+            name="skills"
+            value={s.id}
+            checked={picked.includes(s.id)}
+            title={s.name}
+            detail={`Only on this agent now; no longer in Pizza Bot. ${s.description}`}
+            onChange={() => onToggle(s.id)}
+          />
+        ))}
+      </div>
+      {state.kind === "ready" && library.length === 0 && onlyOnAgent.length === 0 && (
+        <p className="field-hint">Pizza Bot has no skills yet. Add them on its Skills page.</p>
+      )}
+      <span className="field-hint">
+        The agent gets its own copy of each skill you pick. Later changes in Pizza Bot don&apos;t reach it; to take them, clear the skill and pick it again before
+        saving.
+      </span>
+    </fieldset>
+  );
+}
+
+/** Skills the agent already has stay as they are; ones picked in this dialog are copied from the library now. */
+const skillPayload = async (
+  library: FleetSkillLibrary | null,
+  picked: readonly string[],
+  attached: FleetAgent["skills"],
+  touched: ReadonlySet<string>,
+): Promise<FleetPayload[]> =>
+  Promise.all(
+    picked.map(async (id): Promise<FleetPayload> => {
+      if (!touched.has(id) && (attached ?? []).some((s) => s.id === id)) return { id };
+      if (!library) throw new Error("Pizza Bot's skills can't be reached from here");
+      return { id, files: await library.files(id) };
+    }),
+  );
 
 /** A created agent: a name, a model and a system prompt, plus MCP servers and skills on a pizza-bot runner. */
 function AgentSpecForm({
   model,
-  tools,
+  runner,
   initial,
+  attachedSkills,
   label,
   onSave,
   onClose,
 }: {
   model: FleetModel;
-  tools: boolean;
+  runner: FleetRunner | undefined;
   initial?: AgentSpec;
+  attachedSkills?: FleetAgent["skills"];
   label: string;
-  onSave: (spec: Partial<AgentSpec>) => Promise<unknown>;
+  onSave: (spec: FleetPayload) => Promise<unknown>;
   onClose: () => void;
 }) {
+  const tools = runsTools(runner);
   const models = model.agentModels ?? [];
   const [name, setName] = useState(initial?.name ?? "");
   const [picked, setPicked] = useState(models.find((m) => m.id === initial?.model)?.id ?? models[0]?.id ?? "");
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? "");
-  const [mcpServers, setMcpServers] = useState(initial?.mcpServers ?? "");
+  const [mcp, setMcp] = useState<string[]>(initial?.mcp ?? []);
   const [skills, setSkills] = useState<string[]>(initial?.skills ?? []);
+  const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
+  const { library, state } = useSkillLibrary();
   const { saving, error, submit } = useSubmit(onClose);
-  const spec = (): Partial<AgentSpec> => ({ name: name.trim(), model: picked, systemPrompt, ...(tools ? { mcpServers, skills } : {}) });
+  const save = async () => {
+    const base = { name: name.trim(), model: picked, systemPrompt };
+    if (!tools || !runner) return onSave(base);
+    const known = mcp.filter((id) => id in (runner.mcpServers ?? {}));
+    return onSave({ ...base, mcp: known, skills: await skillPayload(library, skills, attachedSkills, touched) });
+  };
   return (
-    <form className="fleet-guide" onSubmit={(e) => void submit(e, () => onSave(spec()))}>
+    <form className="fleet-guide" onSubmit={(e) => void submit(e, save)}>
       <label className="field">
         <span className="field-label">Name</span>
         <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="e.g. Release notes writer" autoFocus />
@@ -219,9 +241,18 @@ function AgentSpecForm({
             : "Each run sends the message you type to the model with this prompt and returns its reply."}
         </span>
       </label>
-      {tools && <ToolsFields mcpServers={mcpServers} setMcpServers={setMcpServers} skills={skills} setSkills={setSkills} />}
+      {tools && runner && (
+        <>
+          <McpPicker runner={runner} picked={mcp} onToggle={(id) => setMcp((prev) => toggled(prev, id))} />
+          <SkillPicker state={state} attached={attachedSkills} picked={skills} mcp={mcp} onToggle={(id) => {
+              setSkills((prev) => toggled(prev, id));
+              setTouched((prev) => new Set([...prev, id]));
+            }}
+          />
+        </>
+      )}
       <ErrorLine error={error} />
-      <Actions saving={saving} disabled={name.trim() === "" || picked === "" || (tools && jsonProblem(mcpServers) !== null)} label={label} onClose={onClose} />
+      <Actions saving={saving} disabled={name.trim() === "" || picked === ""} label={label} onClose={onClose} />
     </form>
   );
 }
@@ -231,14 +262,15 @@ export function EditAgentDialog({ model, agent, send, onClose }: { model: FleetM
     <FleetDialog title={`Edit ${agent.name}`} onClose={onClose}>
       <AgentSpecForm
         model={model}
-        tools={runsTools(model.runners[agent.runner])}
+        runner={model.runners[agent.runner]}
         initial={{
           name: agent.name,
           model: agent.model ?? "",
           systemPrompt: agent.systemPrompt ?? "",
-          mcpServers: mcpServersText(agent),
-          skills: (agent.skills ?? []).map((s) => s.content),
+          mcp: agent.mcp ?? [],
+          skills: (agent.skills ?? []).map((s) => s.id),
         }}
+        attachedSkills={agent.skills ?? []}
         label="Save changes"
         onSave={(spec) => send("EditAgent", { agent: agent.key, ...spec })}
         onClose={onClose}
@@ -315,7 +347,7 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
           {mode === "create" ? (
             <AgentSpecForm
               model={model}
-              tools={runsTools(runner)}
+              runner={runner}
               label="Create agent"
               onSave={(spec) => send("CreateAgent", { runner: runner.name, ...spec })}
               onClose={onClose}

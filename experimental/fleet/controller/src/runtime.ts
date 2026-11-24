@@ -58,7 +58,7 @@ const replay = (log: MsgLog): { model: Model; version: number } =>
     { model: initialModel(), version: 0 },
   );
 
-const indexFields = ({ agents, location, available, canCreate, harnesses }: a2a.RunnerIndex) => ({ agents, location, available, canCreate, harnesses });
+const indexFields = ({ agents, location, available, canCreate, harnesses, mcpServers }: a2a.RunnerIndex) => ({ agents, location, available, canCreate, harnesses, mcpServers });
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -157,6 +157,20 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
         return r.ok
           ? { type: "AgentsSet", runner: effect.runner, added: [], edited: [effect.agentId], ...indexFields(r.value) }
           : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
+      }
+      case "PutRunnerMcpServer": {
+        const ep = await withToken(effect.endpoint);
+        const r = ep.ok ? await a2a.putMcpServer(ep.value.url, ep.value.token, effect.id, effect.entry) : ep;
+        return r.ok
+          ? { type: "McpServersSet", runner: effect.runner, text: `saved MCP server ${effect.id} on ${effect.runner}`, ...indexFields(r.value) }
+          : { type: "McpServerFailed", runner: effect.runner, text: `couldn't save MCP server ${effect.id} on ${effect.runner}: ${r.error}` };
+      }
+      case "DeleteRunnerMcpServer": {
+        const ep = await withToken(effect.endpoint);
+        const r = ep.ok ? await a2a.deleteMcpServer(ep.value.url, ep.value.token, effect.id) : ep;
+        return r.ok
+          ? { type: "McpServersSet", runner: effect.runner, text: `removed MCP server ${effect.id} from ${effect.runner}`, ...indexFields(r.value) }
+          : { type: "McpServerFailed", runner: effect.runner, text: `couldn't remove MCP server ${effect.id} from ${effect.runner}: ${r.error}` };
       }
       case "RetireRunner": {
         const { runner } = effect;

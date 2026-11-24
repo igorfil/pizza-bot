@@ -1,9 +1,10 @@
-/** Parses the MCP servers and skills a UI sends with CreateAgent / EditAgent; a string is the reason it can't. */
-import type { AgentSkill, McpServers } from "./types.js";
+/** Parses MCP servers and skill copies a UI sends; a string is the reason it can't. */
+import type { SkillCopy, SkillFile } from "./types.js";
 
 const MAX_MCP_TEXT = 20_000;
 const MAX_SKILLS = 20;
-const MAX_SKILL = 50_000;
+const MAX_SKILL_BYTES = 2_000_000;
+const ID = /^[a-z0-9_-]+$/;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -15,38 +16,49 @@ const parseJson = (text: string): unknown => {
   }
 };
 
-/** Takes `.mcp.json` text (`{"mcpServers": {...}}`) or the bare server map; empty means none. */
-export const mcpServersFrom = (value: unknown): McpServers | string => {
-  if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) return {};
-  if (typeof value === "string" && value.length > MAX_MCP_TEXT) return `MCP servers must be at most ${MAX_MCP_TEXT} characters`;
-  const parsed = typeof value === "string" ? parseJson(value) : value;
-  if (!isObject(parsed)) return 'MCP servers must be JSON like {"mcpServers": {"fetch": {"command": "uvx", "args": ["mcp-server-fetch"]}}}';
-  const servers = isObject(parsed.mcpServers) ? parsed.mcpServers : parsed;
-  const bad = Object.entries(servers).find(([, s]) => !isObject(s) || (typeof s.command !== "string" && typeof s.url !== "string"));
-  if (bad) return `MCP server "${bad[0]}" needs a command or a url`;
-  return servers as McpServers;
+/** One server's entry, as JSON text or an object: `{"command": "uvx", "args": [...]}` or `{"url": "…"}`. */
+export const mcpEntryFrom = (value: unknown): Record<string, unknown> | string => {
+  if (typeof value === "string" && value.length > MAX_MCP_TEXT) return `an MCP server must be at most ${MAX_MCP_TEXT} characters`;
+  const entry = typeof value === "string" ? parseJson(value) : value;
+  if (!isObject(entry)) return 'an MCP server must be JSON like {"command": "uvx", "args": ["mcp-server-fetch"]}';
+  const has = (key: string) => typeof entry[key] === "string" && (entry[key] as string).trim() !== "";
+  return has("command") || has("url") ? entry : "an MCP server needs a command or a url";
 };
 
-const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
+export const mcpIdFrom = (value: unknown): string | null => (typeof value === "string" && ID.test(value) ? value : null);
 
-const field = (frontmatter: string, key: string): string =>
-  new RegExp(`^${key}:\\s*(.*)$`, "m").exec(frontmatter)?.[1]?.trim().replace(/^(["'])(.*)\1$/, "$2") ?? "";
-
-const slug = (name: string): string => name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-
-/** Each skill is a whole SKILL.md; its frontmatter `name` becomes the folder id. */
-export const skillsFrom = (value: unknown): AgentSkill[] | string => {
+/** The runner's server ids an agent uses. */
+export const mcpIdsFrom = (value: unknown): string[] | string => {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || !value.every((s) => typeof s === "string")) return "skills must be a list of SKILL.md texts";
+  if (!Array.isArray(value) || !value.every((id) => mcpIdFrom(id) !== null)) return "mcp must be a list of the runner's MCP server ids";
+  return [...new Set(value as string[])];
+};
+
+const fileFrom = (value: unknown): SkillFile | null =>
+  isObject(value) && typeof value.path === "string" && typeof value.content === "string"
+    ? { path: value.path, content: value.content, ...(value.encoding === "base64" ? { encoding: "base64" as const } : {}) }
+    : null;
+
+const copyFrom = (value: unknown): SkillCopy | string => {
+  if (!isObject(value) || typeof value.id !== "string" || !ID.test(value.id)) return "each skill needs an id of lowercase letters, digits, - or _";
+  if (value.files === undefined) return { id: value.id };
+  const files = Array.isArray(value.files) ? value.files.map(fileFrom) : [null];
+  if (files.some((f) => f === null)) return `skill ${value.id} has a file without a path and content`;
+  const valid = files as SkillFile[];
+  if (!valid.some((f) => f.path === "SKILL.md")) return `skill ${value.id} has no SKILL.md`;
+  if (valid.reduce((n, f) => n + f.content.length, 0) > MAX_SKILL_BYTES) return `skill ${value.id} is larger than ${MAX_SKILL_BYTES} bytes`;
+  return { id: value.id, files: valid };
+};
+
+/** Copies of skills for an agent: `{id, files}` copies one, `{id}` keeps the copy it has. */
+export const skillCopiesFrom = (value: unknown): SkillCopy[] | string => {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return "skills must be a list";
   if (value.length > MAX_SKILLS) return `an agent can have at most ${MAX_SKILLS} skills`;
-  const skills: AgentSkill[] = [];
-  for (const [i, content] of (value as string[]).entries()) {
-    const frontmatter = FRONTMATTER.exec(content)?.[1];
-    const id = frontmatter ? slug(field(frontmatter, "name")) : "";
-    if (!frontmatter || !id || !field(frontmatter, "description")) return `skill ${i + 1} needs frontmatter with a name and a description`;
-    if (content.length > MAX_SKILL) return `skill ${id} must be at most ${MAX_SKILL} characters`;
-    if (skills.some((s) => s.id === id)) return `two skills are named ${id}`;
-    skills.push({ id, content });
-  }
-  return skills;
+  const copies = value.map(copyFrom);
+  const problem = copies.find((c): c is string => typeof c === "string");
+  if (problem) return problem;
+  const ids = (copies as SkillCopy[]).map((c) => c.id);
+  const twice = ids.find((id, i) => ids.indexOf(id) !== i);
+  return twice ? `two skills are named ${twice}` : (copies as SkillCopy[]);
 };

@@ -41,11 +41,17 @@ export type AgentInput = { label: string; hint: string; example: string };
 /** The `mcpServers` map of a Claude-format `.mcp.json`. */
 export type McpServers = Record<string, Record<string, unknown>>;
 
-/** One skill folder: `skills/<id>/SKILL.md`. */
-export type AgentSkill = { id: string; content: string };
+/** A skill an agent holds a copy of. */
+export type AgentSkill = { id: string; name: string; description: string };
+
+/** One file of a skill copy, relative to the skill folder; binary files are base64. */
+export type SkillFile = { path: string; content: string; encoding?: "base64" };
+
+/** With `files`, a new copy of the skill; without, keep the copy the agent already has. */
+export type SkillCopy = { id: string; files?: SkillFile[] };
 
 /** What a runner's `GET /agents` reports for one agent. */
-/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model`, `systemPrompt`, `mcpServers` and `skills`. */
+/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model`, `systemPrompt` and `skills`. */
 export type AgentInfo = {
   id: string;
   /** The runner harness that runs it; `pizza-bot` agents remember a conversation across follow-ups. */
@@ -56,7 +62,8 @@ export type AgentInfo = {
   created?: boolean;
   model?: string;
   systemPrompt?: string;
-  mcpServers?: McpServers;
+  /** Ids of the runner's MCP servers the agent uses. */
+  mcp?: string[];
   skills?: AgentSkill[];
 };
 
@@ -78,12 +85,14 @@ export type Runner = NewRunner & {
   canCreateAgents: boolean;
   /** Harnesses the runner offers; `pizza-bot` lets created agents have MCP servers and skills. */
   harnesses: string[];
+  /** The MCP servers on the runner's machine, which its agents pick from. */
+  mcpServers: McpServers;
   /** The last AddAgents or CreateAgent for this runner, until it lands or a new one starts. */
   agentsChange: AgentsChange | null;
 };
 
 /** A created agent; MCP servers and skills need a runner with the `pizza-bot` harness. */
-export type NewAgentSpec = { name: string; model: string; systemPrompt: string; mcpServers: McpServers; skills: AgentSkill[] };
+export type NewAgentSpec = { name: string; model: string; systemPrompt: string; mcp: string[]; skills: SkillCopy[] };
 
 /** In flight while `error` is null; `agents` are names or ids, for display. */
 export type AgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
@@ -241,6 +250,8 @@ export type IntentMsg =
   | { type: "RemoveRunner"; name: string; teardown: boolean }
   | { type: "AddAgents"; runner: string; agents: string[] }
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
+  | { type: "SetMcpServer"; runner: string; id: string; entry: Record<string, unknown> }
+  | { type: "RemoveMcpServer"; runner: string; id: string }
   | { type: "DeleteAgent"; agent: string }
   | { type: "EditAgent"; agent: string; spec: NewAgentSpec }
   | { type: "CreateTask"; taskId: string; agent: string; prompt: string; followUpOf?: string | null }
@@ -264,9 +275,11 @@ export type WorldMsg =
   | { type: "Tick"; now: number; local?: LocalClock; since?: number }
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
-  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[] }
-  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[] }
+  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; mcpServers?: McpServers }
+  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; mcpServers?: McpServers }
   | { type: "AgentsSetFailed"; runner: string; error: string }
+  | ({ type: "McpServersSet"; runner: string; text: string } & RunnerIndexFields)
+  | { type: "McpServerFailed"; runner: string; text: string }
   | { type: "RunnerFailed"; name: string; error: string }
   | { type: "RunnerRetired"; name: string; text: string; ok: boolean }
   | { type: "Dispatched"; taskId: string; snapshot: TaskSnapshot }
@@ -282,6 +295,9 @@ export type WorldMsg =
 
 export type Msg = IntentMsg | WorldMsg;
 
+/** What a runner's `GET /agents` says about itself. */
+export type RunnerIndexFields = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; mcpServers?: McpServers };
+
 /** Where to reach one agent over A2A: always through its runner, `<link url>/agents/<id>`. */
 export type Endpoint = { url: string; token: SecretRef };
 
@@ -293,6 +309,8 @@ export type Effect =
   | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
   | { type: "DeleteRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string }
   | { type: "EditRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string; agent: NewAgentSpec }
+  | { type: "PutRunnerMcpServer"; runner: string; endpoint: Endpoint; id: string; entry: Record<string, unknown> }
+  | { type: "DeleteRunnerMcpServer"; runner: string; endpoint: Endpoint; id: string }
   | { type: "Dispatch"; taskId: string; endpoint: Endpoint; prompt: string; contextId: string | null }
   | { type: "GetTask"; taskId: string; endpoint: Endpoint; remoteId: string }
   | { type: "Cancel"; taskId: string; endpoint: Endpoint; remoteId: string }
@@ -311,6 +329,8 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "RemoveRunner",
   "AddAgents",
   "CreateAgent",
+  "SetMcpServer",
+  "RemoveMcpServer",
   "DeleteAgent",
   "EditAgent",
   "CreateTask",

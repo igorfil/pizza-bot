@@ -41,6 +41,7 @@ import { adminVisibility, type AppView } from "./admin-visibility.js";
 import { AppNavigation } from "./components/AppNavigation.js";
 import { LogsModule } from "./components/logs/LogsModule.js";
 import { FleetScreen } from "./components/fleet/FleetScreen.js";
+import { FleetSkillsContext, skillLibraryFrom } from "./components/fleet/fleet-skills.js";
 import { inboxOf } from "./components/fleet/fleet-view-model.js";
 import { useFleet } from "./components/fleet/use-fleet.js";
 import { useFleetNotifications } from "./components/fleet/use-fleet-notifications.js";
@@ -229,6 +230,7 @@ export function App() {
 
   // Connected app-wide, so the rail count and notifications work from any view.
   const fleet = useFleet({ background: view !== "fleet" });
+  const fleetSkills = useMemo(() => skillLibraryFrom(client), [client]);
   const openFleet = useCallback(() => setView("fleet"), []);
   useFleetNotifications(fleet.model, {
     enabled: desktopNotifications?.notifyOnRunCompletion ?? true,
@@ -474,7 +476,9 @@ export function App() {
             </div>
           ) : view === "fleet" ? (
             <div className="module-hub">
-              <FleetScreen fleet={fleet} />
+              <FleetSkillsContext.Provider value={fleetSkills}>
+                <FleetScreen fleet={fleet} />
+              </FleetSkillsContext.Provider>
             </div>
           ) : view === "logs" ? (
             <div className="module-hub">

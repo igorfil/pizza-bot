@@ -51,6 +51,8 @@ export type FleetIntent =
   | "RemoveRunner"
   | "AddAgents"
   | "CreateAgent"
+  | "SetMcpServer"
+  | "RemoveMcpServer"
   | "DeleteAgent"
   | "EditAgent"
   | "CreateTask"
@@ -65,7 +67,9 @@ export type FleetIntent =
   | "GuideRetry"
   | "CancelGuide";
 
-export type FleetPayload = Record<string, string | boolean | string[] | Record<string, string>>;
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+export type FleetPayload = Record<string, Json>;
 
 /**
  * @returns the id the Controller minted (new task or chat), if any

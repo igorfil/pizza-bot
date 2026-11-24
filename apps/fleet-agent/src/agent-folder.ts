@@ -18,6 +18,16 @@ export const qualifyModel = (model: string, providers: ReadonlySet<string>): str
   return providers.has(prefix) ? model : `${DEFAULT_PROVIDER}:${model}`;
 };
 
+/** The runner's servers the agent picked; an id the runner no longer has is reported, not fatal. */
+export const pickServers = <T>(library: Readonly<Record<string, T>>, ids: readonly string[]): { servers: Record<string, T>; missing: string[] } => ({
+  servers: Object.fromEntries(ids.filter((id) => id in library).map((id) => [id, library[id]!])),
+  missing: ids.filter((id) => !(id in library)),
+});
+
+/** `FLEET_MCP_SERVERS`: comma-separated ids. */
+export const serverIds = (value: string | undefined): string[] =>
+  (value ?? "").split(",").map((id) => id.trim()).filter((id) => id.length > 0);
+
 export const systemPromptFor = (agentPrompt: string, hasSkills: boolean): string =>
   [pizzaBotSystemPrompt({ memories: false, subagents: hasSkills }), agentPrompt.trim()]
     .filter((part) => part.length > 0)

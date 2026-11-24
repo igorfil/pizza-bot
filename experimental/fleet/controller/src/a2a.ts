@@ -88,6 +88,7 @@ type IndexJson = {
   location?: unknown;
   canCreate?: unknown;
   harnesses?: unknown;
+  mcpServers?: unknown;
   created?: unknown;
   available?: NonNullable<IndexJson["agents"]>;
   agents?: {
@@ -98,7 +99,7 @@ type IndexJson = {
     created?: unknown;
     model?: unknown;
     systemPrompt?: unknown;
-    mcpServers?: unknown;
+    mcp?: unknown;
     skills?: unknown;
     input?: { label?: unknown; hint?: unknown; example?: unknown } | null;
   }[];
@@ -112,7 +113,11 @@ const mcpServersOf = (v: unknown): McpServers =>
   isObject(v) ? Object.fromEntries(Object.entries(v).filter((e): e is [string, Record<string, unknown>] => isObject(e[1]))) : {};
 
 const skillsOf = (v: unknown): AgentSkill[] =>
-  Array.isArray(v) ? v.filter(isObject).map((s) => ({ id: str(s.id), content: str(s.content) })).filter((s) => s.id !== "") : [];
+  Array.isArray(v)
+    ? v.filter(isObject).map((s) => ({ id: str(s.id), name: str(s.name) || str(s.id), description: str(s.description) })).filter((s) => s.id !== "")
+    : [];
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []);
 
 const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | null =>
   str(a.id)
@@ -122,14 +127,13 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
         description: str(a.description),
         input: a.input ? { label: str(a.input.label), hint: str(a.input.hint), example: str(a.input.example) } : null,
         harness: str(a.harness) || null,
+        mcp: strings(a.mcp),
         ...(a.created === true ? { created: true } : {}),
-        ...(a.created === true && typeof a.model === "string"
-          ? { model: a.model, systemPrompt: str(a.systemPrompt), mcpServers: mcpServersOf(a.mcpServers), skills: skillsOf(a.skills) }
-          : {}),
+        ...(a.created === true && typeof a.model === "string" ? { model: a.model, systemPrompt: str(a.systemPrompt), skills: skillsOf(a.skills) } : {}),
       }
     : null;
 
-export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate: boolean; harnesses: string[] };
+export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate: boolean; harnesses: string[]; mcpServers: McpServers };
 
 const infos = (list: IndexJson["agents"]): AgentInfo[] => (list ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null);
 
@@ -139,7 +143,8 @@ const toIndex = (index: IndexJson): RunnerIndex => ({
   location: str(index.location) || null,
   available: Array.isArray(index.available) ? infos(index.available) : null,
   canCreate: index.canCreate === true,
-  harnesses: Array.isArray(index.harnesses) ? index.harnesses.filter((h): h is string => typeof h === "string") : [],
+  harnesses: strings(index.harnesses),
+  mcpServers: mcpServersOf(index.mcpServers),
 });
 
 /** The runner's `GET /agents` is both discovery and its health check. */
@@ -190,6 +195,34 @@ export const editAgent = (url: string, token: string, id: string, agent: NewAgen
     });
     const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
     if (res.status === 405) throw new Error("this runner can't edit agents; update the runner");
+    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
+    return toIndex(body);
+  });
+
+/** Adds or replaces one of the runner's MCP servers; it answers with its new index. */
+export const putMcpServer = (url: string, token: string, id: string, entry: Record<string, unknown>): Promise<Outcome<RunnerIndex>> =>
+  attempt(async () => {
+    const res = await fetch(`${url}/mcp-servers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(entry),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
+    if (res.status === 404 || res.status === 405) throw new Error("this runner can't hold MCP servers; update the runner");
+    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
+    return toIndex(body);
+  });
+
+export const deleteMcpServer = (url: string, token: string, id: string): Promise<Outcome<RunnerIndex>> =>
+  attempt(async () => {
+    const res = await fetch(`${url}/mcp-servers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
+    if (res.status === 405) throw new Error("this runner can't hold MCP servers; update the runner");
     if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
     return toIndex(body);
   });
