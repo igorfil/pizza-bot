@@ -283,6 +283,11 @@ describe("AgentCard", () => {
     expect(card(scheduled)).toContain("Daily at 07:30");
   });
 
+  it("shows what scheduled runs get as input", () => {
+    const scheduled = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, schedule: { at: "07:30", prompt: "otters" } } } };
+    expect(card(scheduled)).toContain("Topic: otters");
+  });
+
   it("says when an agent isn't scheduled", () => {
     expect(card(model)).toContain("Not scheduled");
   });

@@ -405,12 +405,14 @@ export function ScheduleRow({ agent, send }: { agent: FleetAgent; send: FleetSen
   const notify = useAppToast();
   const [editing, setEditing] = useState(false);
   const [at, setAt] = useState(agent.schedule?.at ?? DEFAULT_SCHEDULE);
+  const [prompt, setPrompt] = useState(agent.schedule?.prompt ?? "");
   const [saving, setSaving] = useState(false);
+  const label = inputLabel(agent);
 
   const save = async (next: string | null) => {
     setSaving(true);
     try {
-      await send("SetSchedule", { agent: agent.key, at: next ?? "", prompt: agent.schedule?.prompt ?? "" });
+      await send("SetSchedule", { agent: agent.key, at: next ?? "", prompt: next ? prompt.trim() : (agent.schedule?.prompt ?? "") });
       setEditing(false);
       notify({ title: next ? `${agent.name} runs daily at ${next}` : `Turned off ${agent.name}'s schedule`, tone: "success" });
     } catch (e) {
@@ -424,7 +426,10 @@ export function ScheduleRow({ agent, send }: { agent: FleetAgent; send: FleetSen
     return (
       <p className="fleet-agent-schedule">
         <AlarmClock size={13} aria-hidden="true" />
-        <span>{agent.schedule ? `Daily at ${agent.schedule.at}` : "Not scheduled"}</span>
+        <span className="fleet-agent-schedule-text">
+          {agent.schedule ? `Daily at ${agent.schedule.at}` : "Not scheduled"}
+          {agent.schedule?.prompt && <span title={agent.schedule.prompt}> · {label}: {agent.schedule.prompt}</span>}
+        </span>
         <button type="button" className="fleet-link-btn" onClick={() => setEditing(true)}>
           {agent.schedule ? "change" : "schedule"}
         </button>
@@ -451,6 +456,13 @@ export function ScheduleRow({ agent, send }: { agent: FleetAgent; send: FleetSen
           required
         />
       </label>
+      <input
+        className="field-input fleet-schedule-input"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder={`${label} (optional)`}
+        aria-label={`${label} for scheduled runs of ${agent.name}`}
+      />
       <span className="fleet-agent-links-spacer" />
       {agent.schedule && (
         <button type="button" className="fleet-link-btn" onClick={() => void save(null)} disabled={saving}>

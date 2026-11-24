@@ -58,8 +58,9 @@ Connection button.
   input).
 - [runs] expands the card in place with the last 5 runs. A finished one opens its result in a dialog,
   read or not, with Run again and Continue in chat. [evals] is disabled ("coming soon").
-- Schedule row: "Daily at 07:30 · change" or "Not scheduled · schedule"; inline time picker with
-  Save / turn off / cancel (`SetSchedule`). Scheduled runs show a "scheduled" chip on their inbox
+- Schedule row: "Daily at 07:30 · <input label>: <input> · change" or "Not scheduled · schedule";
+  inline time picker plus an optional input for scheduled runs, with Save / turn off / cancel
+  (`SetSchedule`). Scheduled runs show a "scheduled" chip on their inbox
   card; runs without input are titled "Your <agent> report".
 - Run opens an inline input on the card (labelled and hinted from the agent card, pre-filled with
   the last input); the result lands in the Inbox. Trash icon removes the agent after confirmation;
