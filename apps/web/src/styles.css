@@ -2104,6 +2104,8 @@ button.fleet-inline-run { cursor: pointer; }
 button.fleet-inline-run:hover { background: var(--panel-2); }
 button.fleet-inline-run:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .fleet-run-meta { margin: 0; flex-wrap: wrap; }
+.fleet-all-runs { align-self: flex-start; }
+.fleet-dialog .fleet-inline-runs { padding-top: 0; border-top: 0; }
 .fleet-inline-runs-input { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-agent-add {
   align-items: center; justify-content: center; gap: 6px; min-height: 150px; cursor: pointer; color: var(--dim); text-align: center;

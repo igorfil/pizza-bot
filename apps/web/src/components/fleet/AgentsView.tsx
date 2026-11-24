@@ -4,7 +4,7 @@ import { AddAgentDialog, EditAgentDialog } from "./AddAgentDialog.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
-import { AddRunnerDialog, DeleteAgentDialog, RemoveRunnerDialog } from "./GuideCard.js";
+import { AddRunnerDialog, DeleteAgentDialog, FleetDialog, RemoveRunnerDialog } from "./GuideCard.js";
 import { RunDialog } from "./InboxView.js";
 import {
   activeRun,
@@ -250,6 +250,8 @@ export function AgentCard({
   const [input, setInput] = useState("");
   const [starting, setStarting] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [allRuns, setAllRuns] = useState(false);
+  const runs = runsOf(model, agent.key);
   const openTask = openTaskId ? model.tasks[openTaskId] : undefined;
   const active = activeRun(model, agent.key);
   const strip = runStrip(model, agent.key);
@@ -393,7 +395,17 @@ export function AgentCard({
         )}
       </footer>
 
-      {showRuns && <InlineRuns model={model} runs={runsOf(model, agent.key).slice(0, INLINE_RUNS)} onOpen={setOpenTaskId} />}
+      {showRuns && <InlineRuns model={model} runs={runs.slice(0, INLINE_RUNS)} onOpen={setOpenTaskId} />}
+      {showRuns && runs.length > INLINE_RUNS && (
+        <button type="button" className="fleet-link-btn fleet-all-runs" onClick={() => setAllRuns(true)}>
+          Show all {runs.length} runs
+        </button>
+      )}
+      {allRuns && (
+        <FleetDialog title={`${agent.name}: all runs`} onClose={() => setAllRuns(false)}>
+          <InlineRuns model={model} runs={runs} onOpen={setOpenTaskId} />
+        </FleetDialog>
+      )}
       {openTask && <RunDialog model={model} task={openTask} send={send} onOpenChat={onOpenChat} onClose={() => setOpenTaskId(null)} />}
     </article>
   );

@@ -57,7 +57,7 @@ Connection button.
   last 10 runs (green ok, red failed, grey canceled, pulsing blue running; tooltip has state, age,
   input).
 - [runs] expands the card in place with the last 5 runs. A finished one opens its result in a dialog,
-  read or not, with Run again and Continue in chat. [evals] is disabled ("coming soon").
+  read or not, with Run again and Continue in chat. "Show all N runs" opens every run in a dialog. [evals] is disabled ("coming soon").
 - Schedule row: "Daily at 07:30 · <input label>: <input> · change" or "Not scheduled · schedule";
   inline time picker plus an optional input for scheduled runs, with Save / turn off / cancel
   (`SetSchedule`). Scheduled runs show a "scheduled" chip on their inbox
