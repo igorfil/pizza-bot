@@ -28,6 +28,10 @@ What the POC skips or does the simplest way. Each item needs a real decision bef
 - Event ordering: a snapshot always wins over stream events; no timestamp comparison.
 - Approvals (`input-required`): state is displayed, responding is not implemented.
 
+## Deploy simplified
+- TEMPORARY: there are no runner releases. The AWS guide installs whatever `npm run build` made on this machine: `deploy/dev-build.sh` cross-compiles the Linux runner and packs the agents, `deploy/dev-push.sh` copies them to `/tmp/fleet-local` on the instance over SSM, and the install script reads them from there (`controller/src/guides/aws/local-build.ts`, `LOCAL_RELEASE_DIR`). Every file involved is marked `TEMPORARY`; replace them all with published, versioned releases together.
+- The built-in Pizza Bot engine (`apps/fleet-agent`, plus Node and a Linux `better-sqlite3`) goes to remote runners through the same local copy until releases exist.
+
 ## Security simplified
 - Runner auth: static bearer token over plain HTTP. EC2 runner listens on 127.0.0.1 only and is reached through SSH over SSM (no inbound ports); the local runner is localhost only. No TLS.
 - Runner tokens are stored in plain text in the Controller Msg log.
