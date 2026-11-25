@@ -4,10 +4,12 @@ import { Tabs } from "radix-ui";
 import { useAppToast } from "../AppToast.js";
 import { EditAgentForm, mcpServerSummary } from "./AddAgentDialog.js";
 import { McpServersPanel } from "./McpServersDialog.js";
+import { AgentRuns, RunButton, ScheduleRow } from "./AgentParts.js";
+import type { OpenChat } from "./RunCard.js";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { FleetDialog } from "./GuideCard.js";
-import { activeRun, ago, isBuiltin, runnerLabel, runnerLocation, runnerStatusText, runnerTone } from "./fleet-view-model.js";
+import { activeRun, ago, isBuiltin, runnerLabel, runsOf, runnerLocation, runnerStatusText, runnerTone } from "./fleet-view-model.js";
 
 export const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
 
@@ -256,11 +258,15 @@ export function RunnerDetailsDialog({
   );
 }
 
+export type AgentTab = "overview" | "runs" | "settings" | "mcp";
+
 export function AgentDetailsDialog({
   model,
   agent,
   runner,
   send,
+  onOpenChat,
+  initial = "overview",
   onDelete,
   onClose,
 }: {
@@ -268,6 +274,8 @@ export function AgentDetailsDialog({
   agent: FleetAgent;
   runner: FleetRunner;
   send: FleetSend;
+  onOpenChat: OpenChat;
+  initial?: AgentTab;
   onDelete: (() => void) | null;
   onClose: () => void;
 }) {
@@ -291,7 +299,7 @@ export function AgentDetailsDialog({
           ["Runner", <RunnerPill key="r" model={model} runner={runner} />],
           ["Runs with", builtin ? "Built-in engine" : harness ? `${harness} harness` : "Its own command"],
           ...(agent.model ? ([["Model", model.agentModels?.find((m) => m.id === agent.model)?.label ?? agent.model]] as [string, ReactNode][]) : []),
-          ["Schedule", agent.schedule ? `Daily at ${agent.schedule.at}` : "Not scheduled"],
+          ["Schedule", <ScheduleRow key={agent.schedule?.at ?? "none"} agent={agent} send={send} />],
           ...(agent.skills?.length ? ([["Skills", agent.skills.map((s) => s.name).join(", ")]] as [string, ReactNode][]) : []),
         ]}
       />
@@ -350,16 +358,19 @@ export function AgentDetailsDialog({
         </span>
         <span className="fleet-muted">on</span>
         <RunnerPill model={model} runner={runner} />
+        <span className="fleet-agent-links-spacer" />
+        <RunButton model={model} agent={agent} runner={runner} send={send} />
       </div>
       <DetailTabs
         tabs={[
           { id: "overview", label: "Overview", content: overview },
+          { id: "runs", label: "Runs", count: runsOf(model, agent.key).length, content: <AgentRuns model={model} agent={agent} send={send} onOpenChat={onOpenChat} /> },
           { id: "settings", label: "Settings", content: settings },
           { id: "mcp", label: "MCP servers", ...(builtin ? { count: used.length } : {}), content: mcp },
           { id: "permissions", label: "Permissions", content: <PermissionsSoon agent={agent} /> },
           { id: "secrets", label: "Secrets", content: <SecretsSoon runner={runner} /> },
         ]}
-        initial="overview"
+        initial={initial}
         label={`${agent.name} details`}
       />
     </FleetDialog>

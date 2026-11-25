@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FleetModel, FleetTask } from "./fleet-types.js";
 import {
   activeRun,
+  agentTone,
   ago,
   artifactsNewestFirst,
   canFollowUp,
@@ -18,6 +19,7 @@ import {
   runnerHealth,
   runnerLocation,
   runsOf,
+  runsWith,
   runStrip,
   runTitle,
   selectedOrNext,
@@ -322,5 +324,44 @@ describe("follow-ups", () => {
   it("show the runs they continue, oldest first", () => {
     const runs = [task({ id: "a" }), task({ id: "b", followUpOf: "a" }), task({ id: "c", followUpOf: "b" })];
     expect(earlierRuns(model(runs), runs[2]!).map((t) => t.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("agentTone", () => {
+  const m = (tasks: FleetTask[]) => model(tasks);
+  const tone = (tasks: FleetTask[], status: "healthy" | "unreachable" = "healthy") => {
+    const mm = m(tasks);
+    return agentTone(mm, { ...mm.runners.ec2!, status }, KEY);
+  };
+
+  it.each([
+    ["never run", [], "muted"],
+    ["last run failed", [task({ state: "failed" })], "bad"],
+    ["last run completed", [task({})], "ok"],
+    ["running", [task({ state: "working" })], "info"],
+  ] as const)("%s", (_, tasks, expected) => {
+    expect(tone([...tasks])).toBe(expected);
+  });
+
+  it("is bad when the runner is unreachable", () => {
+    expect(tone([task({})], "unreachable")).toBe("bad");
+  });
+});
+
+describe("runsWith", () => {
+  const agent = (over: object) => ({ ...model([]).agents![KEY]!, ...over });
+  const runner = model([]).runners.ec2!;
+
+  it("names the model by its label", () => {
+    expect(runsWith({ ...model([]), agentModels: [{ id: "m", label: "Claude Haiku" }] }, runner, agent({ model: "m" }))).toBe("Claude Haiku");
+  });
+
+  it("names the harness of an external agent", () => {
+    const withPlugin = { ...runner, plugins: [{ id: "docker", name: "Docker", version: "1", capabilities: [], healthy: true, detail: "" }] };
+    expect(runsWith(model([]), withPlugin, agent({ kind: "external", harness: "docker" }))).toBe("Docker harness");
+  });
+
+  it("is nothing for an agent that is its own command", () => {
+    expect(runsWith(model([]), runner, agent({ kind: "external", harness: null }))).toBeNull();
   });
 });

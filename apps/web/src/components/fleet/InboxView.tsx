@@ -36,7 +36,7 @@ export const loadInboxLayout = (): InboxLayout => {
   return INBOX_LAYOUTS.find((l) => l.id === saved)?.id ?? "stack";
 };
 
-const save = (key: string, value: string) => {
+export const save = (key: string, value: string) => {
   try {
     localStorage.setItem(key, value);
   } catch {

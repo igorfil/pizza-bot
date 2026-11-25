@@ -5,7 +5,9 @@ import { FleetConnectForm, FleetLinkBadge, FleetModule } from "./FleetModule.js"
 import { InboxView, type InboxLayout } from "./InboxView.js";
 import { InboxCard } from "./RunCard.js";
 import { ChatPane } from "./ChatsView.js";
-import { AgentCard, AgentsView, InlineRuns } from "./AgentsView.js";
+import { AgentsView, type AgentsLayout } from "./AgentsView.js";
+import { AgentCard } from "./AgentsLayouts.js";
+import { InlineRuns } from "./AgentParts.js";
 import { addablePlugins, addAgentModes } from "./AddAgentDialog.js";
 import { GuideCard, GuidePicker } from "./GuideCard.js";
 import type { FleetChat, FleetGuideSession, FleetModel, FleetTask } from "./fleet-types.js";
@@ -221,10 +223,10 @@ describe("AgentsView", () => {
   });
 
   it("invites adding the first agent when a runner serves none", () => {
-    expect(view({ ...model, agents: {} })).toContain("Choose what ec2 runs.");
+    expect(view({ ...model, agents: {} })).toContain("No agents yet. Add one to choose what ec2 runs.");
   });
 
-  it("ends every runner's grid with an Add agent tile", () => {
+  it("offers adding an agent in every runner's heading", () => {
     expect(view(model)).toContain('aria-label="Add agent to ec2"');
   });
 
@@ -267,6 +269,34 @@ describe("AgentsView", () => {
   });
 });
 
+describe("Agents layouts", () => {
+  const two = { ...model, agents: { ...model.agents, "ec2/fact": { ...model.agents["ec2/dadjokes"]!, key: "ec2/fact", id: "fact", name: "Geography fact" } } };
+  const view = (layout: AgentsLayout, m: FleetModel = two) => wrap(<AgentsView model={m} send={noop} onOpenChat={() => {}} initialLayout={layout} />);
+
+  it("offers every layout, with the current one pressed", () => {
+    const html = view("table");
+    expect([html.match(/aria-pressed="(true|false)"/g)?.length, /aria-pressed="true"[^>]*title="One row per agent"/.test(html)]).toEqual([3, true]);
+  });
+
+  it("cards: a card per agent", () => {
+    expect(view("cards").match(/<article class="fleet-agent-card/g)?.length).toBe(2);
+  });
+
+  it("list: a row per agent, the first selected and shown in full", () => {
+    const html = view("list");
+    expect([html.match(/class="fleet-inbox-row fleet-agents-row/g)?.length, /aria-current="true"[^>]*>.*?Dad jokes/.test(html), html.includes('aria-label="Runs of Dad jokes"')]).toEqual([
+      2,
+      true,
+      true,
+    ]);
+  });
+
+  it("table: a row per agent under its runner, each opening the agent", () => {
+    const html = view("table");
+    expect([html.includes('aria-label="Runner ec2"'), html.match(/aria-label="Open (Dad jokes|Geography fact)"/g)?.length]).toEqual([true, 2]);
+  });
+});
+
 describe("Add agent", () => {
   const runner = model.runners.ec2!;
   const offer = (over: Partial<typeof runner>) => addAgentModes({ ...runner, ...over });
@@ -301,26 +331,26 @@ describe("Add agent", () => {
 });
 
 describe("AgentCard", () => {
-  const card = (m: FleetModel) =>
-    wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} onOpenChat={() => {}} />);
+  const card = (m: FleetModel) => wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} onOpen={() => {}} />);
 
-  it("offers deleting an agent", () => {
-    expect(card(model).includes('aria-label="Delete agent Dad jokes"')).toBe(true);
+  it("opens the agent's details from its name", () => {
+    expect(card(model)).toContain('aria-label="Open Dad jokes"');
   });
 
-  it("offers details for every agent", () => {
-    const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true, model: "m", systemPrompt: "" } } };
-    expect([card(model).includes('aria-label="Edit agent Dad jokes"'), card(created).includes('aria-label="Edit agent Dad jokes"')]).toEqual([true, true]);
-  });
-
-  it("can't be deleted while it runs", () => {
+  it("can't be run again while it runs", () => {
     const running = { ...model, tasks: { a: { ...jokes, id: "a", state: "working" as const } } };
-    expect(card(running)).toMatch(/<button[^>]*class="fleet-agent-delete"[^>]*disabled=""/);
+    expect(card(running)).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Run Dad jokes"/);
   });
 
-  it("shows that it's being removed, without actions", () => {
-    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} onOpenChat={() => {}} removing />);
-    expect([html.includes("Removing…"), html.includes("fleet-agent-delete")]).toEqual([true, false]);
+  it("shows that it's being removed, without a Run button", () => {
+    const ec2 = { ...model.runners.ec2!, agentsChange: { action: "remove" as const, agents: ["Dad jokes"], error: null } };
+    const html = card({ ...model, runners: { ec2 } });
+    expect([html.includes("Removing…"), html.includes('aria-label="Run Dad jokes"')]).toEqual([true, false]);
+  });
+
+  it("shows what the agent runs with", () => {
+    const created = { ...model, agentModels: [{ id: "m", label: "Claude Haiku" }], agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, model: "m" } } };
+    expect(card(created)).toContain("Claude Haiku");
   });
 
   it("keeps the agent's key out of the card text", () => {
@@ -347,8 +377,8 @@ describe("AgentCard", () => {
     expect(card(scheduled)).toContain("Topic: otters");
   });
 
-  it("says when an agent isn't scheduled", () => {
-    expect(card(model)).toContain("Not scheduled");
+  it("leaves the schedule out when there is none", () => {
+    expect(card(model)).not.toContain("Daily at");
   });
 });
 

@@ -205,6 +205,31 @@ export const RUN_STRIP_LENGTH = 10;
 export const runStrip = (model: FleetModel, agentKey: string): FleetTask[] =>
   runsOf(model, agentKey).slice(0, RUN_STRIP_LENGTH).reverse();
 
+export const lastFinishedRun = (model: FleetModel, agentKey: string): FleetTask | undefined =>
+  runsOf(model, agentKey).find(isFinished);
+
+/** Offline, running, or how the last run ended. */
+export const agentTone = (model: FleetModel, runner: FleetRunner, agentKey: string): Tone => {
+  if (runner.status === "unreachable") return "bad";
+  if (activeRun(model, agentKey)) return "info";
+  const last = lastFinishedRun(model, agentKey);
+  return last ? taskTone(last.state) : "muted";
+};
+
+/** What the agent runs on, in one short phrase: its model, else its harness; null for an agent that is its own command. */
+export const runsWith = (model: FleetModel, runner: FleetRunner, agent: FleetAgent): string | null => {
+  if (agent.model) return model.agentModels?.find((m) => m.id === agent.model)?.label ?? agent.model;
+  if (isBuiltin(agent)) return "Built-in engine";
+  const harness = runner.plugins?.find((p) => p.id === agent.harness)?.name ?? agent.harness;
+  return harness ? `${harness} harness` : null;
+};
+
+/** A removal the runner hasn't answered yet. */
+export const isRemoving = (runner: FleetRunner, agent: FleetAgent): boolean => {
+  const change = runner.agentsChange;
+  return change?.action === "remove" && change.error === null && change.agents.includes(agent.name);
+};
+
 /** Guides in progress, oldest first; they stay on screen across reloads until done or canceled. */
 export const guideSessionsOf = (model: FleetModel): FleetGuideSession[] =>
   Object.values(model.guideSessions ?? {}).sort((a, b) => a.createdAt - b.createdAt);
