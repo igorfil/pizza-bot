@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { LoaderCircle } from "lucide-react";
-import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
+import type { FleetAgent, FleetModel, FleetPlugin, FleetRunner } from "./fleet-types.js";
 import type { FleetPayload } from "./fleet-client.js";
 import { useSkillLibrary, type FleetSkillLibrary, type LibrarySkill, type SkillsState } from "./fleet-skills.js";
 import type { FleetSend } from "./FleetModule.js";
@@ -9,17 +9,21 @@ import { runnerLabel } from "./fleet-view-model.js";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : "The Controller didn't take that.");
 
-type Mode = "create";
+type Mode = "create" | "existing";
+
+/** Plugins that can add agents, usable or not; the dialog shows why an unusable one is greyed out. */
+export const addablePlugins = (runner: FleetRunner): FleetPlugin[] => (runner.plugins ?? []).filter((p) => p.capabilities.includes("add") && (p.addFields?.length ?? 0) > 0);
 
 /** What the runner can do for Add agent right now: a reason it can't, or the modes it offers. */
 export const addAgentModes = (runner: FleetRunner): { blocker: string } | { modes: Mode[] } => {
   if (runner.status !== "healthy") return { blocker: `${runnerLabel(runner)} isn't reachable right now. Try again once it's online.` };
-  if (runner.canCreateAgents) return { modes: ["create"] };
+  const modes: Mode[] = [...(runner.canCreateAgents ? ["create" as const] : []), ...(addablePlugins(runner).length > 0 ? ["existing" as const] : [])];
+  if (modes.length > 0) return { modes };
   return {
     blocker:
       runner.available == null
         ? `${runnerLabel(runner)} can't change its agents from here. Update the runner to a version that supports adding agents.`
-        : `${runnerLabel(runner)} has no built-in engine, so it can't run agents created here. Reinstall it with the engine.`,
+        : `${runnerLabel(runner)} has no built-in engine and no plugin that can add agents. Reinstall it with the engine.`,
   };
 };
 
@@ -277,7 +281,74 @@ export function EditAgentForm({ model, agent, send, onClose }: { model: FleetMod
   );
 }
 
-const MODE_LABELS: Record<Mode, string> = { create: "Create new" };
+const MODE_LABELS: Record<Mode, string> = { create: "Create new", existing: "Add existing" };
+
+const MODE_HINTS: Record<Mode, string> = {
+  create: "A new agent on the built-in Pizza Bot engine: a model, a system prompt, and the runner's MCP servers and skills.",
+  existing: "An agent that already exists (a folder, an image, a deployed runtime), run by one of the runner's plugins with its own tools.",
+};
+
+/** An agent that already exists somewhere (a folder, an image, a runtime), added through the plugin that runs that kind. */
+function ExistingAgentForm({ runner, send, onClose }: { runner: FleetRunner; send: FleetSend; onClose: () => void }) {
+  const plugins = addablePlugins(runner);
+  const [pluginId, setPluginId] = useState(plugins.find((p) => p.healthy)?.id ?? "");
+  const [values, setValues] = useState<Record<string, string>>({});
+  const { saving, error, submit } = useSubmit(onClose);
+  const plugin = plugins.find((p) => p.id === pluginId);
+  const fields = plugin?.addFields ?? [];
+  const missing = fields.some((f) => f.required && !values[f.id]?.trim());
+  return (
+    <form className="fleet-guide" onSubmit={(e) => void submit(e, () => send("AddPluginAgent", { runner: runner.name, plugin: pluginId, fields: values }))}>
+      <fieldset className="fleet-choice-field">
+        <legend className="field-label fleet-choice-legend">Runs with</legend>
+        <div className="fleet-choice-grid">
+          {plugins.map((p) => (
+            <ChoiceCard
+              key={p.id}
+              type="radio"
+              name="plugin"
+              value={p.id}
+              checked={pluginId === p.id}
+              disabled={!p.healthy}
+              title={p.name}
+              detail={p.healthy ? PLUGIN_BLURBS[p.id] ?? `Agents run by the ${p.name} plugin.` : `Unavailable on ${runnerLabel(runner)}: ${p.detail}`}
+              onChange={() => {
+                setPluginId(p.id);
+                setValues({});
+              }}
+            />
+          ))}
+        </div>
+      </fieldset>
+      {fields.map((f) => (
+        <label key={`${pluginId}/${f.id}`} className="field">
+          <span className="field-label">
+            {f.label}
+            {!f.required && <span className="field-optional"> (optional)</span>}
+          </span>
+          <input
+            className={`field-input${f.kind === "path" ? " mono" : ""}`}
+            value={values[f.id] ?? ""}
+            onChange={(e) => setValues((v) => ({ ...v, [f.id]: e.target.value }))}
+            placeholder={f.placeholder}
+            spellCheck={f.kind === "text"}
+            autoFocus={f === fields[0]}
+          />
+          {f.hint && <span className="field-hint">{f.hint}</span>}
+        </label>
+      ))}
+      <ErrorLine error={error} />
+      <Actions saving={saving} disabled={!plugin || missing} label="Add agent" onClose={onClose} />
+    </form>
+  );
+}
+
+const PLUGIN_BLURBS: Record<string, string> = {
+  python: "A folder on the runner with an agent.py.",
+  docker: "A container image that speaks the agent contract.",
+  "claude-code": "Claude Code working in a project folder.",
+  agentcore: "A runtime deployed to Bedrock AgentCore.",
+};
 
 export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetModel; runner: FleetRunner; send: FleetSend; onClose: () => void }) {
   const offer = addAgentModes(runner);
@@ -305,7 +376,8 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
               ))}
             </div>
           )}
-          {mode === "create" && (
+          <p className="field-hint">{MODE_HINTS[mode]}</p>
+          {mode === "create" ? (
             <AgentSpecForm
               model={model}
               runner={runner}
@@ -313,6 +385,8 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
               onSave={(spec) => send("CreateAgent", { runner: runner.name, ...spec })}
               onClose={onClose}
             />
+          ) : (
+            <ExistingAgentForm runner={runner} send={send} onClose={onClose} />
           )}
         </>
       )}

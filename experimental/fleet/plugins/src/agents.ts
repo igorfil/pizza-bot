@@ -86,7 +86,7 @@ export const slug = (name: string): string =>
 
 export const NAME_FIELD: AddField = { id: "name", label: "Name", kind: "text", required: true, placeholder: "e.g. Release notes" };
 
-export const DESCRIPTION_FIELD: AddField = { id: "description", label: "Description", kind: "text", hint: "optional; shown on the agent's card" };
+export const DESCRIPTION_FIELD: AddField = { id: "description", label: "Description", kind: "text", hint: "shown on the agent's card" };
 
 /** A comma-separated field as its words. */
 export const list = (value: string | undefined): string[] => (value ?? "").split(",").map((w) => w.trim()).filter(Boolean);

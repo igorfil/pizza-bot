@@ -442,6 +442,44 @@ describe("adding agents", () => {
   });
 });
 
+describe("adding an agent through a plugin", () => {
+  const docker = { id: "docker", name: "Docker", version: "1", capabilities: ["cancel", "add"], healthy: true, detail: "Docker 29", addFields: [] };
+  const withDocker = (plugin = docker): Msg => ({ type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: [], plugins: [plugin] });
+  const ready = (plugin = docker): Msg[] => [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), withDocker(plugin)];
+  const fields = { name: "Reports", image: "ghcr.io/acme/report:1" };
+  const add: Msg = { type: "AddPluginAgent", runner: "local", plugin: "docker", fields };
+
+  test("asks the runner's plugin to add it and shows it as being added", () => {
+    const [model, effects] = run([...ready(), add]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([
+      { action: "add", agents: ["Reports"], error: null },
+      [{ type: "AddRunnerPluginAgent", runner: "local", endpoint: { url: "http://x", token }, plugin: "docker", fields }],
+    ]);
+  });
+
+  test("the runner's answer lists the added agent, enabled", () => {
+    const reports = { id: "reports", name: "Reports", description: "", input: null, added: true };
+    const answered: Msg = { type: "AgentsSet", runner: "local", added: ["reports"], agents: [reports, sys], location: "laptop", available: [], plugins: [docker] };
+    const [model] = run([...ready(), add, answered]);
+    expect([model.agents["local/reports"]?.enabled, model.agents["local/reports"]?.added, model.notifications.at(-1)?.text]).toEqual([true, true, "added Reports to local"]);
+  });
+
+  test("a plugin that can't run on the runner is refused with its reason, without calling it", () => {
+    const [model, effects] = run([...ready({ ...docker, healthy: false, detail: "spawn docker ENOENT" }), add]);
+    expect([model.runners.local?.agentsChange?.error, effects]).toEqual(["the Docker plugin isn't usable on local: spawn docker ENOENT", []]);
+  });
+
+  test("a plugin that can't add agents is refused", () => {
+    const [model] = run([...ready({ ...docker, capabilities: ["cancel"] }), add]);
+    expect(model.runners.local?.agentsChange?.error).toBe("the Docker plugin can't add agents");
+  });
+
+  test("the plugin's refusal stays on the runner with its reason", () => {
+    const [model] = run([...ready(), add, { type: "AgentsSetFailed", runner: "local", error: '"--x" isn\'t an image reference' }]);
+    expect(model.runners.local?.agentsChange).toEqual({ action: "add", agents: ["Reports"], error: '"--x" isn\'t an image reference' });
+  });
+});
+
 describe("enabling and disabling agents", () => {
   const jokes = { id: "dadjokes", name: "Dad jokes", description: "", input: null };
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy([sys], [jokes])];

@@ -59,8 +59,8 @@ const load = async (dirs: AgentDirs): Promise<ClaudeAgent[]> => (await readAgent
 const FIELDS: AddField[] = [
   NAME_FIELD,
   { id: "project", label: "Project folder", kind: "path", required: true, hint: "the folder Claude Code works in, on the runner's machine", placeholder: "/home/me/repos/app" },
-  { id: "allowed_tools", label: "Allowed tools", kind: "list", hint: "optional, comma-separated; without them it can't use tools that need approval", placeholder: "Read, Grep, Glob" },
-  { id: "model", label: "Model", kind: "text", hint: "optional; Claude Code's default otherwise", placeholder: "sonnet" },
+  { id: "allowed_tools", label: "Allowed tools", kind: "list", hint: "comma-separated; without them it can't use tools that need approval", placeholder: "Read, Grep, Glob" },
+  { id: "model", label: "Model", kind: "text", hint: "Claude Code's default otherwise", placeholder: "sonnet" },
   DESCRIPTION_FIELD,
 ];
 

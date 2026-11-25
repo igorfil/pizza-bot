@@ -432,6 +432,16 @@ const createAgent = (model: Model, name: string, agent: NewAgentSpec): Result =>
       : fail(`${name} can't create agents; update the runner`),
   );
 
+/** The change shows the name it was given until the runner answers with its id. */
+const addPluginAgent = (model: Model, name: string, pluginId: string, fields: Record<string, string>): Result =>
+  changeAgents(model, name, "add", [fields.name || pluginId], ({ runner, url, fail, start }) => {
+    const plugin = runner.plugins.find((p) => p.id === pluginId);
+    if (!plugin) return fail(`${name} has no ${pluginId} plugin`);
+    if (!plugin.capabilities.includes("add")) return fail(`the ${plugin.name} plugin can't add agents`);
+    if (!plugin.healthy) return fail(`the ${plugin.name} plugin isn't usable on ${name}: ${plugin.detail}`);
+    return start({ type: "AddRunnerPluginAgent", runner: name, endpoint: { url, token: runner.token }, plugin: pluginId, fields });
+  });
+
 /** Deleting would orphan a run in progress, so it waits until the agent is idle. */
 const deleteAgent = (model: Model, key: string): Result => {
   const agent = model.agents[key];
@@ -571,6 +581,9 @@ export const update = (model: Model, msg: Msg): Result => {
 
     case "AddAgents":
       return addAgents(model, msg.runner, msg.agents);
+
+    case "AddPluginAgent":
+      return addPluginAgent(model, msg.runner, msg.plugin, msg.fields);
 
     case "EnableAgent":
       return enableAgent(model, msg.agent);

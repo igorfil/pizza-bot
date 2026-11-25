@@ -93,8 +93,9 @@ a plugin adds or drops show up without a restart. If the plugin exits, its runs 
 `<id>` plugin stopped" and the next request starts it again. When the runner stops, the plugin's
 stdin closes; the plugin should stop its runs and exit.
 
-Plugin agents start out as `available`, like shipped agents: turn them on with Add agent → Turn on
-existing, or list them in `RUNNER_AGENTS`.
+Agents a plugin finds on disk start out disabled, like shipped agents: they show as dimmed cards on
+the Fleet page with Enable, or can be listed in `RUNNER_AGENTS`. An agent added from the Fleet page
+is enabled right away.
 
 ## Testing
 

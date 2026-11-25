@@ -21,8 +21,8 @@ const load = async (dirs: AgentDirs): Promise<DockerAgent[]> => (await readAgent
 const FIELDS: AddField[] = [
   NAME_FIELD,
   { id: "image", label: "Image", kind: "text", required: true, hint: "speaks the agent contract on stdin and stdout", placeholder: "ghcr.io/acme/report-agent:1" },
-  { id: "command", label: "Command", kind: "list", hint: "optional; replaces the image's command, comma-separated", placeholder: "python, agent.py" },
-  { id: "args", label: "docker run flags", kind: "list", hint: "optional, comma-separated, e.g. --network, none", placeholder: "--network, none" },
+  { id: "command", label: "Command", kind: "list", hint: "replaces the image's command, comma-separated", placeholder: "python, agent.py" },
+  { id: "args", label: "docker run flags", kind: "list", hint: "comma-separated, e.g. --network, none", placeholder: "--network, none" },
   DESCRIPTION_FIELD,
 ];
 

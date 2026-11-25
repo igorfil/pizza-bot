@@ -48,6 +48,18 @@ export interface FleetPlugin {
   capabilities: string[];
   healthy: boolean;
   detail: string;
+  /** What Add existing asks for; only plugins with the `add` capability have them. */
+  addFields?: FleetAddField[];
+}
+
+/** `path`: a folder on the runner's machine; `list`: comma-separated words. */
+export interface FleetAddField {
+  id: string;
+  label: string;
+  kind: "text" | "path" | "list";
+  required?: boolean;
+  hint?: string;
+  placeholder?: string;
 }
 
 export interface FleetAgentInfo {
@@ -76,6 +88,8 @@ export interface FleetAgent {
   harness?: string | null;
   /** Made with Create new; deleting it deletes it, while a shipped agent is only turned off. */
   created?: boolean;
+  /** Added through a plugin from Add existing; deleting it removes it from the plugin. */
+  added?: boolean;
   /** Only on created agents, for editing. */
   model?: string;
   systemPrompt?: string;

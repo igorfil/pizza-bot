@@ -381,7 +381,7 @@ export function AgentCard({
                 <Power size={13} />
               </button>
             )}
-            {!down && agent.created && (
+            {!down && (agent.created || agent.added) && (
               <button
                 type="button"
                 className="fleet-agent-delete"
@@ -403,7 +403,7 @@ export function AgentCard({
           runner={runner}
           send={send}
           onDelete={
-            down || !agent.created
+            down || !(agent.created || agent.added)
               ? null
               : () => {
                   setDetails(false);

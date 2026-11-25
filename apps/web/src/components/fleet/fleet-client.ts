@@ -54,6 +54,7 @@ export type FleetIntent =
   | "EnableAgent"
   | "DisableAgent"
   | "CreateAgent"
+  | "AddPluginAgent"
   | "SetMcpServer"
   | "RemoveMcpServer"
   | "DeleteAgent"

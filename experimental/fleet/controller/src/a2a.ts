@@ -1,7 +1,7 @@
 import { ClientFactory, ClientFactoryOptions, DefaultAgentCardResolver, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
 import { attempt, type Outcome } from "./outcome.js";
-import type { AgentInfo, AgentKind, AgentSkill, Artifact, McpServers, NewAgentSpec, PluginInfo, TaskSnapshot, TaskUpdate } from "./types.js";
+import type { AddField, AgentInfo, AgentKind, AgentSkill, Artifact, McpServers, NewAgentSpec, PluginInfo, TaskSnapshot, TaskUpdate } from "./types.js";
 
 /** One agent behind a runner link, with its token already read from the vault. */
 export type AgentEndpoint = { url: string; token: string };
@@ -99,6 +99,7 @@ type IndexJson = {
     kind?: unknown;
     harness?: unknown;
     created?: unknown;
+    added?: unknown;
     model?: unknown;
     systemPrompt?: unknown;
     mcp?: unknown;
@@ -136,6 +137,7 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
         harness: str(a.harness) || null,
         mcp: strings(a.mcp),
         ...(a.created === true ? { created: true } : {}),
+        ...(a.added === true ? { added: true } : {}),
         ...(a.created === true && typeof a.model === "string" ? { model: a.model, systemPrompt: str(a.systemPrompt), skills: skillsOf(a.skills) } : {}),
       }
     : null;
@@ -150,6 +152,23 @@ export type RunnerIndex = {
   mcpServers: McpServers;
 };
 
+const KINDS: ReadonlySet<string> = new Set(["text", "path", "list"]);
+
+export const addFieldsOf = (v: unknown): AddField[] =>
+  Array.isArray(v)
+    ? v
+        .filter(isObject)
+        .filter((f) => str(f.id) !== "" && str(f.label) !== "")
+        .map((f) => ({
+          id: str(f.id),
+          label: str(f.label),
+          kind: (KINDS.has(str(f.kind)) ? str(f.kind) : "text") as AddField["kind"],
+          ...(f.required === true ? { required: true } : {}),
+          ...(str(f.hint) ? { hint: str(f.hint) } : {}),
+          ...(str(f.placeholder) ? { placeholder: str(f.placeholder) } : {}),
+        }))
+    : [];
+
 export const pluginsOf = (v: unknown): PluginInfo[] =>
   Array.isArray(v)
     ? v
@@ -162,6 +181,7 @@ export const pluginsOf = (v: unknown): PluginInfo[] =>
           capabilities: strings(p.capabilities),
           healthy: p.healthy === true,
           detail: str(p.detail),
+          addFields: addFieldsOf(p.addFields),
         }))
     : [];
 
@@ -197,6 +217,21 @@ export const createAgent = (url: string, token: string, agent: NewAgentSpec): Pr
     });
     const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
     if (res.status === 405) throw new Error("this runner can't create agents; update the runner");
+    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
+    return { ...toIndex(body), created: str(body.created) };
+  });
+
+/** Has a plugin on the runner add an agent from a UI's answers; the runner serves it and answers with its new index. */
+export const addPluginAgent = (url: string, token: string, plugin: string, fields: Record<string, string>): Promise<Outcome<RunnerIndex & { created: string }>> =>
+  attempt(async () => {
+    const res = await fetch(`${url}/plugins/${encodeURIComponent(plugin)}/agents`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ fields }),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
+    if (res.status === 404 && !str(body.error)) throw new Error("this runner can't add agents through plugins; update the runner");
     if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
     return { ...toIndex(body), created: str(body.created) };
   });

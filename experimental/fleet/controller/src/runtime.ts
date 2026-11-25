@@ -152,6 +152,13 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
           ? { type: "AgentsSet", runner: effect.runner, added: [r.value.created], ...indexFields(r.value) }
           : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
       }
+      case "AddRunnerPluginAgent": {
+        const ep = await withToken(effect.endpoint);
+        const r = ep.ok ? await a2a.addPluginAgent(ep.value.url, ep.value.token, effect.plugin, effect.fields) : ep;
+        return r.ok
+          ? { type: "AgentsSet", runner: effect.runner, added: [r.value.created], ...indexFields(r.value) }
+          : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
+      }
       case "DeleteRunnerAgent": {
         const ep = await withToken(effect.endpoint);
         const r = ep.ok ? await a2a.deleteAgent(ep.value.url, ep.value.token, effect.agentId) : ep;

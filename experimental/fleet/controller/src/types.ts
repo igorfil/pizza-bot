@@ -53,7 +53,10 @@ export type SkillCopy = { id: string; files?: SkillFile[] };
 /** What a runner's `GET /agents` reports for one agent. */
 /** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model`, `systemPrompt` and `skills`. */
 /** A harness plugin on a runner, as its `GET /agents` reports it. */
-export type PluginInfo = { id: string; name: string; version: string; capabilities: string[]; healthy: boolean; detail: string };
+export type PluginInfo = { id: string; name: string; version: string; capabilities: string[]; healthy: boolean; detail: string; addFields?: AddField[] };
+
+/** One thing a plugin asks for to add an agent (plugins/README.md). */
+export type AddField = { id: string; label: string; kind: "text" | "path" | "list"; required?: boolean; hint?: string; placeholder?: string };
 
 /** `builtin` agents run on the runner's own engine, which configures them; `external` ones bring their own tools. */
 export type AgentKind = "builtin" | "external";
@@ -67,6 +70,8 @@ export type AgentInfo = {
   description: string;
   input: AgentInput | null;
   created?: boolean;
+  /** Added through a plugin from the Fleet page; deleting it deletes it there. */
+  added?: boolean;
   model?: string;
   systemPrompt?: string;
   /** Ids of the runner's MCP servers the agent uses. */
@@ -266,6 +271,7 @@ export type IntentMsg =
   | { type: "EnableAgent"; agent: string }
   | { type: "DisableAgent"; agent: string }
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
+  | { type: "AddPluginAgent"; runner: string; plugin: string; fields: Record<string, string> }
   | { type: "SetMcpServer"; runner: string; id: string; entry: Record<string, unknown> }
   | { type: "RemoveMcpServer"; runner: string; id: string }
   | { type: "DeleteAgent"; agent: string }
@@ -323,6 +329,7 @@ export type Effect =
   | { type: "CheckRunner"; runner: string; url: string }
   | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[]; disabled?: string[] }
   | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
+  | { type: "AddRunnerPluginAgent"; runner: string; endpoint: Endpoint; plugin: string; fields: Record<string, string> }
   | { type: "DeleteRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string }
   | { type: "EditRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string; agent: NewAgentSpec }
   | { type: "PutRunnerMcpServer"; runner: string; endpoint: Endpoint; id: string; entry: Record<string, unknown> }
@@ -348,6 +355,7 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "EnableAgent",
   "DisableAgent",
   "CreateAgent",
+  "AddPluginAgent",
   "SetMcpServer",
   "RemoveMcpServer",
   "DeleteAgent",

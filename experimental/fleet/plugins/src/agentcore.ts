@@ -34,7 +34,7 @@ const load = async (dirs: AgentDirs): Promise<AgentCoreAgent[]> => (await readAg
 const FIELDS: AddField[] = [
   NAME_FIELD,
   { id: "runtime_arn", label: "Runtime ARN", kind: "text", required: true, placeholder: "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/support-AbC123" },
-  { id: "qualifier", label: "Endpoint", kind: "text", hint: "optional; DEFAULT otherwise", placeholder: "DEFAULT" },
+  { id: "qualifier", label: "Endpoint", kind: "text", hint: "DEFAULT otherwise", placeholder: "DEFAULT" },
   DESCRIPTION_FIELD,
 ];
 

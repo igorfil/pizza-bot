@@ -69,9 +69,9 @@ it answers with what was said before. Cancel and timeout send SIGTERM to the pro
 |---|---|---|
 | `webresearch` | question | its own fetch MCP (`.mcp.json`, `uvx mcp-server-fetch`), Bedrock Haiku 5.5 |
 
-Which agents a runner serves starts from `RUNNER_AGENTS` (comma list of ids, including plugin
-agents; default: all). Add agent on the Fleet page changes it through the runner's `PUT /agents`,
-which is saved and wins from then on.
+Which agents a runner serves (its enabled agents) starts from `RUNNER_AGENTS` (comma list of ids,
+including plugin agents; default: all). Enable and Disable on the Fleet page change it through the
+runner's `PUT /agents`, which is saved and wins from then on.
 
 ## Created agents
 
@@ -82,6 +82,7 @@ The agent holds a copy of each skill under `skills/<id>/`; an edit that keeps a 
 id, so the copy stays as it was until the skill is picked again. The runner writes it as an ordinary
 agent folder in `RUNNER_CREATED_AGENTS_DIR` (`agent.toml` with `MODEL` in `[env]`, `system.md`,
 `skills/`). Created agents from before the engine ran a single-call `agent.py`; the runner moves them
-to the engine on start. Deleting a created agent deletes its folder; a shipped agent is only turned
-off and can be added back. The runner's AWS credentials (on EC2, the instance role) must allow the
+to the engine on start. Deleting a created agent deletes its folder. Any agent can be disabled and
+enabled again; a disabled one keeps its schedule and runs but doesn't run. A shipped agent can only
+be disabled. The runner's AWS credentials (on EC2, the instance role) must allow the
 model.

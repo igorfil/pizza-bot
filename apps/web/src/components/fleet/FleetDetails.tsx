@@ -315,7 +315,13 @@ export function AgentDetailsDialog({
       )}
       {onDelete && (
         <div className="fleet-danger-zone">
-          <span className="fleet-muted">{active ? "Wait for the run to finish, or cancel it, before deleting the agent." : "Deletes the agent and its system prompt. Its past results stay in the Inbox."}</span>
+          <span className="fleet-muted">
+            {active
+              ? "Wait for the run to finish, or cancel it, before deleting the agent."
+              : agent.added
+                ? `Removes it from ${runBy}; what it points to isn't touched. Its past results stay in the Inbox.`
+                : "Deletes the agent and its system prompt. Its past results stay in the Inbox."}
+          </span>
           <button type="button" className="btn-secondary fleet-small-btn fleet-danger-btn" onClick={onDelete} disabled={!!active}>
             <Trash2 size={13} aria-hidden="true" /> Delete agent
           </button>

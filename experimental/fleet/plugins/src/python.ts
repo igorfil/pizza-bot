@@ -22,7 +22,7 @@ const load = async (dirs: AgentDirs): Promise<PythonAgent[]> => Promise.all((awa
 const FIELDS: AddField[] = [
   NAME_FIELD,
   { id: "path", label: "Folder", kind: "path", required: true, hint: "the agent's folder on the runner's machine, with its agent.py", placeholder: "/srv/agents/weekly-report" },
-  { id: "command", label: "Command", kind: "text", hint: "optional; how to start it in that folder, if not agent.py", placeholder: "python3 agent.py" },
+  { id: "command", label: "Command", kind: "text", hint: "how to start it in that folder, if not agent.py", placeholder: "python3 agent.py" },
   DESCRIPTION_FIELD,
 ];
 

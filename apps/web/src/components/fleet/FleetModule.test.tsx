@@ -6,7 +6,7 @@ import { InboxView, type InboxLayout } from "./InboxView.js";
 import { InboxCard } from "./RunCard.js";
 import { ChatPane } from "./ChatsView.js";
 import { AgentCard, AgentsView, InlineRuns } from "./AgentsView.js";
-import { addAgentModes } from "./AddAgentDialog.js";
+import { addablePlugins, addAgentModes } from "./AddAgentDialog.js";
 import { GuideCard, GuidePicker } from "./GuideCard.js";
 import type { FleetChat, FleetGuideSession, FleetModel, FleetTask } from "./fleet-types.js";
 
@@ -276,6 +276,20 @@ describe("Add agent", () => {
     expect(offer({ canCreateAgents: true, available: jokes })).toEqual({ modes: ["create"] });
   });
 
+  const docker = { id: "docker", name: "Docker", version: "1", capabilities: ["cancel", "add"], healthy: false, detail: "spawn docker ENOENT", addFields: [{ id: "name", label: "Name", kind: "text" as const }] };
+
+  it("offers adding an existing agent when a plugin can add agents, even an unusable one", () => {
+    expect(offer({ canCreateAgents: true, available: [], plugins: [docker] })).toEqual({ modes: ["create", "existing"] });
+  });
+
+  it("offers only adding existing agents on a runner without the engine", () => {
+    expect(offer({ canCreateAgents: false, available: [], plugins: [{ ...docker, healthy: true }] })).toEqual({ modes: ["existing"] });
+  });
+
+  it("doesn't count a plugin that can't add agents", () => {
+    expect(addablePlugins({ ...runner, plugins: [{ ...docker, capabilities: ["cancel"] }, { ...docker, id: "old", addFields: undefined }] })).toEqual([]);
+  });
+
   it("asks for a runner update when the runner can do neither", () => {
     const r = offer({ canCreateAgents: false, available: null });
     expect("blocker" in r && r.blocker).toContain("Update the runner");
@@ -295,6 +309,11 @@ describe("Add agent", () => {
 describe("AgentCard", () => {
   const card = (m: FleetModel) =>
     wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} onOpenChat={() => {}} />);
+
+  it("offers removing an agent added through a plugin", () => {
+    const added = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, added: true } } };
+    expect(card(added).includes('aria-label="Delete agent Dad jokes"')).toBe(true);
+  });
 
   it("offers deleting only an agent created here", () => {
     const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true } } };

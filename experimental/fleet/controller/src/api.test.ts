@@ -260,6 +260,16 @@ describe("runner transports", () => {
     expect(sent[0]).toEqual({ type: "RenameRunner", name: "laptop", label: logged });
   });
 
+  it("AddPluginAgent carries the runner, plugin and the fields as strings", async () => {
+    const sent: Msg[] = [];
+    await post({ msg_id: "m1", type: "AddPluginAgent", payload: { runner: "laptop", plugin: "docker", fields: { name: "Reports", image: "alpine", n: 3 } } }, sent);
+    expect(sent[0]).toEqual({ type: "AddPluginAgent", runner: "laptop", plugin: "docker", fields: { name: "Reports", image: "alpine", n: "" } });
+  });
+
+  it("AddPluginAgent without fields is refused", async () => {
+    expect((await post({ msg_id: "m1", type: "AddPluginAgent", payload: { runner: "laptop", plugin: "docker" } })).status).toBe(400);
+  });
+
   it("RenameRunner refuses a name that's too long", async () => {
     expect((await post({ msg_id: "m1", type: "RenameRunner", payload: { name: "laptop", label: "x".repeat(41) } })).status).toBe(400);
   });

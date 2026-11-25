@@ -300,7 +300,7 @@ export function AddRunnerDialog({
   );
 }
 
-/** A created agent is deleted from its runner; a shipped one is turned off and can be added back. */
+/** Only for agents created here or added through a plugin; other agents are disabled instead. */
 export function DeleteAgentDialog({ agent, runner, onCancel, onConfirm }: { agent: FleetAgent; runner: FleetRunner; onCancel: () => void; onConfirm: () => void }) {
   return (
     <DialogPrimitive.Root open onOpenChange={(open) => !open && onCancel()}>
@@ -308,12 +308,12 @@ export function DeleteAgentDialog({ agent, runner, onCancel, onConfirm }: { agen
         <DialogPrimitive.Overlay className="sidebar-modal-backdrop" />
         <DialogPrimitive.Content className="sidebar-modal">
           <DialogPrimitive.Title className="sidebar-modal-title">
-            {agent.created ? "Delete" : "Remove"} {agent.name}?
+            {agent.added ? "Remove" : "Delete"} {agent.name}?
           </DialogPrimitive.Title>
           <DialogPrimitive.Description className="sidebar-modal-body">
-            {agent.created
-              ? `This deletes ${agent.name} and its system prompt from ${runnerLabel(runner)}. Its past results stay in the Inbox.`
-              : `${runnerLabel(runner)} stops running ${agent.name}. It stays on the machine, so you can turn it back on with Add agent.`}
+            {agent.added
+              ? `This removes ${agent.name} from ${runnerLabel(runner)}. What it points to (its folder, image or runtime) isn't touched, and its past results stay in the Inbox.`
+              : `This deletes ${agent.name} and its system prompt from ${runnerLabel(runner)}. Its past results stay in the Inbox.`}
           </DialogPrimitive.Description>
           <div className="sidebar-modal-actions">
             <DialogPrimitive.Close asChild>
@@ -322,7 +322,7 @@ export function DeleteAgentDialog({ agent, runner, onCancel, onConfirm }: { agen
               </button>
             </DialogPrimitive.Close>
             <button type="button" className="sidebar-modal-btn danger" onClick={onConfirm}>
-              {agent.created ? "Delete agent" : "Remove agent"}
+              {agent.added ? "Remove agent" : "Delete agent"}
             </button>
           </div>
         </DialogPrimitive.Content>
