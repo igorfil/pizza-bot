@@ -315,9 +315,12 @@ Endpoints:
 - `PUT /agents/<id>`: bearer token required; `{name, model, systemPrompt}` rewrites a created agent
   in place (same id, so its URL and runs stay) and answers with the new index. Shipped agents
   answer 409. Created agents' index entries carry `model` and `systemPrompt` for editing.
-- `DELETE /agents/<id>`: bearer token required; deletes a created agent's folder, or turns a
-  shipped agent off (it stays in `available`), and answers with the new index. Each index entry's
-  `created` tells the two apart.
+- `DELETE /agents/<id>`: bearer token required; deletes a created agent's folder, has the plugin
+  remove an agent added through it, or turns any other agent off (it stays in `available`), and
+  answers with the new index. Each index entry's `created` and `added` tell them apart.
+- `POST /plugins/<id>/agents`: bearer token required; `{fields: {...}}` has the plugin add an agent
+  from the values a UI collected for its `addFields` (plugins/README.md), serves it at once, and
+  answers with the new index plus `created: <id>`. The plugin's reason comes back as a 400.
 - `PUT /agents`: bearer token required; `{agents: [ids]}` replaces the served set, saves it in
   `RUNNER_DB` so it survives restarts, and answers with the new index. Unserved agents answer 404.
 - `/agents/<id>/.well-known/agent-card.json`: public A2A agent card per agent. Its one skill carries

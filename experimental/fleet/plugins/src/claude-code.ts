@@ -2,8 +2,22 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { agentInfo, count, readAgentFolders, stringMap, strings, text, type AgentFolder } from "./agents.js";
-import { fail, ok, type AgentInfo, type Harness, type RunEvent } from "./protocol.js";
+import {
+  agentInfo,
+  count,
+  DESCRIPTION_FIELD,
+  existingFolder,
+  folderAdding,
+  list,
+  NAME_FIELD,
+  readAgentFolders,
+  stringMap,
+  strings,
+  text,
+  type AgentDirs,
+  type AgentFolder,
+} from "./agents.js";
+import { fail, ok, type AddField, type AgentInfo, type Harness, type RunEvent } from "./protocol.js";
 import { capture, oneShot } from "./process.js";
 
 const HEALTH_TIMEOUT_MS = 20_000;
@@ -40,7 +54,15 @@ const toAgent = (folder: AgentFolder): ClaudeAgent => {
   };
 };
 
-const load = async (dir: string): Promise<ClaudeAgent[]> => (await readAgentFolders(dir)).map(toAgent);
+const load = async (dirs: AgentDirs): Promise<ClaudeAgent[]> => (await readAgentFolders(dirs)).map(toAgent);
+
+const FIELDS: AddField[] = [
+  NAME_FIELD,
+  { id: "project", label: "Project folder", kind: "path", required: true, hint: "the folder Claude Code works in, on the runner's machine", placeholder: "/home/me/repos/app" },
+  { id: "allowed_tools", label: "Allowed tools", kind: "list", hint: "optional, comma-separated; without them it can't use tools that need approval", placeholder: "Read, Grep, Glob" },
+  { id: "model", label: "Model", kind: "text", hint: "optional; Claude Code's default otherwise", placeholder: "sonnet" },
+  DESCRIPTION_FIELD,
+];
 
 export const claudeArgs = (agent: ClaudeAgent, prompt: string, resume: string | undefined): string[] => [
   "-p",
@@ -115,7 +137,7 @@ export function sessionStore(file: string) {
   };
 }
 
-export function claudeCodeHarness(agentsDir: string, claude: [string, ...string[]], stateFile: string): Harness {
+export function claudeCodeHarness(dirs: AgentDirs, claude: [string, ...string[]], stateFile: string): Harness {
   const [cli, ...pre] = claude;
   const sessions = sessionStore(stateFile);
   return {
@@ -125,11 +147,11 @@ export function claudeCodeHarness(agentsDir: string, claude: [string, ...string[
     health: async () => {
       const version = await capture(cli, [...pre, "--version"], HEALTH_TIMEOUT_MS);
       if (!version.ok) return { ok: false, detail: `claude isn't usable: ${version.error}` };
-      return { ok: true, detail: `${version.stdout}, ${count((await load(agentsDir)).length, "agent", "agents")}` };
+      return { ok: true, detail: `${version.stdout}, ${count((await load(dirs)).length, "agent", "agents")}` };
     },
-    agents: async () => (await load(agentsDir)).map((a) => a.info),
+    agents: async () => (await load(dirs)).map((a) => a.info),
     prepare: async (task) => {
-      const agent = (await load(agentsDir)).find((a) => a.info.id === task.agent);
+      const agent = (await load(dirs)).find((a) => a.info.id === task.agent);
       if (!agent) return fail(`there is no Claude Code agent ${JSON.stringify(task.agent)}`);
       const isDir = await stat(agent.project).then((s) => s.isDirectory(), () => false);
       if (!isDir) return fail(`${agent.info.id}'s project folder ${agent.project} doesn't exist`);
@@ -153,5 +175,9 @@ export function claudeCodeHarness(agentsDir: string, claude: [string, ...string[
         ),
       );
     },
+    adding: folderAdding(dirs, FIELDS, async (values) => {
+      const project = await existingFolder(values.project ?? "", "Project folder");
+      return project.ok ? ok({ project: project.value, allowed_tools: list(values.allowed_tools), model: values.model }) : project;
+    }),
   };
 }

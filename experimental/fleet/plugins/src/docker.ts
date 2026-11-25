@@ -1,6 +1,6 @@
 /** Container agents: each is an image run with `docker run -i` once per task; cancel kills the container (docker/README.md). */
-import { agentInfo, count, readAgentFolders, stringMap, strings, text, type AgentFolder } from "./agents.js";
-import { fail, ok, type AgentInfo, type Harness } from "./protocol.js";
+import { agentInfo, count, DESCRIPTION_FIELD, folderAdding, list, NAME_FIELD, readAgentFolders, stringMap, strings, text, type AgentDirs, type AgentFolder } from "./agents.js";
+import { fail, ok, type AddField, type AgentInfo, type Harness } from "./protocol.js";
 import { capture, oneShot } from "./process.js";
 
 const HEALTH_TIMEOUT_MS = 10_000;
@@ -16,7 +16,18 @@ const toAgent = (folder: AgentFolder): DockerAgent | null => {
   return { info: agentInfo(folder), image, command: strings(folder.manifest, "command"), args: strings(folder.manifest, "args"), env: stringMap(folder.manifest, "env") };
 };
 
-const load = async (dir: string): Promise<DockerAgent[]> => (await readAgentFolders(dir)).map(toAgent).filter((a): a is DockerAgent => a !== null);
+const load = async (dirs: AgentDirs): Promise<DockerAgent[]> => (await readAgentFolders(dirs)).map(toAgent).filter((a): a is DockerAgent => a !== null);
+
+const FIELDS: AddField[] = [
+  NAME_FIELD,
+  { id: "image", label: "Image", kind: "text", required: true, hint: "speaks the agent contract on stdin and stdout", placeholder: "ghcr.io/acme/report-agent:1" },
+  { id: "command", label: "Command", kind: "list", hint: "optional; replaces the image's command, comma-separated", placeholder: "python, agent.py" },
+  { id: "args", label: "docker run flags", kind: "list", hint: "optional, comma-separated, e.g. --network, none", placeholder: "--network, none" },
+  DESCRIPTION_FIELD,
+];
+
+/** An image reference docker accepts: no spaces, nothing that starts like a flag. */
+const IMAGE = /^[a-z0-9][a-z0-9._/:@-]*$/i;
 
 /** A name docker accepts, unique per run, so cancel can find the container. */
 export const containerName = (taskId: string): string => `fleet-${taskId.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
@@ -35,7 +46,7 @@ export const runArgs = (agent: DockerAgent, taskId: string): string[] => [
   ...agent.command,
 ];
 
-export function dockerHarness(agentsDir: string, docker: [string, ...string[]]): Harness {
+export function dockerHarness(dirs: AgentDirs, docker: [string, ...string[]]): Harness {
   const [cli, ...pre] = docker;
   return {
     name: "Docker",
@@ -44,16 +55,21 @@ export function dockerHarness(agentsDir: string, docker: [string, ...string[]]):
     health: async () => {
       const version = await capture(cli, [...pre, "version", "--format", "{{.Server.Version}}"], HEALTH_TIMEOUT_MS);
       if (!version.ok) return { ok: false, detail: `docker isn't usable: ${version.error}` };
-      return { ok: true, detail: `Docker ${version.stdout}, ${count((await load(agentsDir)).length, "agent", "agents")}` };
+      return { ok: true, detail: `Docker ${version.stdout}, ${count((await load(dirs)).length, "agent", "agents")}` };
     },
-    agents: async () => (await load(agentsDir)).map((a) => a.info),
+    agents: async () => (await load(dirs)).map((a) => a.info),
     prepare: async (task) => {
-      const agent = (await load(agentsDir)).find((a) => a.info.id === task.agent);
+      const agent = (await load(dirs)).find((a) => a.info.id === task.agent);
       if (!agent) return fail(`there is no Docker agent ${JSON.stringify(task.agent)}`);
       const stop = async () => {
         await capture(cli, [...pre, "kill", containerName(task.taskId)], HEALTH_TIMEOUT_MS);
       };
       return ok((emit, signal) => oneShot({ command: cli, args: [...pre, ...runArgs(agent, task.taskId)], label: agent.info.id, stop }, task, emit, signal));
     },
+    adding: folderAdding(dirs, FIELDS, async (values) => {
+      const image = values.image ?? "";
+      if (!IMAGE.test(image)) return fail(`${JSON.stringify(image)} isn't an image reference, like ghcr.io/acme/agent:1`);
+      return ok({ image, command: list(values.command), args: list(values.args) });
+    }),
   };
 }

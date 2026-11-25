@@ -5,6 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { containerName, dockerHarness, runArgs, type DockerAgent } from "./docker.js";
 import type { RunEvent } from "./protocol.js";
 
+/** The plugin's shipped agents in `dir`, and the ones added from the Fleet page inside it (a folder without agent.toml). */
+const dirsOf = (dir: string) => ({ shipped: dir, added: path.join(dir, ".added") });
+
+
+
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 
@@ -39,7 +44,7 @@ const setup = () => {
     writeFileSync(path.join(root, "agents", id!, "agent.toml"), `name = "${id}"\nimage = "${image}"\n[env]\nMODEL = "m"\n`);
   });
   process.env.FAKE_DOCKER_STATE = path.join(root, "state");
-  return { root, harness: dockerHarness(path.join(root, "agents"), [process.execPath, path.join(root, "docker.cjs")]) };
+  return { root, harness: dockerHarness(dirsOf(path.join(root, "agents")), [process.execPath, path.join(root, "docker.cjs")]) };
 };
 
 const agent: DockerAgent = { info: { id: "a", name: "A" }, image: "me/agent:1", command: ["python", "agent.py"], args: ["--network", "none"], env: { MODEL: "m" } };
@@ -65,7 +70,7 @@ describe("Docker agents", () => {
   });
 
   it("are unhealthy, with the reason, when docker can't run", async () => {
-    const health = await dockerHarness(os.tmpdir(), ["/nonexistent/docker"]).health();
+    const health = await dockerHarness(dirsOf(os.tmpdir()), ["/nonexistent/docker"]).health();
     expect([health.ok, health.detail.startsWith("docker isn't usable")]).toEqual([false, true]);
   });
 
@@ -86,5 +91,19 @@ describe("Docker agents", () => {
     const started = Date.now();
     const reason = job.ok ? await job.value(() => {}, controller.signal) : job.error;
     expect([reason, Date.now() - started < 4_000]).toEqual([null, true]);
+  });
+});
+
+describe("adding Docker agents", () => {
+  it("adds an image with its command and flags", async () => {
+    const { harness } = setup();
+    const added = await harness.adding!.add({ name: "Reports", image: "ghcr.io/acme/report:1", command: "python, agent.py", args: "--network, none" });
+    const job = await harness.prepare({ taskId: "t9", contextId: "c", agent: "reports", input: "" });
+    expect([added, job.ok, (await harness.agents()).find((a) => a.id === "reports")]).toEqual([{ ok: true, value: "reports" }, true, { id: "reports", name: "Reports", added: true }]);
+  });
+
+  it("refuses something that isn't an image reference", async () => {
+    const { harness } = setup();
+    expect(await harness.adding!.add({ name: "Bad", image: "--privileged" })).toEqual({ ok: false, error: '"--privileged" isn\'t an image reference, like ghcr.io/acme/agent:1' });
   });
 });

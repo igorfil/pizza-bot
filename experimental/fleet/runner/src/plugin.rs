@@ -31,18 +31,20 @@ pub struct PluginDef {
     pub dir: PathBuf,
     pub command: String,
     pub env: BTreeMap<String, String>,
+    /// Writable folder for what the plugin keeps, e.g. agents added from the Fleet page; its own folder may be read-only.
+    pub data_dir: PathBuf,
 }
 
-pub fn parse_def(id: &str, dir: &Path, toml_text: &str) -> Result<PluginDef, String> {
+pub fn parse_def(id: &str, dir: &Path, data_root: &Path, toml_text: &str) -> Result<PluginDef, String> {
     if !manifest::valid_id(id) {
         return Err(format!("plugin folder {id:?} must be lowercase letters, digits, - or _"));
     }
     let t: PluginToml = toml::from_str(toml_text).map_err(|e| format!("{id}/plugin.toml: {e}"))?;
-    Ok(PluginDef { id: id.to_string(), name: t.name, dir: dir.to_path_buf(), command: t.command, env: t.env })
+    Ok(PluginDef { id: id.to_string(), name: t.name, dir: dir.to_path_buf(), command: t.command, env: t.env, data_dir: data_root.join(id) })
 }
 
 /// Every `<dir>/<id>/plugin.toml`; a folder that doesn't parse is skipped with a warning, and no folder means no plugins.
-pub fn load_defs(dir: &Path) -> Vec<PluginDef> {
+pub fn load_defs(dir: &Path, data_root: &Path) -> Vec<PluginDef> {
     let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
     let mut defs: Vec<PluginDef> = entries
         .filter_map(|e| e.ok())
@@ -50,7 +52,7 @@ pub fn load_defs(dir: &Path) -> Vec<PluginDef> {
         .filter(|p| p.join("plugin.toml").is_file())
         .filter_map(|p| {
             let id = p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-            let parsed = std::fs::read_to_string(p.join("plugin.toml")).map_err(|e| e.to_string()).and_then(|t| parse_def(&id, &p, &t));
+            let parsed = std::fs::read_to_string(p.join("plugin.toml")).map_err(|e| e.to_string()).and_then(|t| parse_def(&id, &p, data_root, &t));
             parsed.map_err(|e| tracing::warn!(plugin = %id, "skipping plugin: {e}")).ok()
         })
         .collect();
@@ -111,6 +113,8 @@ struct AgentJson {
     description: String,
     input: Option<InputSpec>,
     timeout_secs: Option<u64>,
+    #[serde(default)]
+    added: bool,
 }
 
 /// The agents a plugin offers, as specs it hosts; ids unsafe for URLs are dropped.
@@ -125,6 +129,7 @@ pub fn agents_from(plugin: &str, result: &Value) -> Vec<AgentSpec> {
             timeout_secs: a.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
             input: a.input,
             host: Host::Plugin(plugin.to_string()),
+            added: a.added,
         })
         .collect()
 }
@@ -138,6 +143,9 @@ pub struct PluginInfo {
     pub capabilities: Vec<String>,
     pub healthy: bool,
     pub detail: String,
+    /// What a UI asks for to add an agent through this plugin, as the plugin describes it; empty when it can't.
+    #[serde(rename = "addFields")]
+    pub add_fields: Value,
 }
 
 struct Conn {
@@ -200,6 +208,7 @@ impl Plugin {
             capabilities: vec![],
             healthy: false,
             detail: "starting".to_string(),
+            add_fields: Value::Array(vec![]),
         };
         Self { def, conn: tokio::sync::Mutex::new(None), info: RwLock::new(info) }
     }
@@ -215,11 +224,13 @@ impl Plugin {
     }
 
     fn spawn(&self) -> Result<Arc<Conn>, String> {
+        std::fs::create_dir_all(&self.def.data_dir).map_err(|e| format!("{}: {e}", self.def.data_dir.display()))?;
         let mut child = Command::new("sh")
             .arg("-c")
             .arg(&self.def.command)
             .current_dir(&self.def.dir)
             .envs(&self.def.env)
+            .env("FLEET_PLUGIN_DATA", &self.def.data_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -305,6 +316,7 @@ impl Plugin {
             info.name = d.get("name").and_then(Value::as_str).unwrap_or(&self.def.name).to_string();
             info.version = d.get("version").and_then(Value::as_str).unwrap_or_default().to_string();
             info.capabilities = d.get("capabilities").cloned().and_then(|c| serde_json::from_value(c).ok()).unwrap_or_default();
+            info.add_fields = d.pointer("/add/fields").filter(|f| f.is_array()).cloned().unwrap_or(Value::Array(vec![]));
         }
         let health = match described {
             Err(e) => Err(e),
@@ -334,6 +346,17 @@ impl Plugin {
             return Err(e);
         }
         Ok(rx)
+    }
+
+    /// Adds an agent from what a UI filled in; answers with its id.
+    pub async fn add(&self, fields: &Value) -> Result<String, String> {
+        let result = self.request("add", json!({ "fields": fields })).await?;
+        result.get("id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| format!("the {} plugin added an agent without an id", self.def.id))
+    }
+
+    /// Deletes an agent that was added through the plugin.
+    pub async fn remove(&self, agent: &str) -> Result<(), String> {
+        self.request("remove", json!({ "agent": agent })).await.map(|_| ())
     }
 
     pub async fn cancel(&self, task_id: &str) {
@@ -407,21 +430,24 @@ mod tests {
 
     #[test]
     fn reads_the_plugin_folder() {
-        let def = parse_def("python", Path::new("/p"), "name = \"Python\"\ncommand = \"python3 plugin.py\"\n[env]\nX = \"1\"").unwrap();
-        assert_eq!((def.name.as_str(), def.command.as_str(), def.env["X"].as_str()), ("Python", "python3 plugin.py", "1"));
+        let def = parse_def("python", Path::new("/p"), Path::new("/data/plugins"), "name = \"Python\"\ncommand = \"node plugin.mjs\"\n[env]\nX = \"1\"").unwrap();
+        assert_eq!(
+            (def.name.as_str(), def.command.as_str(), def.env["X"].as_str(), def.data_dir),
+            ("Python", "node plugin.mjs", "1", PathBuf::from("/data/plugins/python"))
+        );
     }
 
     #[test]
     fn turns_listed_agents_into_specs_it_hosts() {
         let result = json!({"agents": [
-            {"id": "slow", "name": "Slow", "timeoutSecs": 30, "input": {"label": "Plan"}},
+            {"id": "slow", "name": "Slow", "timeoutSecs": 30, "input": {"label": "Plan"}, "added": true},
             {"id": "Bad Id", "name": "x"}
         ]});
         let specs = agents_from("python", &result);
         let s = &specs[0];
         assert_eq!(
-            (specs.len(), s.id.as_str(), s.timeout_secs, s.input.as_ref().map(|i| i.label.as_str()), &s.host),
-            (1, "slow", 30, Some("Plan"), &Host::Plugin("python".into()))
+            (specs.len(), s.id.as_str(), s.timeout_secs, s.input.as_ref().map(|i| i.label.as_str()), &s.host, s.added),
+            (1, "slow", 30, Some("Plan"), &Host::Plugin("python".into()), true)
         );
     }
 
@@ -432,7 +458,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("bad")).unwrap();
         std::fs::write(dir.join("good/plugin.toml"), "name = \"Good\"\ncommand = \"true\"").unwrap();
         std::fs::write(dir.join("bad/plugin.toml"), "name = ").unwrap();
-        let ids: Vec<String> = load_defs(&dir).into_iter().map(|d| d.id).collect();
+        let ids: Vec<String> = load_defs(&dir, &dir.join("data")).into_iter().map(|d| d.id).collect();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(ids, vec!["good".to_string()]);
     }
@@ -445,16 +471,21 @@ mod tests {
         let script = r#"while read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
-    *'"describe"'*) echo "{\"id\":$id,\"result\":{\"name\":\"Echo\",\"version\":\"1\",\"capabilities\":[\"cancel\"]}}" ;;
+    *'"describe"'*) echo "{\"id\":$id,\"result\":{\"name\":\"Echo\",\"version\":\"1\",\"capabilities\":[\"cancel\",\"add\"],\"add\":{\"fields\":[{\"id\":\"name\",\"label\":\"Name\"}]}}}" ;;
+    *'"add"'*) echo "$FLEET_PLUGIN_DATA" > data-dir.txt; echo "{\"id\":$id,\"result\":{\"id\":\"made\"}}" ;;
+    *'"remove"'*) echo "{\"id\":$id,\"error\":\"no added agent x\"}" ;;
     *'"health"'*) echo "{\"id\":$id,\"result\":{\"ok\":true,\"detail\":\"fine\"}}" ;;
     *'"agents"'*) echo "{\"id\":$id,\"result\":{\"agents\":[{\"id\":\"echo\",\"name\":\"Echo\"}]}}" ;;
     *'"run"'*) echo "{\"id\":$id,\"result\":{}}"; echo '{"taskId":"t1","status":"working"}'; echo '{"taskId":"t1","artifact":{"name":"reply","text":"hi"}}'; echo '{"taskId":"t1","done":true}' ;;
   esac
 done"#;
         std::fs::write(dir.join("plugin.sh"), script).unwrap();
-        let plugin = Plugin::new(PluginDef { id: "echo".into(), name: "Echo".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new() });
+        let plugin = Plugin::new(PluginDef { id: "echo".into(), name: "Echo".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new(), data_dir: dir.join("data") });
         plugin.check().await;
         let agents: Vec<String> = plugin.agents().await.unwrap().into_iter().map(|a| a.id).collect();
+        let added = plugin.add(&json!({"name": "Made"})).await;
+        let removed = plugin.remove("x").await;
+        let data_dir = std::fs::read_to_string(dir.join("data-dir.txt")).unwrap_or_default();
         let mut rx = plugin.run("t1", "c1", "echo", "hello").await.unwrap();
         let mut events = vec![];
         while let Some(e) = rx.recv().await {
@@ -467,12 +498,16 @@ done"#;
         let info = plugin.info();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(
-            (info.healthy, info.version.as_str(), info.capabilities, agents, events),
+            (info.healthy, info.version.as_str(), info.capabilities, info.add_fields, agents, added, removed, data_dir.trim().to_string(), events),
             (
                 true,
                 "1",
-                vec!["cancel".to_string()],
+                vec!["cancel".to_string(), "add".to_string()],
+                json!([{"id": "name", "label": "Name"}]),
                 vec!["echo".to_string()],
+                Ok("made".to_string()),
+                Err("no added agent x".to_string()),
+                dir.join("data").display().to_string(),
                 vec![TaskEvent::Status("working".into()), TaskEvent::Artifact { name: "reply".into(), text: "hi".into() }, TaskEvent::Done]
             )
         );
@@ -483,7 +518,7 @@ done"#;
         let dir = std::env::temp_dir().join(format!("fleet-plugin-crash-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("plugin.sh"), "read -r line; id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\\([0-9]*\\).*/\\1/p'); echo \"{\\\"id\\\":$id,\\\"result\\\":{}}\"; exit 3").unwrap();
-        let plugin = Plugin::new(PluginDef { id: "crash".into(), name: "Crash".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new() });
+        let plugin = Plugin::new(PluginDef { id: "crash".into(), name: "Crash".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new(), data_dir: dir.join("data") });
         let mut rx = plugin.run("t1", "c1", "x", "").await.unwrap();
         let (first, second) = (rx.recv().await, rx.recv().await);
         let _ = std::fs::remove_dir_all(&dir);

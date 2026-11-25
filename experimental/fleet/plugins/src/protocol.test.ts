@@ -110,3 +110,40 @@ describe("serve", () => {
     expect(s.lines.filter((l) => l.taskId)).toEqual([{ taskId: "t1", done: true }]);
   });
 });
+
+describe("adding agents through serve", () => {
+  const adding = {
+    fields: [{ id: "name", label: "Name", kind: "text" as const, required: true }],
+    add: async (values: Record<string, string>) => (values.name ? ok(`id-${values.name}`) : fail("Name is required")),
+    remove: async (id: string) => (id === "id-x" ? ok(null) : fail(`no added agent ${id}`)),
+  };
+
+  it("describes what it asks for, and says it can add", async () => {
+    const s = session(harness(quick, { adding }));
+    expect((await s.reply(s.request("describe")))?.result).toEqual({
+      name: "Test",
+      version: "7",
+      capabilities: ["cancel", "add"],
+      add: { fields: [{ id: "name", label: "Name", kind: "text", required: true }] },
+    });
+  });
+
+  it("adds an agent from trimmed values and answers with its id", async () => {
+    const s = session(harness(quick, { adding }));
+    expect(await s.reply(s.request("add", { fields: { name: "  x " } }))).toEqual({ id: 1, result: { id: "id-x" } });
+  });
+
+  it("passes on why an agent can't be added or removed", async () => {
+    const s = session(harness(quick, { adding }));
+    const [a, r] = [s.request("add", { fields: {} }), s.request("remove", { agent: "id-y" })];
+    expect([await s.reply(a), await s.reply(r)]).toEqual([
+      { id: a, error: "Name is required" },
+      { id: r, error: "no added agent id-y" },
+    ]);
+  });
+
+  it("refuses to add through a plugin that can't", async () => {
+    const s = session(harness(quick));
+    expect(await s.reply(s.request("add", { fields: { name: "x" } }))).toEqual({ id: 1, error: "Test can't add agents" });
+  });
+});

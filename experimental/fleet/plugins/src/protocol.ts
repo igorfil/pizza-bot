@@ -4,8 +4,19 @@ import type { Readable, Writable } from "node:stream";
 
 export type Input = { label: string; hint?: string; example?: string };
 
-/** What the runner learns about an agent from `agents`. */
-export type AgentInfo = { id: string; name: string; description?: string; input?: Input; timeoutSecs?: number };
+/** What the runner learns about an agent from `agents`; `added`: added through the plugin, so removing it deletes it. */
+export type AgentInfo = { id: string; name: string; description?: string; input?: Input; timeoutSecs?: number; added?: boolean };
+
+/** One thing a UI asks for to add an agent: `path` is a folder on the runner's machine, `list` comma-separated words. */
+export type AddField = { id: string; label: string; kind: "text" | "path" | "list"; required?: boolean; hint?: string; placeholder?: string };
+
+/** Adding agents through a plugin: what to ask, and what to do with the answers. */
+export interface Adding {
+  fields: AddField[];
+  /** Resolves to the new agent's id. */
+  add(values: Record<string, string>): Promise<Result<string>>;
+  remove(agentId: string): Promise<Result<null>>;
+}
 
 export type RunEvent = { status: string } | { artifact: { name: string; text: string } } | { error: string };
 
@@ -33,6 +44,8 @@ export interface Harness {
   agents(): Promise<AgentInfo[]>;
   /** Checks the task can start (the agent exists, its settings are usable) and returns the job that runs it. */
   prepare(task: Task): Promise<Result<Job>>;
+  /** Present when agents can be added from the Fleet page. */
+  adding?: Adding;
 }
 
 export const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -82,7 +95,13 @@ export function serve(harness: Harness, io: Io = { input: process.stdin, output:
   };
 
   const methods: Record<string, (params: Record<string, unknown>) => Promise<Result<unknown>>> = {
-    describe: async () => ok({ name: harness.name, version: harness.version, capabilities: harness.capabilities }),
+    describe: async () =>
+      ok({
+        name: harness.name,
+        version: harness.version,
+        capabilities: harness.adding ? [...harness.capabilities, "add"] : harness.capabilities,
+        ...(harness.adding ? { add: { fields: harness.adding.fields } } : {}),
+      }),
     health: async () => ok(await harness.health()),
     agents: async () => ok({ agents: await harness.agents() }),
     run: async (params) => {
@@ -93,6 +112,14 @@ export function serve(harness: Harness, io: Io = { input: process.stdin, output:
       start(task.value, job.value);
       return ok({});
     },
+    add: async (params) => {
+      if (!harness.adding) return fail(`${harness.name} can't add agents`);
+      const raw = isRecord(params.fields) ? params.fields : {};
+      const values = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, str(v).trim()]));
+      const id = await harness.adding.add(values);
+      return id.ok ? ok({ id: id.value }) : id;
+    },
+    remove: async (params) => (harness.adding ? harness.adding.remove(str(params.agent)) : fail(`${harness.name} can't remove agents`)),
     cancel: async (params) => {
       runs.get(str(params.taskId))?.controller.abort();
       return ok({});

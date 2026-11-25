@@ -21,7 +21,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, delete, get, put};
+use axum::routing::{any, delete, get, post, put};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -45,6 +45,8 @@ struct Config {
     engine: Arc<Engine>,
     /// Harness plugins for external agents (plugins/README.md); none when the folder is missing.
     plugins_dir: PathBuf,
+    /// One writable folder per plugin, beside the task store: `<data>/plugins/<id>`.
+    plugin_data: PathBuf,
     /// The runner's MCP library; beside the task store unless `RUNNER_MCP_CONFIG` says otherwise.
     mcp_config: PathBuf,
 }
@@ -71,6 +73,7 @@ fn load_config() -> Result<Config, String> {
         location: std::env::var("RUNNER_LOCATION").ok().filter(|l| !l.is_empty()),
         engine: Arc::new(Engine::from_vars(std::env::vars())),
         plugins_dir: PathBuf::from(env_or("RUNNER_PLUGINS_DIR", "plugins")),
+        plugin_data: data_dir.join("plugins"),
         mcp_config: std::env::var("RUNNER_MCP_CONFIG").map(PathBuf::from).unwrap_or_else(|_| data_dir.join("mcp.json")),
         bind,
     })
@@ -138,6 +141,7 @@ fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
         "input": s.input,
         "url": agent_url(cfg, s),
         "created": is_created(cfg, s),
+        "added": s.added,
         "kind": if s.builtin() { "builtin" } else { "external" },
         "harness": match &s.host { Host::Engine(_) => PIZZA_BOT, Host::Plugin(plugin) => plugin },
         "mcp": s.engine().map(|e| e.mcp.clone()).unwrap_or_default(),
@@ -279,15 +283,63 @@ impl App {
         tracing::info!(plugin = %plugin, agents = ?agents.specs.iter().filter(|s| ours(s)).map(|s| &s.id).collect::<Vec<_>>(), "plugin agents changed");
     }
 
-    /// Health and agent lists of every plugin; a plugin that exited starts again here.
+    /// A plugin's health and agent list; a plugin that exited starts again here.
+    async fn check_plugin(&self, plugin: &plugin::Plugin) {
+        plugin.check().await;
+        match plugin.agents().await {
+            Ok(listed) => self.set_plugin_agents(&plugin.def.id, listed),
+            Err(e) => tracing::warn!(plugin = %plugin.def.id, "couldn't list agents: {e}"),
+        }
+    }
+
     async fn check_plugins(&self) {
         for plugin in self.plugins.all() {
-            plugin.check().await;
-            match plugin.agents().await {
-                Ok(listed) => self.set_plugin_agents(&plugin.def.id, listed),
-                Err(e) => tracing::warn!(plugin = %plugin.def.id, "couldn't list agents: {e}"),
-            }
+            self.check_plugin(&plugin).await;
         }
+    }
+
+    /// Adds an agent through its plugin from what a UI filled in, and serves it right away.
+    async fn add_plugin_agent(&self, plugin_id: &str, body: &Value) -> Result<Value, ApiError> {
+        let plugin = self.plugins.get(plugin_id).ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("this runner has no {plugin_id} plugin")))?;
+        let fields = body.get("fields").filter(|f| f.is_object()).ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "body must be {\"fields\": {...}}"))?;
+        let id = plugin.add(fields).await.map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+        self.check_plugin(&plugin).await;
+        let served = {
+            let mut agents = self.agents.write().unwrap();
+            if !agents.specs.iter().any(|s| s.id == id) {
+                return Err(api_error(StatusCode::CONFLICT, format!("the {plugin_id} plugin added {id:?}, but another agent already has that id")));
+            }
+            agents.served.insert(id.clone());
+            agents.served.clone()
+        };
+        self.save_served(&served)?;
+        tracing::info!(plugin = %plugin_id, agent = %id, "plugin agent added");
+        let mut index = self.index();
+        index["created"] = json!(id);
+        Ok(index)
+    }
+
+    /// The plugin that added this agent, when it was added from the Fleet page; removing it deletes it there.
+    fn added_through(&self, id: &str) -> Option<Arc<plugin::Plugin>> {
+        let agents = self.agents.read().unwrap();
+        let spec = agents.specs.iter().find(|s| s.id == id && s.added)?;
+        match &spec.host {
+            Host::Plugin(p) => self.plugins.get(p),
+            Host::Engine(_) => None,
+        }
+    }
+
+    async fn remove_plugin_agent(&self, plugin: &plugin::Plugin, id: &str) -> Result<Value, ApiError> {
+        plugin.remove(id).await.map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
+        self.check_plugin(plugin).await;
+        let served = {
+            let mut agents = self.agents.write().unwrap();
+            agents.served.remove(id);
+            agents.served.clone()
+        };
+        self.save_served(&served)?;
+        tracing::info!(plugin = %plugin.def.id, agent = %id, "plugin agent removed");
+        Ok(self.index())
     }
 
     fn parse_agent(&self, body: &Value) -> Result<created::NewAgent, ApiError> {
@@ -423,7 +475,17 @@ async fn delete_agent(State(app): State<Arc<App>>, headers: HeaderMap, Path(id):
     if !authorized(&headers, &app.bearer) {
         return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
     }
-    app.delete(&id).map(Json)
+    match app.added_through(&id) {
+        Some(plugin) => app.remove_plugin_agent(&plugin, &id).await.map(Json),
+        None => app.delete(&id).map(Json),
+    }
+}
+
+async fn post_plugin_agent(State(app): State<Arc<App>>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !authorized(&headers, &app.bearer) {
+        return Err(api_error(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    app.add_plugin_agent(&id, &body).await.map(|index| (StatusCode::CREATED, Json(index)))
 }
 
 /// Routes `/agents/<id>/<rest>` to that agent's router, so agents can be added while the runner runs.
@@ -491,7 +553,7 @@ async fn main() -> Result<(), String> {
     if orphans > 0 {
         tracing::warn!(orphans, "marked tasks interrupted by restart as failed");
     }
-    let plugins = Plugins::new(plugin::load_defs(&cfg.plugins_dir));
+    let plugins = Plugins::new(plugin::load_defs(&cfg.plugins_dir, &cfg.plugin_data));
     let saved = sqlite.served_agents().map_err(|e| e.to_string())?;
     let app = Arc::new(App {
         bearer: Arc::new(format!("Bearer {}", cfg.token)),
@@ -526,6 +588,7 @@ async fn main() -> Result<(), String> {
         .route("/agents", get(|State(app): State<Arc<App>>| async move { Json(app.index()) }).put(put_agents).post(post_agents))
         .route("/agents/{id}", delete(delete_agent).put(put_agent))
         .route("/mcp-servers/{id}", put(put_mcp_server).delete(delete_mcp_server))
+        .route("/plugins/{id}/agents", post(post_plugin_agent))
         .route("/agents/{id}/{*rest}", any(agent_request))
         .with_state(app.clone());
 

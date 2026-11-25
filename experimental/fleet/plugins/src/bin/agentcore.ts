@@ -1,8 +1,7 @@
-import path from "node:path";
 import { BedrockAgentCoreClient } from "@aws-sdk/client-bedrock-agentcore";
 import { agentCoreHarness } from "../agentcore.js";
 import { serve } from "../protocol.js";
-import { pluginDir } from "./here.js";
+import { agentDirs } from "./here.js";
 
 const clients = new Map<string, BedrockAgentCoreClient>();
 const client = (region: string): BedrockAgentCoreClient => {
@@ -21,4 +20,4 @@ const hasCredentials = (): Promise<boolean> =>
       () => false,
     );
 
-await serve(agentCoreHarness(process.env.AGENTCORE_AGENTS_DIR ?? path.join(pluginDir(import.meta.url), "agents"), client, hasCredentials));
+await serve(agentCoreHarness(agentDirs(import.meta.url, process.env.AGENTCORE_AGENTS_DIR), client, hasCredentials));

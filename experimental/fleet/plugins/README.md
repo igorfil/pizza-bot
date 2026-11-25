@@ -60,11 +60,13 @@ lines below is ignored; stderr goes to the runner's log.
 
 | Method | Params | Result |
 |---|---|---|
-| `describe` | none | `{name, version, capabilities: [...]}`; `cancel` is the one capability the runner reads today |
+| `describe` | none | `{name, version, capabilities: [...], add?: {fields: [...]}}`; `add` in `capabilities` and `add.fields` mean agents can be added from the Fleet page (below) |
 | `health` | none | `{ok, detail}`; shown on the runner in the Fleet page |
-| `agents` | none | `{agents: [{id, name, description?, input?: {label, hint, example}, timeoutSecs?}]}` |
+| `agents` | none | `{agents: [{id, name, description?, input?: {label, hint, example}, timeoutSecs?, added?}]}`; `added`: added through `add`, so removing it deletes it |
 | `run` | `{taskId, contextId, agent, input}` | `{}` once the run started; an error if it can't start |
 | `cancel` | `{taskId}` | `{}`; then the run ends with `done` |
+| `add` | `{fields: {<id>: "<value>"}}` | `{id}` of the new agent; an error says what to fix |
+| `remove` | `{agent}` | `{}`; refused for agents it didn't add, which can only be disabled |
 
 **Run events** carry the task's `taskId` and no `id`:
 
@@ -78,6 +80,13 @@ lines below is ignored; stderr goes to the runner's log.
 Every run ends with `done`, canceled ones too. The runner owns the timeout (`timeoutSecs`, default
 600): it sends `cancel` and fails the run. Agent ids must be lowercase letters, digits, `-` or `_`;
 an id another agent on the runner already has is ignored.
+
+**Adding agents.** "Add agent → Add existing" on the Fleet page lists every plugin that offers
+`add`, and asks for its `add.fields`: `{id, label, kind, required?, hint?, placeholder?}`, where
+`kind` is `text`, `path` (a folder on the runner's machine) or `list` (comma-separated words). The
+runner sends the answers with `add`, serves the new agent right away, and sends `remove` when it is
+deleted. A plugin keeps added agents in `FLEET_PLUGIN_DATA`, a writable folder the runner gives each
+plugin (`<data>/plugins/<id>` beside its task store), since its own folder may be read-only.
 
 **Lifecycle.** The runner asks `describe`, `health` and `agents` at startup and every 30s, so agents
 a plugin adds or drops show up without a restart. If the plugin exits, its runs fail with "the

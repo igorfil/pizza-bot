@@ -5,6 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { claudeArgs, claudeCodeHarness, NO_INPUT, translate, type ClaudeAgent } from "./claude-code.js";
 import type { RunEvent } from "./protocol.js";
 
+/** The plugin's shipped agents in `dir`, and the ones added from the Fleet page inside it (a folder without agent.toml). */
+const dirsOf = (dir: string) => ({ shipped: dir, added: path.join(dir, ".added") });
+
+
+
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 
@@ -73,24 +78,25 @@ describe("Claude Code's stream", () => {
   });
 });
 
-describe("Claude Code agents", () => {
-  const setup = () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "fleet-claude-"));
-    dirs.push(root);
-    writeFileSync(path.join(root, "claude.cjs"), FAKE_CLAUDE);
-    mkdirSync(path.join(root, "agents", "ask"), { recursive: true });
-    writeFileSync(path.join(root, "agents", "ask", "agent.toml"), 'name = "Ask"\nproject = "."\n');
-    process.env.FAKE_CLAUDE_STATE = root;
-    const harness = claudeCodeHarness(path.join(root, "agents"), [process.execPath, path.join(root, "claude.cjs")], path.join(root, "sessions.json"));
-    const run = async (taskId: string, contextId: string, input: string) => {
-      const job = await harness.prepare({ taskId, contextId, agent: "ask", input });
-      const events: RunEvent[] = [];
-      const reason = job.ok ? await job.value((e) => events.push(e), new AbortController().signal) : job.error;
-      return { events, reason };
-    };
-    const calls = () => readFileSync(path.join(root, "calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
-    return { harness, run, calls };
+const setup = () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "fleet-claude-"));
+  dirs.push(root);
+  writeFileSync(path.join(root, "claude.cjs"), FAKE_CLAUDE);
+  mkdirSync(path.join(root, "agents", "ask"), { recursive: true });
+  writeFileSync(path.join(root, "agents", "ask", "agent.toml"), 'name = "Ask"\nproject = "."\n');
+  process.env.FAKE_CLAUDE_STATE = root;
+  const harness = claudeCodeHarness(dirsOf(path.join(root, "agents")), [process.execPath, path.join(root, "claude.cjs")], path.join(root, "sessions.json"));
+  const run = async (taskId: string, contextId: string, input: string) => {
+    const job = await harness.prepare({ taskId, contextId, agent: "ask", input });
+    const events: RunEvent[] = [];
+    const reason = job.ok ? await job.value((e) => events.push(e), new AbortController().signal) : job.error;
+    return { events, reason };
   };
+  const calls = () => readFileSync(path.join(root, "calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
+  return { harness, run, calls };
+};
+
+describe("Claude Code agents", () => {
 
   it("relay a run", async () => {
     expect(await setup().run("t1", "c1", "hi")).toEqual({
@@ -115,7 +121,25 @@ describe("Claude Code agents", () => {
   it("refuse to run in a project folder that doesn't exist", async () => {
     const { harness } = setup();
     const job = await harness.prepare({ taskId: "t1", contextId: "c", agent: "ask", input: "" });
-    const missing = claudeCodeHarness(path.join(os.tmpdir(), "no-such-agents"), ["claude"], "/tmp/x.json");
+    const missing = claudeCodeHarness(dirsOf(path.join(os.tmpdir(), "no-such-agents")), ["claude"], "/tmp/x.json");
     expect([job.ok, (await missing.prepare({ taskId: "t", contextId: "c", agent: "ask", input: "" })).ok]).toEqual([true, false]);
+  });
+});
+
+describe("adding Claude Code agents", () => {
+  it("adds a project folder with its allowed tools", async () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), "fleet-claude-project-"));
+    dirs.push(project);
+    const { harness, run, calls } = setup();
+    const added = await harness.adding!.add({ name: "Repo helper", project, allowed_tools: "Read, Grep" });
+    await run("t1", "c1", "hi");
+    const job = await harness.prepare({ taskId: "t2", contextId: "c2", agent: "repo-helper", input: "hi" });
+    if (job.ok) await job.value(() => {}, new AbortController().signal);
+    expect([added, calls().at(-1)?.slice(-2)]).toEqual([{ ok: true, value: "repo-helper" }, ["--allowedTools", "Read,Grep"]]);
+  });
+
+  it("refuses a project folder that doesn't exist", async () => {
+    const { harness } = setup();
+    expect((await harness.adding!.add({ name: "X", project: "/no/such/repo" })).ok).toBe(false);
   });
 });

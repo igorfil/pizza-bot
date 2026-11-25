@@ -55,6 +55,8 @@ pub struct AgentSpec {
     pub timeout_secs: u64,
     pub input: Option<InputSpec>,
     pub host: Host,
+    /// Added from the Fleet page through its plugin, so removing it deletes it instead of only disabling it.
+    pub added: bool,
 }
 
 impl AgentSpec {
@@ -92,6 +94,7 @@ pub fn parse(id: &str, dir: &Path, toml_text: &str) -> Result<AgentSpec, String>
         timeout_secs: m.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
         input: m.input,
         host: Host::Engine(EngineAgent { dir: dir.to_path_buf(), env: m.env, mcp: m.mcp }),
+        added: false,
     })
 }
 
