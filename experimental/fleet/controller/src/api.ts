@@ -9,6 +9,8 @@ import type { SecretStore } from "./vault.js";
 
 const KEEPALIVE_MS = 15_000;
 
+const MAX_LABEL = 40;
+
 const LOOPBACK = /^https?:\/\/(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?(\/|$)/;
 
 /** What a UI may know about a runner's transport: its kind, the EC2 instance, and whether it is this machine. */
@@ -182,6 +184,12 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
       return str(p.agent) ? { type, agent: p.agent } : "DeleteAgent needs agent (<runner>/<id>)";
     case "RemoveRunner":
       return str(p.name) ? { type, name: p.name, teardown: p.teardown === true || p.teardown === "true" } : "RemoveRunner needs name";
+    case "RenameRunner": {
+      if (!str(p.name)) return "RenameRunner needs name, label";
+      const label = typeof p.label === "string" ? p.label.trim() : "";
+      if (label.length > MAX_LABEL) return `A runner name can be at most ${MAX_LABEL} characters`;
+      return { type, name: p.name, label: label === "" || label === p.name ? null : label };
+    }
     case "StartGuide":
       return str(p.guide) ? { type, sessionId: crypto.randomUUID(), guide: p.guide } : "StartGuide needs guide";
     case "GuideInput":

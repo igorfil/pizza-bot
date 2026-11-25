@@ -558,6 +558,23 @@ describe("updating a runner", () => {
   });
 });
 
+describe("renaming a runner", () => {
+  test("sets its display name and keeps its agents' keys", () => {
+    const [model] = run([...withRunningTask, { type: "RenameRunner", name: "local", label: "Home laptop" }]);
+    expect([model.runners.local?.label, Object.keys(model.agents), model.tasks.t1?.runner]).toEqual(["Home laptop", ["local/sys"], "local"]);
+  });
+
+  test("an empty label goes back to the id", () => {
+    const [model] = run([...withRunningTask, { type: "RenameRunner", name: "local", label: "Home" }, { type: "RenameRunner", name: "local", label: null }]);
+    expect(model.runners.local?.label).toBeNull();
+  });
+
+  test("an unknown runner is reported", () => {
+    const [model] = run([{ type: "RenameRunner", name: "nope", label: "x" }]);
+    expect(model.notifications.at(-1)?.text).toBe("unknown runner nope");
+  });
+});
+
 describe("removing a runner", () => {
   const origin = { guide: "aws", summary: "EC2 i-1", teardown: { label: "terminate i-1", data: { instanceId: "i-1" } } };
   const awsRunner: Msg = { ...addLocal, origin } as Msg;

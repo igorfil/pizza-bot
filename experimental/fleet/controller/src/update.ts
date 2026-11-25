@@ -487,6 +487,12 @@ export const update = (model: Model, msg: Msg): Result => {
     case "RemoveRunner":
       return removeRunner(model, msg.name, msg.teardown);
 
+    case "RenameRunner": {
+      const runner = model.runners[msg.name];
+      if (!runner) return [notify(model, "error", `unknown runner ${msg.name}`), []];
+      return [setRunner(model, { ...runner, label: msg.label }), []];
+    }
+
     case "RunnerRetired":
       return [notify(model, msg.ok ? "info" : "error", msg.text), []];
 

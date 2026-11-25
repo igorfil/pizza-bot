@@ -206,6 +206,7 @@ Intents (only these are accepted over the API; world Msgs are rejected):
 | `EditAgent` | `agent` (`<runner>/<id>`), `name`, `model`, `systemPrompt`; rewrites a created agent under the same id. Runs in progress finish with the old spec |
 | `UpdateRunner` | `name`, plus any of `url`/`transport`, `token`; the link reopens with the new config |
 | `RemoveRunner` | `name` |
+| `RenameRunner` | `name`, `label` (display name, up to 40 characters; empty = back to `name`). The id `name` and agent keys don't change |
 | `CreateTask` | `agent` (`<runner>/<id>`), `prompt` (may be empty) |
 | `CancelTask` | `taskId` |
 | `AckInbox` | `taskId`: mark a finished run as dealt with |

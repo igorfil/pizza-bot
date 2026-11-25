@@ -69,6 +69,8 @@ export type AgentInfo = {
 
 /** A host process: one per machine. Health and reconnect are per runner; the link comes first. */
 export type Runner = NewRunner & {
+  /** Display name set with RenameRunner; `name` stays the id that agent keys and tasks use. */
+  label?: string | null;
   link: Link;
   linkEpoch: number;
   linkFailures: number;
@@ -248,6 +250,7 @@ export type IntentMsg =
   | ({ type: "AddRunner" } & NewRunner)
   | { type: "UpdateRunner"; name: string; transport: TransportSpec | null; token: SecretRef | null }
   | { type: "RemoveRunner"; name: string; teardown: boolean }
+  | { type: "RenameRunner"; name: string; label: string | null }
   | { type: "AddAgents"; runner: string; agents: string[] }
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
   | { type: "SetMcpServer"; runner: string; id: string; entry: Record<string, unknown> }
@@ -327,6 +330,7 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "AddRunner",
   "UpdateRunner",
   "RemoveRunner",
+  "RenameRunner",
   "AddAgents",
   "CreateAgent",
   "SetMcpServer",

@@ -248,6 +248,20 @@ describe("runner transports", () => {
   it("UpdateRunner with nothing to change is refused", async () => {
     expect((await post({ msg_id: "m1", type: "UpdateRunner", payload: { name: "laptop" } })).status).toBe(400);
   });
+
+  it.each([
+    ["  Home laptop ", "Home laptop"],
+    ["", null],
+    ["laptop", null],
+  ])("RenameRunner to %j logs label %j", async (label, logged) => {
+    const sent: Msg[] = [];
+    await post({ msg_id: "m1", type: "RenameRunner", payload: { name: "laptop", label } }, sent);
+    expect(sent[0]).toEqual({ type: "RenameRunner", name: "laptop", label: logged });
+  });
+
+  it("RenameRunner refuses a name that's too long", async () => {
+    expect((await post({ msg_id: "m1", type: "RenameRunner", payload: { name: "laptop", label: "x".repeat(41) } })).status).toBe(400);
+  });
 });
 
 describe("transport facts for UIs", () => {
