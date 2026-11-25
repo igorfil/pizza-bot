@@ -12,6 +12,9 @@ Related documents:
 - [README.md](README.md): how to run it, the API, config.
 - [agents/README.md](agents/README.md): the agent contract.
 - [docs/UI.md](docs/UI.md), [docs/DEPLOY.md](docs/DEPLOY.md), [docs/LEARNINGS.md](docs/LEARNINGS.md).
+- C4 diagrams in Mermaid: [system context](design/c1-system-context.md),
+  [containers](design/c2-containers.md), [Controller](design/c3-controller.md),
+  [Runner](design/c3-runner.md).
 
 History: built as a standalone repo (`agent-fleet`: Bun Controller, Rust runner, a TUI, and the
 pizza-bot screen as a patch). It was then imported into pizza-bot-experimental with its git
