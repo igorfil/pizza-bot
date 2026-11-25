@@ -293,6 +293,9 @@ gotchas are in `docs/LEARNINGS.md`.
 
 - 🔮 The MCP shim may become the most-used "UI": people may prefer their main assistant to dispatch and watch tasks over yet another dashboard.
 - 🔮 MCP's Multi Round-Trip Requests and handle-based state blur the "agent as MCP tool" vs A2A line. Likely: MCP-wrapped agents for internal, A2A for crossing org/vendor boundaries.
+- 🔮 An MCP gateway, so every agent can use every MCP server: built-in agents, plugin agents (Python, Docker, Claude Code, AgentCore) and agents on any runner, instead of each runner configuring its own servers for its built-in agents only.
+- 🔮 Memory as a plugin behind that gateway: agents reach memory as MCP tools, so the memory implementation can be swapped without changing the agents.
+- 🔮 Rewrite the Controller in Rust, like the runner.
 
 ## 17. References
 
