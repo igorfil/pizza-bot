@@ -2358,9 +2358,6 @@ button.fleet-inline-run:focus-visible { outline: 2px solid var(--brand); outline
 .fleet-mcp-chip.lit { border-color: var(--brand); background: color-mix(in oklch, var(--brand) 14%, var(--panel)); color: var(--brand); }
 .fleet-mcp-chip.lit svg { color: var(--brand); }
 .fleet-mcp-chip.faded { opacity: .4; }
-.fleet-mcp-chip.add { border-style: dashed; background: transparent; color: var(--dim); font-family: inherit; }
-.fleet-mcp-chip.add:hover:not(:disabled) { color: var(--text); }
-.fleet-mcp-chip.add:disabled { cursor: default; opacity: .5; }
 .fleet-hover-reveal { opacity: 0; transition: opacity .15s; }
 .fleet-runner:is(:hover, :focus-within) .fleet-hover-reveal { opacity: 1; }
 .fleet-details { width: min(680px, calc(100vw - 32px)); height: min(680px, calc(100vh - 64px)); overflow: hidden; }

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { AlarmClock, ChevronDown, ChevronUp, LoaderCircle, Play, Plug, Plus, RotateCcw, Server, Settings, Square, Trash2, X } from "lucide-react";
-import { AddAgentDialog, mcpServerSummary, runsTools } from "./AddAgentDialog.js";
+import { AddAgentDialog, mcpServerSummary } from "./AddAgentDialog.js";
 import { AgentDetailsDialog, RunnerDetailsDialog, RunnerPill, type RunnerTab } from "./FleetDetails.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
@@ -174,7 +174,7 @@ export function RunnerGroup({
           )}
         </span>
       </header>
-      {runsTools(runner) && (
+      {servers.length > 0 && (
         <ul className="fleet-mcp-chips" aria-label={`MCP servers on ${runnerLabel(runner)}`}>
           {servers.map((id) => (
             <li key={id}>
@@ -183,11 +183,6 @@ export function RunnerGroup({
               </button>
             </li>
           ))}
-          <li className={servers.length > 0 ? "fleet-hover-reveal" : undefined}>
-            <button type="button" className="fleet-mcp-chip add" onClick={() => setDetails("mcp")} disabled={runner.status !== "healthy"}>
-              <Plus size={12} aria-hidden="true" /> {servers.length > 0 ? "MCP server" : "Add MCP server"}
-            </button>
-          </li>
         </ul>
       )}
       {change?.error && (

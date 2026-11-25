@@ -221,11 +221,7 @@ export function RunnerDetailsDialog({
       id: "mcp",
       label: "MCP servers",
       count: Object.keys(runner.mcpServers ?? {}).length,
-      content: runsTools(runner) ? (
-        <McpServersPanel runner={runner} agents={agents} send={send} onClose={onClose} />
-      ) : (
-        <p className="fleet-muted">{runnerLabel(runner)}&apos;s harness doesn&apos;t give agents MCP servers.</p>
-      ),
+      content: <McpServersPanel runner={runner} agents={agents} send={send} onClose={onClose} />,
     },
     { id: "secrets", label: "Secrets", content: <SecretsSoon runner={runner} /> },
   ];
