@@ -44,8 +44,10 @@ controller/src/
                       Manager via @napi-rs/keyring) and in-memory
   transport.ts        Transport interface, factory, direct + aws_ssm implementations
   guides/
-    guide.ts          RunnerGuide interface, StepView schema, ports
-    registry.ts       the list of guides (the extension point)
+    guide.ts          RunnerGuide interface, GuidePorts
+    plugin.ts         the plugin contract: GuidePlugin, PluginHost, GuidePluginFactory (the extension point)
+    registry.ts       the built-in plugins (aws, manual)
+    load.ts           loads the plugins copied into runner-guides/ (../runner-guides/README.md)
     manual.ts         name + URL + token
     aws/              guide.ts (steps) · ec2.ts (Ec2Host on AWS SDK v3) · install.ts (bootstrap script)
                       · profiles.ts (~/.aws/config and ~/.aws/credentials)
@@ -75,7 +77,8 @@ interface SecretStore {
 type TransportSpec =
   | { kind: "direct"; url: string }
   | { kind: "aws_ssm"; region: string; instanceId: string; remotePort: number; credentials: AwsCredentials }
-  | { kind: "ssh"; host: string; user: string | null; port: number | null; identityFile: string | null; remotePort: number };
+  | { kind: "ssh"; host: string; user: string | null; port: number | null; identityFile: string | null; remotePort: number }
+  | { kind: "plugin"; plugin: string; label: string; config: Record<string, string> };
 type AwsCredentials = { kind: "profile"; profile: string } | { kind: "default" } | { kind: "keys"; accessKeyId: SecretRef; secretAccessKey: SecretRef };
 
 type RunnerOrigin = { guide: string; summary: string; teardown: { label: string; data: Record<string, string> } | null };
@@ -93,6 +96,8 @@ interface Transport {
 - `ssh`: picks a free local port, spawns `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<remotePort>` with
   `BatchMode` and `ExitOnForwardFailure` (null fields defer to `~/.ssh/config`), and is up once the
   local port accepts connections; `closed` resolves when ssh exits.
+- `plugin`: opened by the runner-guide plugin named `plugin`; if it isn't installed, `open` fails
+  saying so.
 
 `UpdateRunner {name, transport?, token?}` replaces a runner's config: it bumps the link epoch so the
 link reopens with the new transport, drops the runner to `unknown` until it answers again, and
@@ -122,10 +127,17 @@ type StepView = {
             options?: { value: string; label: string; detail?: string }[] }[];
   submit?: string;                                          // button label; none while working
 };
-type GuidePorts = { vault: SecretStore; aws: AwsPort; transports: (spec: TransportSpec) => Transport; fetch: typeof fetch; sessionId: string };
+type GuidePorts = { sessionId: string; runnerNames: readonly string[]; vault: SecretStore; transports: (spec: TransportSpec) => Transport; fetch: typeof fetch; sleep: (ms: number) => Promise<void> };
+
+type GuidePlugin = { id: string; guides: readonly RunnerGuide[]; transport?: (spec: PluginTransport) => Transport };
+type GuidePluginFactory = (host: PluginHost) => GuidePlugin | Promise<GuidePlugin>;
+type PluginHost = { vault: SecretStore; transports: (spec: TransportSpec) => Transport; localBuildDir: string; nameProblem: (name: string, taken: readonly string[]) => string | null };
 ```
 
-- `registry.ts` lists the guides. The catalog (`id, title, description`) reaches UIs through the
+- Every guide comes from a plugin. The built-in ones (`aws`, `manual`) are in `registry.ts`; others
+  are folders copied into `runner-guides/`, loaded at startup and listed after them
+  ([../runner-guides/README.md](../runner-guides/README.md)). `GuidePorts` stays generic: a guide
+  builds what only it needs (the AWS guide's `AwsPort` and `pushLocalBuild`) from its factory. The catalog (`id, title, description`) reaches UIs through the
   Model (it rides in `Booted`), so a new guide needs no UI change.
 - The Fleet page renders any `StepView` with one generic component.
 - Steps must be safe to repeat (the Controller can die mid-step): e.g. a retried install reuses the
@@ -169,7 +181,10 @@ interface Ec2Host {
 
 ### manual
 
-Listed in Add runner as "Coming soon" (`comingSoon` in the catalog); it can't be started yet. Scripts add a runner by URL with the `AddRunner` intent.
+"By URL": one screen asks for the runner name, its URL and its token (a secret field, so it goes to
+the vault). The guide checks that `GET <url>/agents` answers, then saves a `direct` runner; a
+problem asks again with the reason, and an empty token on a retry keeps the one entered before.
+Scripts can still add a runner by URL with the `AddRunner` intent.
 
 ### aws (EC2)
 
@@ -221,7 +236,6 @@ step and both scripts.
   history for 30 days. Move it to SSM Parameter Store (SecureString) or generate it on the box?
 - Q-GUIDE-2 No GitHub release exists yet: this checkout's `origin` is upstream pizza-bot with push
   disabled. Which repo publishes `fleet-runner-v*` releases?
-- Q-GUIDE-3 External guides (a folder of guide modules, like agents) once the interface settles?
 - Q-GUIDE-4 The aws_ssm transport needs the AWS CLI and session-manager-plugin on the Controller's
   machine. Check for them in the guide's first step, or implement the SSM data channel in Node?
 - Q-GUIDE-5 Launching a new instance (IAM role and instance profile, a no-inbound security group,

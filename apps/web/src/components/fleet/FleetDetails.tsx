@@ -31,7 +31,7 @@ function PluginList({ runner }: { runner: FleetRunner }) {
   );
 }
 
-const TRANSPORT: Record<FleetRunner["transport"], string> = { direct: "Direct", aws_ssm: "AWS SSM tunnel", ssh: "SSH tunnel" };
+const TRANSPORT: Record<FleetRunner["transport"], string> = { direct: "Direct", aws_ssm: "AWS SSM tunnel", ssh: "SSH tunnel", plugin: "Plugin tunnel" };
 
 /** The runner's name, tinted by its health; the tooltip carries where it lives and its status in words. */
 export function RunnerPill({ model, runner }: { model: FleetModel; runner: FleetRunner }) {
@@ -194,7 +194,7 @@ export function RunnerDetailsDialog({
         rows={[
           ["Status", runnerStatusText(model, runner)],
           ["Runs on", runnerLocation(runner)],
-          ["Connection", `${TRANSPORT[runner.transport]} · ${link}`],
+          ["Connection", `${runner.transportLabel ?? TRANSPORT[runner.transport]} · ${link}`],
           ...(runner.instanceId ? ([["EC2 instance", <code key="i">{runner.instanceId}</code>]] as [string, ReactNode][]) : []),
           ...(runner.origin ? ([["Set up with", runner.origin.summary]] as [string, ReactNode][]) : []),
           ["Built-in engine", runner.canCreateAgents ? "Pizza Bot" : "Not installed"],

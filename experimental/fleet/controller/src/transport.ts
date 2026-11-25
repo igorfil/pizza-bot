@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { connect, createServer } from "node:net";
 import { fail, ok, type Outcome } from "./outcome.js";
-import type { AwsCredentials, SshTransport, TransportSpec } from "./types.js";
+import type { AwsCredentials, PluginTransport, SshTransport, TransportSpec } from "./types.js";
 import { reveal, type SecretStore } from "./vault.js";
 
 export type OpenLink = { url: string; closed: Promise<string | null> };
@@ -17,6 +17,8 @@ export type TransportDeps = {
   awsCommand?: string;
   sshCommand?: string;
   readyTimeoutMs?: number;
+  /** Transports runner-guide plugins provide; null when the plugin isn't installed. */
+  plugins?: (spec: PluginTransport) => Transport | null;
 };
 
 const whenAborted = (signal: AbortSignal): Promise<null> =>
@@ -187,5 +189,7 @@ export const transportFor = (spec: TransportSpec, deps: TransportDeps): Transpor
       return awsSsm(spec, deps);
     case "ssh":
       return ssh(spec, deps);
+    case "plugin":
+      return deps.plugins?.(spec) ?? { open: () => Promise.resolve(fail(`the ${spec.plugin} runner-guide plugin is not installed`)) };
   }
 };

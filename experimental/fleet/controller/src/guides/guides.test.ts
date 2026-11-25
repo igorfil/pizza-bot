@@ -3,9 +3,8 @@ import { ok, fail } from "../outcome.js";
 import type { Transport } from "../transport.js";
 import type { GuideResult, GuideState } from "../types.js";
 import { memoryVault } from "../vault.js";
-import { awsGuide } from "./aws/guide.js";
+import { awsSteps as awsGuide, type AwsPorts } from "./aws/guide.js";
 import type { AwsPort, Ec2Host, Instance } from "./aws/port.js";
-import type { GuidePorts } from "./guide.js";
 import { manualGuide } from "./manual.js";
 import { catalog } from "./registry.js";
 
@@ -46,7 +45,7 @@ const fakeAws = (
 
 const upTransport: Transport = { open: async () => ok({ url: "http://127.0.0.1:5555", closed: new Promise(() => {}) }) };
 
-const ports = (over: Partial<GuidePorts> = {}): GuidePorts => ({
+const ports = (over: Partial<AwsPorts> = {}): AwsPorts => ({
   sessionId: "s1",
   runnerNames: ["laptop"],
   vault: memoryVault(),
@@ -59,10 +58,10 @@ const ports = (over: Partial<GuidePorts> = {}): GuidePorts => ({
 });
 
 /** Runs `working` steps until the guide asks, fails or finishes. */
-const settle = async (result: GuideResult, p: GuidePorts, guide = awsGuide): Promise<GuideResult> =>
+const settle = async (result: GuideResult, p: AwsPorts, guide = awsGuide): Promise<GuideResult> =>
   result.kind === "working" ? settle(await guide.step(result.state, null, p), p, guide) : result;
 
-const answer = async (state: GuideState, input: Record<string, string>, p: GuidePorts) => settle(await awsGuide.step(state, input, p), p);
+const answer = async (state: GuideState, input: Record<string, string>, p: AwsPorts) => settle(await awsGuide.step(state, input, p), p);
 
 const stateOf = (r: GuideResult): GuideState => ("state" in r ? r.state : {});
 
@@ -76,16 +75,60 @@ const failingInstall = (result: { done: boolean; ok: boolean; output: string }, 
     scriptResult: async (_id, cmd) => ok(cmd === "install" ? result : { done: true, ok: true, output: "FLEET_RUNNER=absent" }),
   });
 
-const toTarget = async (p: GuidePorts) => answer(stateOf(await awsGuide.step(awsGuide.start(), null, p)), { source: "profile:default" }, p);
+const toTarget = async (p: AwsPorts) => answer(stateOf(await awsGuide.step(awsGuide.start(), null, p)), { source: "profile:default" }, p);
 
 describe("manual guide", () => {
-  test("is listed as coming soon", () => {
-    expect(catalog([manualGuide])).toEqual([{ id: "manual", title: "By URL", description: manualGuide.description, comingSoon: true }]);
+  const typed = { name: "homelab", url: "http://10.0.0.5:9000/", token: "guide/s1/token/k1" };
+
+  test("asks for a name, a URL and the token as a secret", async () => {
+    const r = await manualGuide.step(manualGuide.start(), null, ports());
+    expect(r.kind === "ask" && r.view.fields.map((f) => [f.id, f.kind])).toEqual([
+      ["name", "text"],
+      ["url", "text"],
+      ["token", "secret"],
+    ]);
   });
 
-  test("has no workflow yet", async () => {
-    const r = await manualGuide.step({}, null, ports());
-    expect([r.kind, r.kind === "failed" && r.error]).toEqual(["failed", "Adding a runner by URL isn't available yet."]);
+  test("is startable", () => {
+    expect(catalog([manualGuide])).toEqual([{ id: "manual", title: "By URL", description: manualGuide.description }]);
+  });
+
+  test("a runner that answers becomes a direct runner holding the vaulted token", async () => {
+    const r = await manualGuide.step({}, typed, ports());
+    expect(r.kind === "done" && r.runner).toEqual({
+      name: "homelab",
+      transport: { kind: "direct", url: "http://10.0.0.5:9000" },
+      token: { kind: "vault", key: "guide/s1/token/k1" },
+      origin: { guide: "manual", summary: "http://10.0.0.5:9000", teardown: null },
+    });
+  });
+
+  test("asks again with the reason when nothing answers at the URL", async () => {
+    const p = ports({ fetch: (async () => Promise.reject(new Error("ECONNREFUSED"))) as typeof fetch });
+    const r = await manualGuide.step({}, typed, p);
+    expect([r.kind, r.kind === "ask" && r.error]).toEqual(["ask", "No runner answered at http://10.0.0.5:9000: ECONNREFUSED"]);
+  });
+
+  test("a taken name is refused before calling the URL", async () => {
+    const r = await manualGuide.step({}, { ...typed, name: "laptop" }, ports());
+    expect(r.kind === "ask" && r.error).toBe("A runner named laptop already exists.");
+  });
+
+  test("a URL without a scheme is refused", async () => {
+    const r = await manualGuide.step({}, { ...typed, url: "10.0.0.5:9000" }, ports());
+    expect(r.kind === "ask" && r.error).toBe("The URL must start with http:// or https://.");
+  });
+
+  test("the token is required", async () => {
+    const r = await manualGuide.step({}, { ...typed, token: "" }, ports());
+    expect(r.kind === "ask" && r.error).toBe("Enter the runner's token.");
+  });
+
+  test("an empty token on a retry keeps the one entered before", async () => {
+    const p = ports({ fetch: (async () => new Response("", { status: 404 })) as typeof fetch });
+    const first = await manualGuide.step({}, typed, p);
+    const r = await manualGuide.step(stateOf(first), { ...typed, token: "" }, ports());
+    expect(r.kind === "done" && r.runner.token).toEqual({ kind: "vault", key: "guide/s1/token/k1" });
   });
 });
 
@@ -389,7 +432,7 @@ describe("aws guide: set-up checklist", () => {
   const pick = { instance: "i-online", name: "ec2" };
 
   /** Every screen the guide shows from picking the instance until it finishes. */
-  const screens = async (p: GuidePorts): Promise<GuideResult[]> => {
+  const screens = async (p: AwsPorts): Promise<GuideResult[]> => {
     const seen: GuideResult[] = [];
     const walk = async (r: GuideResult): Promise<void> => {
       seen.push(r);

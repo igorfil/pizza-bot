@@ -5,8 +5,16 @@ import { reveal } from "../../vault.js";
 import { nameProblem, type GuidePorts, type RunnerGuide } from "../guide.js";
 import { AGENT_MODELS, BEDROCK_PROBE_MODEL } from "../../agent-models.js";
 import { bedrockScript, detectScript, installScript, parseBedrock, parseDetect, uninstallScript } from "./install.js";
-import { LOCAL_RELEASE_DIR } from "./local-build.js";
-import type { Arch, Ec2Host, Instance } from "./port.js";
+import { LOCAL_RELEASE_DIR, type PushLocalBuild } from "./local-build.js";
+import type { Arch, AwsPort, Ec2Host, Instance } from "./port.js";
+
+export type AwsGuideDeps = {
+  aws: AwsPort;
+  /** TEMPORARY: copies this checkout's runner build to an instance, the only install source until releases exist. */
+  pushLocalBuild: PushLocalBuild;
+};
+
+export type AwsPorts = GuidePorts & AwsGuideDeps;
 
 const RUNNER_PORT = 9000;
 const POLL_MS = 5_000;
@@ -106,7 +114,7 @@ const failed = (state: AwsState, title: string, error: string): GuideResult => {
   };
 };
 
-const credentialsView = async (ports: GuidePorts): Promise<StepView> => {
+const credentialsView = async (ports: AwsPorts): Promise<StepView> => {
   const profiles = await ports.aws.profiles();
   return {
     title: "AWS credentials",
@@ -138,7 +146,7 @@ const keysView: StepView = {
   submit: "Continue",
 };
 
-const homeRegionOf = async (source: AwsCredentials | "keys", ports: GuidePorts): Promise<string> => {
+const homeRegionOf = async (source: AwsCredentials | "keys", ports: AwsPorts): Promise<string> => {
   if (source === "keys" || source.kind !== "profile") return HOME_REGION;
   const profiles = await ports.aws.profiles();
   return profiles.find((p) => p.name === source.profile)?.region ?? HOME_REGION;
@@ -147,15 +155,15 @@ const homeRegionOf = async (source: AwsCredentials | "keys", ports: GuidePorts):
 const fromSource = (source: string): AwsCredentials | "keys" =>
   source === "keys" ? "keys" : source.startsWith("profile:") ? { kind: "profile", profile: source.slice("profile:".length) } : { kind: "default" };
 
-const hostIn = async (state: AwsState, region: string | undefined, ports: GuidePorts): Promise<Outcome<Ec2Host>> =>
+const hostIn = async (state: AwsState, region: string | undefined, ports: AwsPorts): Promise<Outcome<Ec2Host>> =>
   state.credentials && region ? ports.aws.host(state.credentials, region) : fail("credentials are not set");
 
-const host = (state: AwsState, ports: GuidePorts): Promise<Outcome<Ec2Host>> => hostIn(state, state.region, ports);
+const host = (state: AwsState, ports: AwsPorts): Promise<Outcome<Ec2Host>> => hostIn(state, state.region, ports);
 
 type Found = Instance & { region: string };
 
 /** Regions that fail (e.g. blocked by an SCP) are skipped, so one bad region doesn't hide the rest. */
-const scan = async (state: AwsState, regions: string[], ports: GuidePorts): Promise<{ found: Found[]; failed: string[] }> => {
+const scan = async (state: AwsState, regions: string[], ports: AwsPorts): Promise<{ found: Found[]; failed: string[] }> => {
   const results = await Promise.all(
     regions.map(async (region) => {
       const h = await hostIn(state, region, ports);
@@ -180,7 +188,7 @@ const transportOf = (state: AwsState): TransportSpec => ({
 });
 
 /** Verifies access, then lists where the runner can go across every enabled region. */
-const target = async (state: AwsState, ports: GuidePorts, error?: string): Promise<GuideResult> => {
+const target = async (state: AwsState, ports: AwsPorts, error?: string): Promise<GuideResult> => {
   const h = await hostIn(state, state.homeRegion, ports);
   if (!h.ok) return failed(state, "Checking AWS access", h.error);
   const who = await h.value.whoAmI();
@@ -224,7 +232,7 @@ const target = async (state: AwsState, ports: GuidePorts, error?: string): Promi
   );
 };
 
-const chooseTarget = (state: AwsState, input: GuideInput, ports: GuidePorts): Promise<GuideResult> | GuideResult => {
+const chooseTarget = (state: AwsState, input: GuideInput, ports: AwsPorts): Promise<GuideResult> | GuideResult => {
   const name = (input.name ?? "").trim();
   const instance = input.instance ?? "";
   const kept: AwsState = { ...state, name };
@@ -239,7 +247,7 @@ const chooseTarget = (state: AwsState, input: GuideInput, ports: GuidePorts): Pr
   );
 };
 
-const detect = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const detect = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed(state, "Looking for a runner", h.error);
   const sent = await h.value.sendScript(state.instanceId!, detectScript());
@@ -248,14 +256,14 @@ const detect = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> 
 };
 
 /** The found token reuses the guide's vault key, so retrying never leaves a stray entry. */
-const adopt = async (state: AwsState, port: number, token: string, ports: GuidePorts): Promise<GuideResult> => {
+const adopt = async (state: AwsState, port: number, token: string, ports: AwsPorts): Promise<GuideResult> => {
   const key = state.tokenKey ?? `runner/${state.name}/${randomUUID()}`;
   const stored = await ports.vault.set(key, token);
   if (!stored.ok) return failed({ ...state, step: "detect" }, "Looking for a runner", stored.error);
   return working({ ...state, step: "check", tokenKey: key, remotePort: port, adopted: true }, "Connecting", "Found a runner; opening the tunnel…");
 };
 
-const waitDetect = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const waitDetect = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed({ ...state, step: "detect" }, "Looking for a runner", h.error);
   const result = await h.value.scriptResult(state.instanceId!, state.commandId!);
@@ -272,7 +280,7 @@ const waitDetect = async (state: AwsState, ports: GuidePorts): Promise<GuideResu
   return working({ ...state, polls }, "Looking for a runner", `Checking the instance… (${polls * (POLL_MS / 1000)}s)`);
 };
 
-const runnerToken = async (state: AwsState, ports: GuidePorts): Promise<Outcome<{ key: string; token: string }>> => {
+const runnerToken = async (state: AwsState, ports: AwsPorts): Promise<Outcome<{ key: string; token: string }>> => {
   if (state.tokenKey) {
     const existing = await reveal(ports.vault, { kind: "vault", key: state.tokenKey });
     return existing.ok ? ok({ key: state.tokenKey, token: existing.value }) : existing;
@@ -284,12 +292,12 @@ const runnerToken = async (state: AwsState, ports: GuidePorts): Promise<Outcome<
 };
 
 // TEMPORARY: until runner releases are published, the runner installed is the Linux build `npm run build` made, copied over scp (local-build.ts).
-const push = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const push = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const pushed = await ports.pushLocalBuild(state.instanceId!, state.region!, state.found?.[state.instanceId!]?.arch ?? "arm64", state.credentials!);
   return pushed.ok ? working({ ...state, step: "install" }, "Installing the runner", "Starting…") : failed(state, "Installing the runner", pushed.error);
 };
 
-const install = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const install = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed(state, "Installing the runner", h.error);
   const token = await runnerToken(state, ports);
@@ -308,7 +316,7 @@ const install = async (state: AwsState, ports: GuidePorts): Promise<GuideResult>
   return working({ ...withToken, step: "installing", commandId: sent.value, polls: 0 }, "Installing the runner", "Downloading the runner…");
 };
 
-const waitInstall = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const waitInstall = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed(state, "Installing the runner", h.error);
   const result = await h.value.scriptResult(state.instanceId!, state.commandId!);
@@ -336,7 +344,7 @@ const done = (state: AwsState): NewRunner => ({
 });
 
 /** Opens the same tunnel the Controller will use from now on, and asks the runner for its agents. */
-const check = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const check = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), CHECK_TIMEOUT_MS);
   try {
@@ -352,7 +360,7 @@ const check = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> =
   }
 };
 
-const bedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const bedrock = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed(state, "Checking Bedrock", h.error);
   const sent = await h.value.sendScript(state.instanceId!, bedrockScript([BEDROCK_PROBE_MODEL], state.region!));
@@ -362,7 +370,7 @@ const bedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideResult>
 
 
 /** Agents call Bedrock with the instance role, so a role that can't reach the cheapest model fails the set-up. */
-const waitBedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideResult> => {
+const waitBedrock = async (state: AwsState, ports: AwsPorts): Promise<GuideResult> => {
   const h = await host(state, ports);
   if (!h.ok) return failed({ ...state, step: "bedrock" }, "Checking Bedrock", h.error);
   const result = await h.value.scriptResult(state.instanceId!, state.commandId!);
@@ -386,7 +394,13 @@ const waitBedrock = async (state: AwsState, ports: GuidePorts): Promise<GuideRes
   return working({ ...state, polls }, "Checking Bedrock", `${probing} (${polls * (POLL_MS / 1000)}s)`);
 };
 
-export const awsGuide: RunnerGuide = {
+/** The guide before its AWS ports are bound; tests drive it with fakes. */
+type AwsSteps = Omit<RunnerGuide, "step" | "teardown"> & {
+  step(state: GuideState, input: GuideInput | null, ports: AwsPorts): Promise<GuideResult>;
+  teardown(runner: NewRunner, ports: AwsPorts): Promise<Outcome<string>>;
+};
+
+export const awsSteps: AwsSteps = {
   id: "aws",
   title: "AWS EC2",
   description: "Use the runner on one of your running EC2 instances, installing it if needed, and reach it through an SSM tunnel.",
@@ -443,3 +457,9 @@ export const awsGuide: RunnerGuide = {
     return sent.ok ? ok(`uninstalling the runner and its agents from ${t.instanceId}; the instance was not terminated`) : sent;
   },
 };
+
+export const createAwsGuide = (deps: AwsGuideDeps): RunnerGuide => ({
+  ...awsSteps,
+  step: (state, input, ports) => awsSteps.step(state, input, { ...ports, ...deps }),
+  teardown: (runner, ports) => awsSteps.teardown(runner, { ...ports, ...deps }),
+});

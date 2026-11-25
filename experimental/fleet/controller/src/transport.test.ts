@@ -186,3 +186,20 @@ describe("transports", () => {
     expect(env).toEqual({ ok: false, error: "secret a is missing from the vault" });
   });
 });
+
+describe("plugin transport", () => {
+  const spec: TransportSpec = { kind: "plugin", plugin: "box", label: "Box", config: { host: "b1" } };
+
+  test("opens through the plugin that provides it", async () => {
+    const seen: Record<string, string>[] = [];
+    const plugins = (t: Extract<TransportSpec, { kind: "plugin" }>) =>
+      t.plugin === "box" ? (seen.push(t.config), direct("http://127.0.0.1:7777/")) : null;
+    const link = await transportFor(spec, { vault: memoryVault(), plugins }).open(new AbortController().signal);
+    expect([link.ok && link.value.url, seen]).toEqual(["http://127.0.0.1:7777", [{ host: "b1" }]]);
+  });
+
+  test("fails to open when its plugin is not installed", async () => {
+    const link = await transportFor(spec, { vault: memoryVault(), plugins: () => null }).open(new AbortController().signal);
+    expect(link).toEqual({ ok: false, error: "the box runner-guide plugin is not installed" });
+  });
+});

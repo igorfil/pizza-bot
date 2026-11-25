@@ -1,7 +1,5 @@
 import * as a2a from "./a2a.js";
 import type { GuidePorts, RunnerGuide } from "./guides/guide.js";
-import type { PushLocalBuild } from "./guides/aws/local-build.js";
-import type { AwsPort } from "./guides/aws/port.js";
 import { catalog, guideById } from "./guides/registry.js";
 import * as llm from "./llm.js";
 import type { MsgLog } from "./log.js";
@@ -21,9 +19,7 @@ export type Runtime = {
 export type RuntimeDeps = {
   vault: SecretStore;
   transports: (spec: TransportSpec) => Transport;
-  aws: AwsPort;
   guides: readonly RunnerGuide[];
-  pushLocalBuild: PushLocalBuild;
 };
 
 const localClock = (date: Date): LocalClock => ({
@@ -91,11 +87,9 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
     sessionId,
     runnerNames: Object.keys(model.runners),
     vault: deps.vault,
-    aws: deps.aws,
     transports: deps.transports,
     fetch,
     sleep,
-    pushLocalBuild: deps.pushLocalBuild,
   });
 
   const effectResult = async (effect: Effect): Promise<Msg | null> => {

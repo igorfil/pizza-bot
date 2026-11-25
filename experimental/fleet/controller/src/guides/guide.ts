@@ -2,20 +2,15 @@ import type { Outcome } from "../outcome.js";
 import type { Transport } from "../transport.js";
 import type { GuideInput, GuideResult, GuideState, NewRunner, TransportSpec } from "../types.js";
 import type { SecretStore } from "../vault.js";
-import type { PushLocalBuild } from "./aws/local-build.js";
-import type { AwsPort } from "./aws/port.js";
 
-/** Everything a guide may touch. Tests pass fakes; the runtime passes the real thing. */
+/** Everything a guide step may touch. Tests pass fakes; the runtime passes the real thing. */
 export type GuidePorts = {
   sessionId: string;
   runnerNames: readonly string[];
   vault: SecretStore;
-  aws: AwsPort;
   transports: (spec: TransportSpec) => Transport;
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
-  /** TEMPORARY: copies this checkout's runner build to an instance, the only install source until releases exist. */
-  pushLocalBuild: PushLocalBuild;
 };
 
 /**

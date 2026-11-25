@@ -12,7 +12,11 @@ export type AwsCredentials =
 export type TransportSpec =
   | { kind: "direct"; url: string }
   | { kind: "aws_ssm"; region: string; instanceId: string; remotePort: number; credentials: AwsCredentials }
-  | SshTransport;
+  | SshTransport
+  | PluginTransport;
+
+/** A transport a runner-guide plugin provides; `config` is the plugin's own and must hold no secret. */
+export type PluginTransport = { kind: "plugin"; plugin: string; label: string; config: Record<string, string> };
 
 /** Auth is the system ssh's: ~/.ssh/config, ssh-agent, known_hosts; null fields defer to them. */
 export type SshTransport = {

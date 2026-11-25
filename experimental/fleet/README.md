@@ -12,6 +12,7 @@ it comes back.
 - Components as built, with open questions: [DESIGN.md](DESIGN.md)
 - What the POC skips: [POC-GAPS.md](POC-GAPS.md)
 - Agent contract: [agents/README.md](agents/README.md)
+- Runner-guide plugins (more ways to add a runner): [runner-guides/README.md](runner-guides/README.md)
 - EC2 and AWS details: [docs/DEPLOY.md](docs/DEPLOY.md)
 - The Fleet page: [docs/UI.md](docs/UI.md)
 - Verified facts and gotchas: [docs/LEARNINGS.md](docs/LEARNINGS.md)

@@ -15,7 +15,9 @@ export interface FleetRunner {
   name: string;
   /** Display name; `name` stays the id agent keys and intents use. */
   label?: string | null;
-  transport: "direct" | "aws_ssm" | "ssh";
+  transport: "direct" | "aws_ssm" | "ssh" | "plugin";
+  /** How a `plugin` transport names itself, e.g. "SSH via a dev box". */
+  transportLabel?: string;
   /** The EC2 instance an aws_ssm runner lives on. */
   instanceId?: string | null;
   /** The runner is on this machine (a direct link to loopback); it can't be removed from the page. */

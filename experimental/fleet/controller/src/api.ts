@@ -16,6 +16,7 @@ const LOOPBACK = /^https?:\/\/(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?(\/|$
 /** What a UI may know about a runner's transport: its kind, the EC2 instance, and whether it is this machine. */
 export const transportFacts = (t: TransportSpec) => ({
   transport: t.kind,
+  ...(t.kind === "plugin" ? { transportLabel: t.label } : {}),
   instanceId: t.kind === "aws_ssm" ? t.instanceId : null,
   local: t.kind === "direct" && LOOPBACK.test(t.url),
 });

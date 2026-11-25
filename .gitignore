@@ -28,3 +28,7 @@ apps/web/dist/
 
 # Bundled fleet harness plugins (npm run build)
 experimental/fleet/plugins/*/plugin.mjs
+
+# Runner-guide plugins are copied in from outside; only the folder's README is part of this repository.
+experimental/fleet/runner-guides/*
+!experimental/fleet/runner-guides/README.md
