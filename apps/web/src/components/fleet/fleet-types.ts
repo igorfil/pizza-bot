@@ -57,12 +57,14 @@ export interface FleetAgentInfo {
 }
 
 /** In flight while `error` is null. */
-export type FleetAgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
+export type FleetAgentsChange = { action: "add" | "remove" | "edit" | "enable" | "disable"; agents: string[]; error: string | null };
 
 /** What users run, schedule and see. Key: `<runner>/<id>`. */
 export interface FleetAgent {
   key: string;
   runner: string;
+  /** Served by its runner; a disabled agent keeps its schedule and runs but doesn't run. Missing from older Controllers: enabled. */
+  enabled?: boolean;
   id: string;
   name: string;
   description: string;

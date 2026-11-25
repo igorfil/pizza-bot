@@ -51,6 +51,8 @@ export type FleetIntent =
   | "RemoveRunner"
   | "RenameRunner"
   | "AddAgents"
+  | "EnableAgent"
+  | "DisableAgent"
   | "CreateAgent"
   | "SetMcpServer"
   | "RemoveMcpServer"

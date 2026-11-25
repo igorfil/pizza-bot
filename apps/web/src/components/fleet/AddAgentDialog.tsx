@@ -9,20 +9,17 @@ import { runnerLabel } from "./fleet-view-model.js";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : "The Controller didn't take that.");
 
-type Mode = "create" | "existing";
+type Mode = "create";
 
 /** What the runner can do for Add agent right now: a reason it can't, or the modes it offers. */
 export const addAgentModes = (runner: FleetRunner): { blocker: string } | { modes: Mode[] } => {
   if (runner.status !== "healthy") return { blocker: `${runnerLabel(runner)} isn't reachable right now. Try again once it's online.` };
-  const modes: Mode[] = [...(runner.canCreateAgents ? ["create" as const] : []), ...((runner.available?.length ?? 0) > 0 ? ["existing" as const] : [])];
-  if (modes.length > 0) return { modes };
+  if (runner.canCreateAgents) return { modes: ["create"] };
   return {
     blocker:
       runner.available == null
         ? `${runnerLabel(runner)} can't change its agents from here. Update the runner to a version that supports adding agents.`
-        : !runner.canCreateAgents
-          ? `${runnerLabel(runner)} has no built-in engine, so it can't run agents created here. Reinstall it with the engine.`
-          : `Every agent on ${runnerLabel(runner)} is already added.`,
+        : `${runnerLabel(runner)} has no built-in engine, so it can't run agents created here. Reinstall it with the engine.`,
   };
 };
 
@@ -280,44 +277,7 @@ export function EditAgentForm({ model, agent, send, onClose }: { model: FleetMod
   );
 }
 
-/** Picks agents from what the runner has on disk but doesn't serve yet. */
-function ExistingAgentsForm({ runner, send, onClose }: { runner: FleetRunner; send: FleetSend; onClose: () => void }) {
-  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
-  const { saving, error, submit } = useSubmit(onClose);
-  const toggle = (id: string) =>
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  return (
-    <form className="fleet-guide" onSubmit={(e) => void submit(e, () => send("AddAgents", { runner: runner.name, agents: [...picked] }))}>
-      <p className="field-hint">Pick what {runnerLabel(runner)} should also run. They're already on the machine, so nothing is installed.</p>
-      <fieldset className="fleet-choice-field">
-        <legend className="field-label fleet-choice-legend">Agents</legend>
-        <div className="fleet-choice-grid">
-          {(runner.available ?? []).map((a) => (
-            <ChoiceCard
-              key={a.id}
-              type="checkbox"
-              name="agents"
-              value={a.id}
-              checked={picked.has(a.id)}
-              title={a.name}
-              {...(a.description ? { detail: a.description } : {})}
-              onChange={() => toggle(a.id)}
-            />
-          ))}
-        </div>
-      </fieldset>
-      <ErrorLine error={error} />
-      <Actions saving={saving} disabled={picked.size === 0} label={picked.size > 1 ? `Add ${picked.size} agents` : "Add agent"} onClose={onClose} />
-    </form>
-  );
-}
-
-const MODE_LABELS: Record<Mode, string> = { create: "Create new", existing: "Turn on existing" };
+const MODE_LABELS: Record<Mode, string> = { create: "Create new" };
 
 export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetModel; runner: FleetRunner; send: FleetSend; onClose: () => void }) {
   const offer = addAgentModes(runner);
@@ -345,7 +305,7 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
               ))}
             </div>
           )}
-          {mode === "create" ? (
+          {mode === "create" && (
             <AgentSpecForm
               model={model}
               runner={runner}
@@ -353,8 +313,6 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
               onSave={(spec) => send("CreateAgent", { runner: runner.name, ...spec })}
               onClose={onClose}
             />
-          ) : (
-            <ExistingAgentsForm runner={runner} send={send} onClose={onClose} />
           )}
         </>
       )}

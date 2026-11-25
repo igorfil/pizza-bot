@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Cloud, KeyRound, Laptop, LoaderCircle, Pencil, Plug, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Cloud, KeyRound, Laptop, LoaderCircle, Pencil, Plug, Plus, Power, ShieldCheck, Trash2 } from "lucide-react";
 import { Tabs } from "radix-ui";
 import { useAppToast } from "../AppToast.js";
 import { EditAgentForm, mcpServerSummary } from "./AddAgentDialog.js";
@@ -219,6 +219,7 @@ export function RunnerDetailsDialog({
             <li key={a.key} className="fleet-detail-row">
               <span className="fleet-detail-row-name">{a.name}</span>
               <span className="fleet-muted fleet-detail-row-desc">{a.description}</span>
+              {a.enabled === false && <span className="fleet-pill fleet-pill-muted">disabled</span>}
               {activeRun(model, a.key) && <span className="fleet-pill fleet-pill-info">running</span>}
             </li>
           ))}
@@ -262,6 +263,7 @@ export function AgentDetailsDialog({
   runner,
   send,
   onDelete,
+  onToggle,
   onClose,
 }: {
   model: FleetModel;
@@ -269,14 +271,16 @@ export function AgentDetailsDialog({
   runner: FleetRunner;
   send: FleetSend;
   onDelete: (() => void) | null;
+  onToggle: (() => void) | null;
   onClose: () => void;
 }) {
   const active = activeRun(model, agent.key);
   const down = runner.status === "unreachable";
   const servers = Object.entries(runner.mcpServers ?? {});
   const used = agent.mcp ?? [];
-  const status = down ? "offline" : active ? "running" : "idle";
-  const tone = down ? "bad" : active ? "info" : "ok";
+  const disabled = agent.enabled === false;
+  const status = down ? "offline" : disabled ? "disabled" : active ? "running" : "idle";
+  const tone = down ? "bad" : disabled ? "muted" : active ? "info" : "ok";
   const builtin = isBuiltin(agent);
   const editable = builtin && agent.created === true && agent.model !== undefined && !down;
   const harness = runner.plugins?.find((p) => p.id === agent.harness)?.name ?? agent.harness;
@@ -295,11 +299,25 @@ export function AgentDetailsDialog({
           ...(agent.skills?.length ? ([["Skills", agent.skills.map((s) => s.name).join(", ")]] as [string, ReactNode][]) : []),
         ]}
       />
+      {onToggle && (
+        <div className="fleet-action-row">
+          <span className="fleet-muted">
+            {disabled
+              ? "It keeps its schedule and runs, and starts running again once enabled."
+              : active
+                ? "Wait for the run to finish, or cancel it, before disabling it."
+                : "A disabled agent keeps its schedule and runs but doesn't run."}
+          </span>
+          <button type="button" className="btn-secondary fleet-small-btn" onClick={onToggle} disabled={!disabled && !!active}>
+            <Power size={13} aria-hidden="true" /> {disabled ? "Enable agent" : "Disable agent"}
+          </button>
+        </div>
+      )}
       {onDelete && (
         <div className="fleet-danger-zone">
-          <span className="fleet-muted">{active ? "Wait for the run to finish, or cancel it, before removing the agent." : agent.created ? "Deletes the agent and its system prompt." : "The runner stops serving it; you can add it back later."}</span>
+          <span className="fleet-muted">{active ? "Wait for the run to finish, or cancel it, before deleting the agent." : "Deletes the agent and its system prompt. Its past results stay in the Inbox."}</span>
           <button type="button" className="btn-secondary fleet-small-btn fleet-danger-btn" onClick={onDelete} disabled={!!active}>
-            <Trash2 size={13} aria-hidden="true" /> {agent.created ? "Delete agent" : "Remove agent"}
+            <Trash2 size={13} aria-hidden="true" /> Delete agent
           </button>
         </div>
       )}

@@ -442,6 +442,62 @@ describe("adding agents", () => {
   });
 });
 
+describe("enabling and disabling agents", () => {
+  const jokes = { id: "dadjokes", name: "Dad jokes", description: "", input: null };
+  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy([sys], [jokes])];
+  const disabledSys: Msg = { type: "AgentsSet", runner: "local", added: [], disabled: ["sys"], agents: [], location: "laptop", available: [jokes, sys] };
+  const ep = { url: "http://x", token };
+
+  test("an agent the runner has but doesn't serve is there, disabled", () => {
+    const [model] = run(ready);
+    expect([model.agents["local/dadjokes"]?.enabled, model.agents["local/sys"]?.enabled]).toEqual([false, true]);
+  });
+
+  test("enabling asks the runner to serve it next to what it serves", () => {
+    const [, effects] = run([...ready, { type: "EnableAgent", agent: "local/dadjokes" }]);
+    expect(effects).toEqual([{ type: "SetRunnerAgents", runner: "local", endpoint: ep, agents: ["dadjokes", "sys"], added: ["dadjokes"] }]);
+  });
+
+  test("disabling asks the runner to stop serving it", () => {
+    const [model, effects] = run([...ready, { type: "DisableAgent", agent: "local/sys" }]);
+    expect([model.runners.local?.agentsChange, effects]).toEqual([
+      { action: "disable", agents: ["System report"], error: null },
+      [{ type: "SetRunnerAgents", runner: "local", endpoint: ep, agents: [], added: [], disabled: ["sys"] }],
+    ]);
+  });
+
+  test("a disabled agent keeps its schedule and says so", () => {
+    const [model] = run([...ready, { type: "SetSchedule", agent: "local/sys", at: "07:30", prompt: "" }, { type: "DisableAgent", agent: "local/sys" }, disabledSys]);
+    expect([model.agents["local/sys"]?.enabled, model.agents["local/sys"]?.schedule, model.notifications.at(-1)?.text]).toEqual([
+      false,
+      { at: "07:30", prompt: "" },
+      "disabled System report on local",
+    ]);
+  });
+
+  test("a disabled agent isn't run on its schedule", () => {
+    const tick: Msg = { type: "Tick", now: 2_000, local: { day: "2026-11-25", minute: 8 * 60 } };
+    const [model] = run([...ready, { type: "SetSchedule", agent: "local/sys", at: "07:30", prompt: "" }, disabledSys, tick]);
+    expect(Object.keys(model.tasks)).toEqual([]);
+  });
+
+  test("a disabled agent can't be run", () => {
+    const [model] = run([...ready, { type: "CreateTask", taskId: "t1", agent: "local/dadjokes", prompt: "" }]);
+    expect([model.tasks.t1, model.notifications.at(-1)?.text]).toEqual([undefined, "Dad jokes is disabled; enable it to run it"]);
+  });
+
+  test("an agent with a run in progress isn't disabled", () => {
+    const [model, effects] = run([...withRunningTask, { type: "DisableAgent", agent: "local/sys" }]);
+    expect([model.runners.local?.agentsChange?.error, effects]).toEqual(["System report has a run in progress; cancel it or wait for it to finish", []]);
+  });
+
+  test("adding agents leaves disabled ones off", () => {
+    const more = { id: "more", name: "More", description: "", input: null };
+    const [, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy([sys], [jokes, more]), { type: "AddAgents", runner: "local", agents: ["more"] }]);
+    expect(effects).toEqual([{ type: "SetRunnerAgents", runner: "local", endpoint: ep, agents: ["more", "sys"], added: ["more"] }]);
+  });
+});
+
 describe("creating an agent", () => {
   const poet = { name: "Haiku poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku.", mcp: [], skills: [] };
   const creator: Msg = { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: [], canCreate: true };

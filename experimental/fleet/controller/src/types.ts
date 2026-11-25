@@ -106,12 +106,14 @@ export type Runner = NewRunner & {
 export type NewAgentSpec = { name: string; model: string; systemPrompt: string; mcp: string[]; skills: SkillCopy[] };
 
 /** In flight while `error` is null; `agents` are names or ids, for display. */
-export type AgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
+export type AgentsChange = { action: "add" | "remove" | "edit" | "enable" | "disable"; agents: string[]; error: string | null };
 
 /** An agent hosted by a runner; the unit users run, schedule and see. Key: `<runner>/<id>`. */
 export type Agent = AgentInfo & {
   key: string;
   runner: string;
+  /** Served by its runner; a disabled agent keeps its schedule and runs but neither runs nor is scheduled. */
+  enabled: boolean;
   /** Daily run at local `at` (HH:MM). Fires once per local day, on the first tick at or after `at`. */
   schedule: { at: string; prompt: string } | null;
   lastScheduledDay: string | null;
@@ -261,6 +263,8 @@ export type IntentMsg =
   | { type: "RemoveRunner"; name: string; teardown: boolean }
   | { type: "RenameRunner"; name: string; label: string | null }
   | { type: "AddAgents"; runner: string; agents: string[] }
+  | { type: "EnableAgent"; agent: string }
+  | { type: "DisableAgent"; agent: string }
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
   | { type: "SetMcpServer"; runner: string; id: string; entry: Record<string, unknown> }
   | { type: "RemoveMcpServer"; runner: string; id: string }
@@ -288,7 +292,7 @@ export type WorldMsg =
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
   | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers }
-  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers }
+  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; disabled?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers }
   | { type: "AgentsSetFailed"; runner: string; error: string }
   | ({ type: "McpServersSet"; runner: string; text: string } & RunnerIndexFields)
   | { type: "McpServerFailed"; runner: string; text: string }
@@ -317,7 +321,7 @@ export type LlmTurn = { role: ChatRole; text: string };
 
 export type Effect =
   | { type: "CheckRunner"; runner: string; url: string }
-  | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[] }
+  | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[]; disabled?: string[] }
   | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
   | { type: "DeleteRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string }
   | { type: "EditRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string; agent: NewAgentSpec }
@@ -341,6 +345,8 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "RemoveRunner",
   "RenameRunner",
   "AddAgents",
+  "EnableAgent",
+  "DisableAgent",
   "CreateAgent",
   "SetMcpServer",
   "RemoveMcpServer",

@@ -142,7 +142,7 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
         const ep = await withToken(effect.endpoint);
         const r = ep.ok ? await a2a.setAgents(ep.value.url, ep.value.token, effect.agents) : ep;
         return r.ok
-          ? { type: "AgentsSet", runner: effect.runner, added: effect.added, ...indexFields(r.value) }
+          ? { type: "AgentsSet", runner: effect.runner, added: effect.added, ...(effect.disabled ? { disabled: effect.disabled } : {}), ...indexFields(r.value) }
           : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
       }
       case "CreateRunnerAgent": {

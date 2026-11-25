@@ -160,6 +160,9 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
       return str(p.runner) && Array.isArray(p.agents) && p.agents.length > 0 && p.agents.every(str)
         ? { type, runner: p.runner, agents: p.agents as string[] }
         : "AddAgents needs runner and agents (a non-empty list of agent ids)";
+    case "EnableAgent":
+    case "DisableAgent":
+      return str(p.agent) ? { type, agent: p.agent } : `${type} needs agent (<runner>/<id>)`;
     case "CreateAgent": {
       if (!str(p.runner)) return "CreateAgent needs runner, name, model, systemPrompt";
       const agent = agentSpecOf(type, p);

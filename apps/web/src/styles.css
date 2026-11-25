@@ -2155,16 +2155,22 @@ textarea.field-input { resize: vertical; line-height: 1.5; }
   box-shadow: 0 4px 16px rgb(0 0 0 / .14);
 }
 .fleet-agent-card.active { border-color: color-mix(in oklch, var(--info) 45%, var(--border)); }
-.fleet-agent-card.removing { opacity: .5; pointer-events: none; }
+.fleet-agent-card.busy { opacity: .5; pointer-events: none; }
+.fleet-agent-card.disabled:not(.busy) { opacity: .6; border-style: dashed; }
+.fleet-agent-card.disabled:not(.busy):is(:hover, :focus-within) { opacity: 1; }
+.fleet-agent-off { margin: 0; font-size: 12.5px; color: var(--dim); }
 .fleet-hover-actions { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; opacity: 0; transition: opacity .15s; }
 .fleet-agent-card:is(:hover, :focus-within) .fleet-hover-actions,
 .fleet-runner:is(:hover, :focus-within) > .fleet-runner-head .fleet-hover-actions { opacity: 1; }
-.fleet-ghost-btn, .fleet-agent-delete {
+.fleet-ghost-btn, .fleet-agent-delete, .fleet-agent-toggle {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; min-width: 26px; padding: 0 8px;
   border: 0; border-radius: 7px; background: transparent; color: var(--dim); font: inherit; font-size: 12px; font-weight: 550;
   cursor: pointer; transition: color .15s, background .15s;
 }
-.fleet-agent-delete { padding: 0; width: 26px; }
+.fleet-agent-delete, .fleet-agent-toggle { padding: 0; width: 26px; }
+.fleet-agent-toggle:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
+.fleet-agent-toggle:disabled { cursor: default; opacity: .35; }
+.fleet-agent-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .fleet-ghost-btn:hover { color: var(--text); background: var(--panel-2); }
 .fleet-ghost-btn:focus-visible, .fleet-agent-delete:focus-visible, .fleet-mcp-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .fleet-ghost-danger:hover, .fleet-agent-delete:hover:not(:disabled) { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
@@ -2346,6 +2352,7 @@ button.fleet-inline-run:focus-visible { outline: 2px solid var(--brand); outline
 .fleet-pill-ok { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 40%, transparent); background: color-mix(in oklch, var(--ok) 10%, transparent); }
 .fleet-pill-bad { color: var(--bad); border-color: color-mix(in oklch, var(--bad) 40%, transparent); background: color-mix(in oklch, var(--bad) 10%, transparent); }
 .fleet-pill-warn { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 40%, transparent); background: color-mix(in oklch, var(--warn) 10%, transparent); }
+.fleet-pill-muted { color: var(--dim); }
 .fleet-pill-info { color: var(--info); border-color: color-mix(in oklch, var(--info) 40%, transparent); background: color-mix(in oklch, var(--info) 10%, transparent); }
 .fleet-mcp-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .fleet-mcp-chip {
@@ -2385,6 +2392,8 @@ button.fleet-inline-run:focus-visible { outline: 2px solid var(--brand); outline
 .fleet-detail-desc { margin: 0; line-height: 1.5; }
 .fleet-plugin-list { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .fleet-plugin-version { font-weight: 400; opacity: .75; }
+.fleet-action-row { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 12px 14px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 10px; }
+.fleet-action-row .fleet-small-btn { flex: 0 0 auto; }
 .fleet-danger-zone {
   display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 12px 14px; font-size: 12.5px;
   border: 1px solid color-mix(in srgb, var(--bad) 30%, var(--border)); border-radius: 10px;

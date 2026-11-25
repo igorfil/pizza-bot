@@ -206,6 +206,8 @@ Intents (only these are accepted over the API; world Msgs are rejected):
 | `DeleteAgent` | `agent` (`<runner>/<id>`); a created agent is deleted from its runner, a shipped one turned off. Refused while it has a run in progress |
 | `CreateAgent` | `runner`, `name`, `model` (one of the model's `agentModels`), `systemPrompt`; the runner creates and serves a prompt agent |
 | `EditAgent` | `agent` (`<runner>/<id>`), `name`, `model`, `systemPrompt`; rewrites a created agent under the same id. Runs in progress finish with the old spec |
+| `EnableAgent` | `agent` (`<runner>/<id>`): the runner serves it again; it kept its schedule and runs |
+| `DisableAgent` | `agent`: the runner stops serving it but keeps it; it isn't run or scheduled. Refused while it has a run in progress |
 | `UpdateRunner` | `name`, plus any of `url`/`transport`, `token`; the link reopens with the new config |
 | `RemoveRunner` | `name` |
 | `RenameRunner` | `name`, `label` (display name, up to 40 characters; empty = back to `name`). The id `name` and agent keys don't change |

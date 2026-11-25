@@ -272,12 +272,8 @@ describe("Add agent", () => {
   const offer = (over: Partial<typeof runner>) => addAgentModes({ ...runner, ...over });
   const jokes = [{ id: "dadjokes", name: "Dad jokes", description: "" }];
 
-  it("offers creating first, then turning on existing agents", () => {
-    expect(offer({ canCreateAgents: true, available: jokes })).toEqual({ modes: ["create", "existing"] });
-  });
-
-  it("offers only creating when nothing is left to turn on", () => {
-    expect(offer({ canCreateAgents: true, available: [] })).toEqual({ modes: ["create"] });
+  it("offers creating a new agent on a runner with the built-in engine", () => {
+    expect(offer({ canCreateAgents: true, available: jokes })).toEqual({ modes: ["create"] });
   });
 
   it("asks for a runner update when the runner can do neither", () => {
@@ -300,9 +296,20 @@ describe("AgentCard", () => {
   const card = (m: FleetModel) =>
     wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} onOpenChat={() => {}} />);
 
-  it("has a delete button that names what it does", () => {
+  it("offers deleting only an agent created here", () => {
     const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true } } };
-    expect([card(model).includes('aria-label="Remove agent Dad jokes"'), card(created).includes('aria-label="Delete agent Dad jokes"')]).toEqual([true, true]);
+    expect([card(model).includes('aria-label="Delete agent Dad jokes"'), card(created).includes('aria-label="Delete agent Dad jokes"')]).toEqual([false, true]);
+  });
+
+  it("offers disabling an enabled agent and enabling a disabled one", () => {
+    const off = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, enabled: false } } };
+    expect([card(model).includes('aria-label="Disable agent Dad jokes"'), card(off).includes('aria-label="Enable agent Dad jokes"')]).toEqual([true, true]);
+  });
+
+  it("shows a disabled agent dimmed, with Enable instead of Run", () => {
+    const off = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, enabled: false } } };
+    const html = card(off);
+    expect([html.includes("fleet-agent-card disabled"), />\s*Enable<\/button>/.test(html), />\s*Run<\/button>/.test(html)]).toEqual([true, true, false]);
   });
 
   it("offers details for every agent, shipped or created", () => {
@@ -310,14 +317,14 @@ describe("AgentCard", () => {
     expect([card(model).includes('aria-label="Edit agent Dad jokes"'), card(created).includes('aria-label="Edit agent Dad jokes"')]).toEqual([true, true]);
   });
 
-  it("can't be deleted while it runs", () => {
+  it("can't be disabled while it runs", () => {
     const running = { ...model, tasks: { a: { ...jokes, id: "a", state: "working" as const } } };
-    expect(card(running)).toMatch(/<button[^>]*class="fleet-agent-delete"[^>]*disabled=""/);
+    expect(card(running)).toMatch(/<button[^>]*class="fleet-agent-toggle"[^>]*disabled=""/);
   });
 
   it("shows that it's being removed, without actions", () => {
-    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} onOpenChat={() => {}} removing />);
-    expect([html.includes("Removing…"), html.includes("fleet-agent-delete")]).toEqual([true, false]);
+    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} onOpenChat={() => {}} pending="remove" />);
+    expect([html.includes("Removing…"), html.includes("fleet-agent-toggle")]).toEqual([true, false]);
   });
 
   it("keeps the agent's key out of the card text", () => {
