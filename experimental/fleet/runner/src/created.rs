@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use base64::Engine;
 use serde_json::{Value, json};
 
-use crate::harness::PIZZA_BOT;
+use crate::engine::PIZZA_BOT;
 use crate::manifest;
 
 const MAX_NAME: usize = 60;
@@ -321,7 +321,7 @@ mod tests {
     fn the_manifest_reads_back_as_an_agent_with_its_model() {
         let a = parse_request(&json!({"name": "Say \"hi\"", "model": "us.openai.gpt-5.5", "systemPrompt": ""})).unwrap();
         let spec = manifest::parse(&a.id, Path::new("/x"), &manifest_toml(&a)).unwrap();
-        assert_eq!((spec.name.as_str(), spec.env["MODEL"].as_str()), ("Say \"hi\"", "us.openai.gpt-5.5"));
+        assert_eq!((spec.name.as_str(), spec.engine().unwrap().env["MODEL"].as_str()), ("Say \"hi\"", "us.openai.gpt-5.5"));
     }
 
     fn skill_md(name: &str) -> String {
@@ -388,14 +388,14 @@ mod tests {
     fn names_the_runner_mcp_servers_it_uses_in_the_manifest() {
         let a = agent(json!([]), json!(["fetch", "github"]));
         let spec = manifest::parse("r", Path::new("/x"), &manifest_toml(&a)).unwrap();
-        assert_eq!(spec.mcp, vec!["fetch".to_string(), "github".to_string()]);
+        assert_eq!(spec.engine().unwrap().mcp, vec!["fetch".to_string(), "github".to_string()]);
     }
 
     #[test]
     fn a_created_agent_runs_on_the_engine() {
         let a = parse_request(&json!({"name": "Researcher", "model": "m", "systemPrompt": ""})).unwrap();
         let spec = manifest::parse(&a.id, Path::new("/x"), &manifest_toml(&a)).unwrap();
-        assert_eq!(spec.launch, manifest::Launch::Harness(PIZZA_BOT.into()));
+        assert!(spec.builtin());
     }
 
     #[test]
@@ -421,7 +421,7 @@ mod tests {
         let spec = manifest::parse("old", &folder, &std::fs::read_to_string(folder.join("agent.toml")).unwrap()).unwrap();
         let script = folder.join("agent.py").exists();
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!((first, second, spec.launch, spec.env["MODEL"].as_str(), script), (1, 0, manifest::Launch::Harness(PIZZA_BOT.into()), "m", false));
+        assert_eq!((first, second, spec.builtin(), spec.engine().unwrap().env["MODEL"].as_str(), script), (1, 0, true, "m", false));
     }
 
     #[test]
@@ -445,6 +445,6 @@ mod tests {
         let spec = manifest::parse("tester", &folder, &std::fs::read_to_string(folder.join("agent.toml")).unwrap()).unwrap();
         let prompt = std::fs::read_to_string(folder.join("system.md")).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!((spec.name.as_str(), spec.env["MODEL"].as_str(), prompt.as_str()), ("Renamed", "m2", "Be brief."));
+        assert_eq!((spec.name.as_str(), spec.engine().unwrap().env["MODEL"].as_str(), prompt.as_str()), ("Renamed", "m2", "Be brief."));
     }
 }

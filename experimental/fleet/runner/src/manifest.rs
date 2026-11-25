@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::harness::PIZZA_BOT;
+use crate::engine::PIZZA_BOT;
 
-const DEFAULT_TIMEOUT_SECS: u64 = 600;
+pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct InputSpec {
@@ -31,33 +31,42 @@ struct Manifest {
     mcp: Vec<String>,
 }
 
-/// How a run starts: the agent's own command, or a harness the runner provides (e.g. `pizza-bot`).
+/// A built-in agent's folder: the engine runs it with its `[env]`, and its picks from the runner's MCP servers.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Launch {
-    Command(String),
-    Harness(String),
-}
-
-/// One agent folder, as the runner serves it. See agents/README.md for the contract.
-#[derive(Debug, Clone)]
-pub struct AgentSpec {
-    pub id: String,
+pub struct EngineAgent {
     pub dir: PathBuf,
-    pub name: String,
-    pub description: String,
-    pub launch: Launch,
-    pub timeout_secs: u64,
-    pub input: Option<InputSpec>,
     pub env: BTreeMap<String, String>,
-    /// Ids of the runner's MCP servers the agent uses.
     pub mcp: Vec<String>,
 }
 
+/// Built-in agents run on the runner's engine, which configures them; plugin agents are external and bring their own tools.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Host {
+    Engine(EngineAgent),
+    Plugin(String),
+}
+
+/// One agent, as the runner serves it. See agents/README.md and plugins/README.md.
+#[derive(Debug, Clone)]
+pub struct AgentSpec {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub timeout_secs: u64,
+    pub input: Option<InputSpec>,
+    pub host: Host,
+}
+
 impl AgentSpec {
-    /// Runs on the runner's built-in engine, so the runner configures it: model, prompt, skills, MCP servers.
-    /// Every other agent is external and brings its own tools.
+    pub fn engine(&self) -> Option<&EngineAgent> {
+        match &self.host {
+            Host::Engine(e) => Some(e),
+            Host::Plugin(_) => None,
+        }
+    }
+
     pub fn builtin(&self) -> bool {
-        matches!(&self.launch, Launch::Harness(name) if name == PIZZA_BOT)
+        self.engine().is_some()
     }
 }
 
@@ -65,50 +74,46 @@ pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
+/// A built-in agent folder; anything else runs through a plugin.
 pub fn parse(id: &str, dir: &Path, toml_text: &str) -> Result<AgentSpec, String> {
     if !valid_id(id) {
         return Err(format!("agent folder {id:?} must be lowercase letters, digits, - or _"));
     }
     let m: Manifest = toml::from_str(toml_text).map_err(|e| format!("{id}/agent.toml: {e}"))?;
-    let launch = match (m.command, m.harness) {
-        (Some(command), None) => Launch::Command(command),
-        (None, Some(harness)) => Launch::Harness(harness),
-        _ => return Err(format!("{id}/agent.toml needs either command or harness")),
-    };
-    if !m.mcp.is_empty() && launch != Launch::Harness(PIZZA_BOT.into()) {
-        return Err(format!("{id}/agent.toml: only agents on the built-in engine (harness = \"{PIZZA_BOT}\") pick the runner's MCP servers"));
+    if m.command.is_some() || m.harness.as_deref() != Some(PIZZA_BOT) {
+        return Err(format!(
+            "{id}/agent.toml: agent folders run on the built-in engine (harness = \"{PIZZA_BOT}\"); run other agents through a plugin (plugins/README.md)"
+        ));
     }
     Ok(AgentSpec {
         id: id.to_string(),
-        dir: dir.to_path_buf(),
         name: m.name,
         description: m.description,
-        launch,
         timeout_secs: m.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
         input: m.input,
-        env: m.env,
-        mcp: m.mcp,
+        host: Host::Engine(EngineAgent { dir: dir.to_path_buf(), env: m.env, mcp: m.mcp }),
     })
 }
 
-/// Every `<dir>/<id>/agent.toml`, sorted by id.
+/// Every `<dir>/<id>/agent.toml`, sorted by id; a folder that doesn't parse is skipped with a warning,
+/// so one stale agent can't keep the runner from starting.
 pub fn load(dir: &Path) -> Result<Vec<AgentSpec>, String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("cannot read agents dir {}: {e}", dir.display()))?;
     let mut specs: Vec<AgentSpec> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.join("agent.toml").is_file())
-        .map(|p| {
+        .filter_map(|p| {
             let id = p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-            let text = std::fs::read_to_string(p.join("agent.toml")).map_err(|e| format!("{id}/agent.toml: {e}"))?;
-            parse(&id, &p, &text)
+            let parsed = std::fs::read_to_string(p.join("agent.toml")).map_err(|e| format!("{id}/agent.toml: {e}")).and_then(|t| parse(&id, &p, &t));
+            parsed.map_err(|e| tracing::warn!(agent = %id, "skipping agent: {e}")).ok()
         })
-        .collect::<Result<_, _>>()?;
+        .collect();
     specs.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(specs)
 }
 
-/// The first id with no agent folder, so a typo never silently serves nothing.
+/// The first id with no agent, so a typo never silently serves nothing.
 pub fn unknown<'a>(specs: &[AgentSpec], ids: &'a [String]) -> Option<&'a String> {
     ids.iter().find(|id| !specs.iter().any(|s| &s.id == *id))
 }
@@ -118,12 +123,13 @@ mod tests {
     use super::*;
 
     const FULL: &str = r#"
-name = "Dad jokes"
-description = "Writes jokes."
-command = "uv run agent.py"
+name = "Web research"
+description = "Reads pages."
+harness = "pizza-bot"
 timeout_secs = 30
+mcp = ["fetch"]
 [input]
-label = "Topic"
+label = "Question"
 hint = "about what"
 example = "tacos"
 [env]
@@ -132,55 +138,61 @@ MODEL = "m"
 
     #[test]
     fn parses_a_full_manifest() {
-        let s = parse("dadjokes", Path::new("/a"), FULL).unwrap();
+        let s = parse("webresearch", Path::new("/a"), FULL).unwrap();
+        let e = s.engine().unwrap();
         assert_eq!(
-            (s.name.as_str(), s.timeout_secs, s.input.unwrap().label, s.env["MODEL"].as_str()),
-            ("Dad jokes", 30, "Topic".to_string(), "m")
+            (s.name.as_str(), s.timeout_secs, s.input.as_ref().map(|i| i.label.as_str()), e.env["MODEL"].as_str(), e.mcp.clone()),
+            ("Web research", 30, Some("Question"), "m", vec!["fetch".to_string()])
         );
     }
 
     #[test]
     fn defaults_the_timeout() {
-        let s = parse("x", Path::new("/a"), "name = \"X\"\ncommand = \"true\"").unwrap();
+        let s = parse("x", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").unwrap();
         assert_eq!(s.timeout_secs, DEFAULT_TIMEOUT_SECS);
     }
 
     #[test]
-    fn requires_a_command() {
+    fn an_agent_folder_is_builtin() {
+        assert!(parse("x", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").unwrap().builtin());
+    }
+
+    #[test]
+    fn sends_a_command_agent_to_a_plugin() {
+        let err = parse("x", Path::new("/a"), "name = \"X\"\ncommand = \"true\"").unwrap_err();
+        assert!(err.contains("plugin"), "{err}");
+    }
+
+    #[test]
+    fn refuses_another_harness() {
+        assert!(parse("x", Path::new("/a"), "name = \"X\"\nharness = \"docker\"").is_err());
+    }
+
+    #[test]
+    fn requires_a_harness() {
         assert!(parse("x", Path::new("/a"), "name = \"X\"").is_err());
     }
 
     #[test]
-    fn takes_a_harness_instead_of_a_command() {
-        let s = parse("x", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").unwrap();
-        assert_eq!(s.launch, Launch::Harness("pizza-bot".into()));
-    }
-
-    #[test]
-    fn an_agent_on_the_engine_is_builtin_and_a_command_agent_is_not() {
-        let engine = parse("x", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").unwrap();
-        let command = parse("y", Path::new("/a"), "name = \"Y\"\ncommand = \"true\"").unwrap();
-        assert_eq!((engine.builtin(), command.builtin()), (true, false));
-    }
-
-    #[test]
-    fn refuses_runner_mcp_servers_for_an_external_agent() {
-        assert!(parse("x", Path::new("/a"), "name = \"X\"\ncommand = \"true\"\nmcp = [\"fetch\"]").is_err());
-    }
-
-    #[test]
-    fn refuses_both_a_command_and_a_harness() {
-        assert!(parse("x", Path::new("/a"), "name = \"X\"\ncommand = \"true\"\nharness = \"pizza-bot\"").is_err());
-    }
-
-    #[test]
     fn rejects_ids_unsafe_for_urls() {
-        assert!(parse("My Agent", Path::new("/a"), "name = \"X\"\ncommand = \"true\"").is_err());
+        assert!(parse("My Agent", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").is_err());
     }
 
     #[test]
-    fn names_the_first_id_without_a_folder() {
-        let specs = vec![parse("a", Path::new("/a"), "name = \"A\"\ncommand = \"true\"").unwrap()];
+    fn skips_an_agent_folder_that_isnt_for_the_engine() {
+        let dir = std::env::temp_dir().join(format!("fleet-agents-load-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("good")).unwrap();
+        std::fs::create_dir_all(dir.join("old")).unwrap();
+        std::fs::write(dir.join("good/agent.toml"), "name = \"Good\"\nharness = \"pizza-bot\"").unwrap();
+        std::fs::write(dir.join("old/agent.toml"), "name = \"Old\"\ncommand = \"uv run agent.py\"").unwrap();
+        let ids: Vec<String> = load(&dir).unwrap().into_iter().map(|s| s.id).collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(ids, vec!["good".to_string()]);
+    }
+
+    #[test]
+    fn names_the_first_id_without_an_agent() {
+        let specs = vec![parse("a", Path::new("/a"), "name = \"A\"\nharness = \"pizza-bot\"").unwrap()];
         let ids = vec!["a".to_string(), "typo".to_string()];
         assert_eq!(unknown(&specs, &ids), Some(&"typo".to_string()));
     }

@@ -44,6 +44,12 @@ describe("update", () => {
     expect(Object.keys(model.agents)).toEqual(["local/sys"]);
   });
 
+  test("RunnerOk keeps the plugins the runner reports, with their health", () => {
+    const python = { id: "python", name: "Python", version: "1", capabilities: ["cancel"], healthy: false, detail: "uv is missing" };
+    const [model] = run([...withRunningTask.slice(0, 3), { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: null, plugins: [python] }]);
+    expect(model.runners.local?.plugins).toEqual([python]);
+  });
+
   test("an agent the runner stops serving disappears", () => {
     const [model] = run([...withRunningTask.slice(0, 4), healthy([])]);
     expect(model.agents).toEqual({});

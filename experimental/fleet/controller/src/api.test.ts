@@ -29,6 +29,7 @@ const model: Model = {
       available: null,
       canCreateAgents: false,
       harnesses: [],
+      plugins: [],
       mcpServers: {},
       agentsChange: null,
     },

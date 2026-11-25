@@ -1,0 +1,3 @@
+name = "Python"
+# The plugin itself needs Python 3.11+ (tomllib); uv provides one if the machine's is older.
+command = "uv run --quiet --script plugin.py"

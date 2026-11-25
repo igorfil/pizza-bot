@@ -2383,6 +2383,8 @@ button.fleet-inline-run:focus-visible { outline: 2px solid var(--brand); outline
 .fleet-fact dt { color: var(--dim); font-size: 12.5px; }
 .fleet-fact dd { margin: 0; overflow-wrap: anywhere; }
 .fleet-detail-desc { margin: 0; line-height: 1.5; }
+.fleet-plugin-list { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.fleet-plugin-version { font-weight: 400; opacity: .75; }
 .fleet-danger-zone {
   display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 12px 14px; font-size: 12.5px;
   border: 1px solid color-mix(in srgb, var(--bad) 30%, var(--border)); border-radius: 10px;

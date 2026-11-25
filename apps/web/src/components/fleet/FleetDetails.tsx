@@ -11,6 +11,23 @@ import { activeRun, ago, isBuiltin, runnerLabel, runnerLocation, runnerStatusTex
 
 export const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
 
+function PluginList({ runner }: { runner: FleetRunner }) {
+  const plugins = runner.plugins ?? [];
+  if (plugins.length === 0) return <span className="fleet-muted">None</span>;
+  return (
+    <span className="fleet-plugin-list">
+      {plugins.map((p) => (
+        <span key={p.id} className={`fleet-pill fleet-pill-${p.healthy ? "ok" : "bad"}`} title={p.detail || undefined}>
+          <span className={`dot dot-${p.healthy ? "ok" : "bad"}`} aria-hidden="true" />
+          {p.name}
+          {p.version && <span className="fleet-plugin-version">v{p.version}</span>}
+          <span className="sr-only">{p.healthy ? " (healthy)" : ` (unavailable${p.detail ? `: ${p.detail}` : ""})`}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 const TRANSPORT: Record<FleetRunner["transport"], string> = { direct: "Direct", aws_ssm: "AWS SSM tunnel", ssh: "SSH tunnel" };
 
 /** The runner's name, tinted by its health; the tooltip carries where it lives and its status in words. */
@@ -177,7 +194,8 @@ export function RunnerDetailsDialog({
           ["Connection", `${TRANSPORT[runner.transport]} · ${link}`],
           ...(runner.instanceId ? ([["EC2 instance", <code key="i">{runner.instanceId}</code>]] as [string, ReactNode][]) : []),
           ...(runner.origin ? ([["Set up with", runner.origin.summary]] as [string, ReactNode][]) : []),
-          ["Harnesses", runner.harnesses?.length ? runner.harnesses.join(", ") : "—"],
+          ["Built-in engine", runner.canCreateAgents ? "Pizza Bot" : "Not installed"],
+          ["Harness plugins", <PluginList key="p" runner={runner} />],
           ...(runner.lastError ? ([["Last error", <span key="e" className="fleet-tone-bad">{runner.lastError}</span>]] as [string, ReactNode][]) : []),
         ]}
       />

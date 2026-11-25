@@ -1,6 +1,6 @@
 #!/bin/bash
 # TEMPORARY, until runner releases are published: cross-compiles what a fleet-runner-v* release
-# publishes (static musl runner + agents tarball) from this checkout, into runner/target-linux/dist.
+# publishes (static musl runner + agents and plugins tarballs + built-in engine) from this checkout, into runner/target-linux/dist.
 # `npm run build` runs it for both architectures; the AWS guide copies the result (dev-push.sh).
 # Needs: brew install zig; cargo install cargo-zigbuild; rustup target add <arch>-unknown-linux-musl.
 # Usage: dev-build.sh <arm64|x86_64>
@@ -33,6 +33,7 @@ cp "$FLEET/runner/target-linux/$TARGET/release/fleet-runner" "$DIST/$ASSET"
 
 # Keeps macOS extended attributes (com.apple.provenance) out; Linux tar warns about each one.
 COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$DIST/fleet-agents.tar.gz" -C "$FLEET/agents" --exclude README.md --exclude .venv --exclude __pycache__ .
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$DIST/fleet-plugins.tar.gz" -C "$FLEET/plugins" --exclude 'README.md' --exclude 'test_*.py' --exclude .venv --exclude __pycache__ .
 
 # The built-in engine: Node, the fleet-agent bundle, and better-sqlite3 with only its Linux binaries (N-API, any Node 24).
 CACHE="$FLEET/runner/target-linux/cache"

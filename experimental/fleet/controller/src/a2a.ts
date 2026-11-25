@@ -1,7 +1,7 @@
 import { ClientFactory, ClientFactoryOptions, DefaultAgentCardResolver, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
 import { attempt, type Outcome } from "./outcome.js";
-import type { AgentInfo, AgentKind, AgentSkill, Artifact, McpServers, NewAgentSpec, TaskSnapshot, TaskUpdate } from "./types.js";
+import type { AgentInfo, AgentKind, AgentSkill, Artifact, McpServers, NewAgentSpec, PluginInfo, TaskSnapshot, TaskUpdate } from "./types.js";
 
 /** One agent behind a runner link, with its token already read from the vault. */
 export type AgentEndpoint = { url: string; token: string };
@@ -88,6 +88,7 @@ type IndexJson = {
   location?: unknown;
   canCreate?: unknown;
   harnesses?: unknown;
+  plugins?: unknown;
   mcpServers?: unknown;
   created?: unknown;
   available?: NonNullable<IndexJson["agents"]>;
@@ -139,7 +140,30 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
       }
     : null;
 
-export type RunnerIndex = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate: boolean; harnesses: string[]; mcpServers: McpServers };
+export type RunnerIndex = {
+  agents: AgentInfo[];
+  location: string | null;
+  available: AgentInfo[] | null;
+  canCreate: boolean;
+  harnesses: string[];
+  plugins: PluginInfo[];
+  mcpServers: McpServers;
+};
+
+export const pluginsOf = (v: unknown): PluginInfo[] =>
+  Array.isArray(v)
+    ? v
+        .filter(isObject)
+        .filter((p) => str(p.id) !== "")
+        .map((p) => ({
+          id: str(p.id),
+          name: str(p.name) || str(p.id),
+          version: str(p.version),
+          capabilities: strings(p.capabilities),
+          healthy: p.healthy === true,
+          detail: str(p.detail),
+        }))
+    : [];
 
 const infos = (list: IndexJson["agents"]): AgentInfo[] => (list ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null);
 
@@ -150,6 +174,7 @@ const toIndex = (index: IndexJson): RunnerIndex => ({
   available: Array.isArray(index.available) ? infos(index.available) : null,
   canCreate: index.canCreate === true,
   harnesses: strings(index.harnesses),
+  plugins: pluginsOf(index.plugins),
   mcpServers: mcpServersOf(index.mcpServers),
 });
 

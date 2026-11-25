@@ -22,6 +22,11 @@ rm -rf /opt/fleet-engine.new && mkdir -p /opt/fleet-engine.new
 tar -xzf /tmp/fleet-engine-x64-linux.tar.gz -C /opt/fleet-engine.new
 rm -rf /opt/fleet-engine && mv /opt/fleet-engine.new /opt/fleet-engine
 
+curl -fsSL "$RELEASE/fleet-plugins.tar.gz" -o /tmp/fleet-plugins.tar.gz
+rm -rf /opt/fleet-plugins.new && mkdir -p /opt/fleet-plugins.new
+tar -xzf /tmp/fleet-plugins.tar.gz -C /opt/fleet-plugins.new
+rm -rf /opt/fleet-plugins && mv /opt/fleet-plugins.new /opt/fleet-plugins
+
 id fleet-runner >/dev/null 2>&1 || useradd --system --home-dir /var/lib/fleet-runner --create-home fleet-runner
 
 umask 077
@@ -35,6 +40,7 @@ RUNNER_TOKEN=abc123
 RUNNER_BIND=127.0.0.1:9000
 RUNNER_DB=/var/lib/fleet-runner/runner.db
 RUNNER_HARNESS_PIZZA_BOT=/opt/fleet-engine/node/bin/node /opt/fleet-engine/fleet-agent/main.js
+RUNNER_PLUGINS_DIR=/opt/fleet-plugins
 EOF
 umask 022
 

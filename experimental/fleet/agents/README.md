@@ -1,26 +1,26 @@
 # Agents
 
-Each folder here is one agent. A runner scans this directory at startup and serves every agent it
+Each folder here is one **built-in** agent: it runs on the runner's own engine, Pizza Bot's agent
+runtime (`apps/fleet-agent`). A runner scans this directory at startup and serves every agent it
 finds as its own A2A endpoint (`/agents/<folder>/`). The runner owns A2A, auth, the durable task
-store, cancel and health; an agent is just a program that turns one input into results.
+store, cancel and health, and configures the agent: model, system prompt, skills, and picks from its
+MCP servers.
 
-Agents are not part of the runner's source. Add one by adding a folder; no runner rebuild. A
-runner may ship no agents at all (no `agents/` folder): agents are then created on the Fleet page.
+External agents (Python scripts, containers, other runtimes) don't live here: harness plugins run
+them and bring their own tools ([plugins/README.md](../plugins/README.md)). A folder here with a
+`command` instead of the engine is skipped with a warning.
 
-There are two kinds:
-
-- **Built-in** agents run on the runner's own engine (`harness = "pizza-bot"`, below). The runner
-  configures them: model, system prompt, skills, and picks from its MCP servers.
-- **External** agents run their own `command` and bring their own tools. The runner only starts
-  them, relays what they report, and cancels them; they never see its MCP servers, and an
-  `agent.toml` with `command` can't name any (`mcp = [...]` is refused).
+Agents are not part of the runner's source. Add one by adding a folder; no runner rebuild. A runner
+may ship no agents at all (no `agents/` folder): agents are then created on the Fleet page.
 
 ## Folder
 
 ```
 agents/<id>/
 ├── agent.toml     manifest (below)
-└── …              whatever the command needs (agent.py, scripts, a Dockerfile…)
+├── system.md      the system prompt
+├── skills/<id>/   optional skills (SKILL.md and its files)
+└── .mcp.json      optional MCP servers of its own, Claude format
 ```
 
 `<id>` is the folder name: lowercase, used in URLs and task ids.
@@ -28,94 +28,60 @@ agents/<id>/
 ## agent.toml
 
 ```toml
-name = "Dad jokes"                        # shown in UIs
-description = "Writes 5 dad jokes …"      # shown on agent cards
-command = "uv run --quiet agent.py"       # run with `sh -c` in this folder, once per task
-timeout_secs = 120                        # optional, default 600; the run fails after this
+name = "Web research"                     # shown in UIs
+description = "Reads web pages …"         # shown on agent cards
+harness = "pizza-bot"                     # the built-in engine
+timeout_secs = 300                        # optional, default 600; the run fails after this
+mcp = ["fetch"]                           # optional; picks from the runner's MCP servers
 
 [input]                                   # optional; how UIs label the input box
-label = "Topic"
-hint = "what the jokes should be about"
-example = "kubernetes"                    # default input
+label = "Question"
+hint = "a question, ideally with the URLs to read"
+example = "What's on the Hacker News front page?"   # default input
 
-[env]                                     # optional extra environment for the command
-MODEL = "us.openai.gpt-6.1-terra"
+[env]
+MODEL = "us.anthropic.claude-haiku-5-5"   # a Bedrock id, or <provider>:<id>
 ```
 
-Instead of `command`, an agent can name a `harness` the runner provides. `harness = "pizza-bot"` runs
-the folder on pizza-bot's agent runtime (`apps/fleet-agent`): `system.md` is the system prompt,
-`MODEL` in `[env]` the model (a Bedrock id, or `<provider>:<id>`) and `skills/<id>/` the skills.
 MCP servers run on the runner's machine, so they belong to the runner: its library is one
 Claude-format `mcp.json` beside the task store (`RUNNER_MCP_CONFIG`), managed over
-`PUT`/`DELETE /mcp-servers/<id>`, and `mcp = ["fetch", …]` in `agent.toml` picks from it. The runner
-passes the library and the picks as `FLEET_MCP_CONFIG` and `FLEET_MCP_SERVERS`. A shipped agent may
-also bring its own `.mcp.json`. A server that no skill grants gets a skill of its own.
-The runner offers a harness when `RUNNER_HARNESS_<NAME>` holds the command that starts it;
-`npm run dev` sets `RUNNER_HARNESS_PIZZA_BOT` for the laptop runner. See `agents/webresearch`.
+`PUT`/`DELETE /mcp-servers/<id>`, and `mcp = [...]` picks from it. The runner passes the library and
+the picks as `FLEET_MCP_CONFIG` and `FLEET_MCP_SERVERS`. A server that no skill grants gets a skill
+of its own.
 
-## The run contract
+The runner has the engine when `RUNNER_HARNESS_PIZZA_BOT` holds the command that starts it; `npm run
+dev` sets it for the laptop runner, and the AWS guide installs it to `/opt/fleet-engine`.
 
-1. **Start.** The runner runs `command` via `sh -c` with this folder as the working directory, in
-   its own process group. Environment: the runner's own (so `PATH`, AWS credentials, `HOME`), plus
-   `[env]`, plus `FLEET_TASK_ID`.
-2. **Input.** One JSON object on stdin, then stdin closes:
-   ```json
-   {"taskId": "…", "contextId": "…", "input": "kubernetes"}
-   ```
-   A follow-up from the Fleet page is a new task with the earlier run's `contextId`. The `pizza-bot`
-   harness keeps each context's conversation under `.state/` in the folder (or `FLEET_AGENT_STATE`),
-   so it answers with what was said before; an agent that keeps nothing just sees a new input.
-3. **Events.** One JSON object per line on stdout. Anything that isn't a JSON object is ignored.
-   | Line | Meaning |
-   |---|---|
-   | `{"status": "reading inbox"}` | progress; shows as the run's status text |
-   | `{"artifact": {"name": "jokes", "text": "…"}}` | a result; same `name` again replaces it |
-   | `{"error": "Midway expired, run mwinit"}` | the run failed with this reason |
-4. **End.** Exit code 0 and no `error` event → `completed` (status text = last `status`). Otherwise
-   `failed`, with the `error` event, or else the last stderr line, or else the exit code as the reason.
-5. **Logs.** stderr goes to the runner's log. Use it freely.
-6. **Cancel.** SIGTERM to the process group, SIGKILL 5s later. Timeout does the same and fails the run.
+## How a run goes
 
-Test an agent without a runner by piping the input into its command in its folder, e.g.
-`echo '{"input":"tacos"}' | uv run --quiet agent.py`.
-
-## Python agents
-
-Single files with inline dependencies ([PEP 723](https://peps.python.org/pep-0723/)), run with
-`uv run`, so there is no virtualenv to manage:
-
-```python
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["boto3"]
-# ///
-```
-
-## Docker
-
-A container is just another command, e.g.
-`command = "docker run --rm -i -e AWS_REGION my-agent:latest"`. `-i` keeps stdin open for the
-input; stdout and exit code carry the contract unchanged.
+The runner starts the engine once per task in the agent's folder (`sh -c`, its own process group),
+with the runner's environment plus `[env]`, `FLEET_TASK_ID` and the MCP variables above. It writes
+`{"taskId": "…", "contextId": "…", "input": "…"}` on stdin; the engine answers with JSON lines on
+stdout (`{"status": …}`, `{"artifact": {"name": …, "text": …}}`, `{"error": …}`) and exits 0 when it
+succeeded. A follow-up from the Fleet page is a new task with the earlier run's `contextId`; the
+engine keeps each context's conversation under `.state/` in the folder (or `FLEET_AGENT_STATE`), so
+it answers with what was said before. Cancel and timeout send SIGTERM to the process group, SIGKILL
+5s later. stderr goes to the runner's log.
 
 ## The agents here
 
-| id | Kind | Input | Uses |
-|---|---|---|---|
-| `webresearch` | built-in | question | the engine, its own fetch MCP (`.mcp.json`, `uvx mcp-server-fetch`), Bedrock Haiku 5.5 |
+| id | Input | Uses |
+|---|---|---|
+| `webresearch` | question | its own fetch MCP (`.mcp.json`, `uvx mcp-server-fetch`), Bedrock Haiku 5.5 |
 
-Which agents a runner serves starts from `RUNNER_AGENTS` (comma list of ids; default: all folders).
-Add agent on the Fleet page changes it through the runner's `PUT /agents`, which is saved and wins
-from then on.
+Which agents a runner serves starts from `RUNNER_AGENTS` (comma list of ids, including plugin
+agents; default: all). Add agent on the Fleet page changes it through the runner's `PUT /agents`,
+which is saved and wins from then on.
 
 ## Created agents
 
 Add agent → Create new on the Fleet page makes the bare-minimum agent: a name, a Bedrock model and a
 system prompt, plus the runner's MCP servers and skills from Pizza Bot's skill library. It runs on
-the runner's built-in engine (`harness = "pizza-bot"`); a runner without the engine has `canCreate`
-false and refuses to create agents. The agent holds a copy of each skill under `skills/<id>/`; an
-edit that keeps a skill sends only its id, so the copy stays as it was until the skill is picked
-again. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR` (`agent.toml`
-with `MODEL` in `[env]`, `system.md`, `skills/`). Created agents from before the engine ran a
-single-call `agent.py`; the runner moves them to the engine on start. Deleting a created agent
-deletes its folder; a shipped agent is only turned off and can be added back. The runner's AWS
-credentials (on EC2, the instance role) must allow the model.
+the built-in engine; a runner without the engine has `canCreate` false and refuses to create agents.
+The agent holds a copy of each skill under `skills/<id>/`; an edit that keeps a skill sends only its
+id, so the copy stays as it was until the skill is picked again. The runner writes it as an ordinary
+agent folder in `RUNNER_CREATED_AGENTS_DIR` (`agent.toml` with `MODEL` in `[env]`, `system.md`,
+`skills/`). Created agents from before the engine ran a single-call `agent.py`; the runner moves them
+to the engine on start. Deleting a created agent deletes its folder; a shipped agent is only turned
+off and can be added back. The runner's AWS credentials (on EC2, the instance role) must allow the
+model.

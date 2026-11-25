@@ -1,14 +1,16 @@
 mod created;
+mod engine;
 mod events;
 mod exec;
-mod harness;
 mod manifest;
 mod mcp;
+mod plugin;
 mod store;
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use a2a::*;
 use a2a_server::agent_card::agent_card_router;
@@ -23,8 +25,11 @@ use axum::routing::{any, delete, get, put};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use harness::{Harnesses, PIZZA_BOT};
-use manifest::{AgentSpec, Launch};
+use engine::{Engine, PIZZA_BOT};
+use manifest::{AgentSpec, Host};
+use plugin::Plugins;
+
+const PLUGIN_CHECK_EVERY: Duration = Duration::from_secs(30);
 
 struct Config {
     name: String,
@@ -37,7 +42,9 @@ struct Config {
     created_dir: PathBuf,
     only: Option<Vec<String>>,
     location: Option<String>,
-    harnesses: Arc<Harnesses>,
+    engine: Arc<Engine>,
+    /// Harness plugins for external agents (plugins/README.md); none when the folder is missing.
+    plugins_dir: PathBuf,
     /// The runner's MCP library; beside the task store unless `RUNNER_MCP_CONFIG` says otherwise.
     mcp_config: PathBuf,
 }
@@ -62,7 +69,8 @@ fn load_config() -> Result<Config, String> {
             .ok()
             .map(|s| s.split(',').map(|id| id.trim().to_string()).filter(|id| !id.is_empty()).collect()),
         location: std::env::var("RUNNER_LOCATION").ok().filter(|l| !l.is_empty()),
-        harnesses: Arc::new(Harnesses::from_vars(std::env::vars())),
+        engine: Arc::new(Engine::from_vars(std::env::vars())),
+        plugins_dir: PathBuf::from(env_or("RUNNER_PLUGINS_DIR", "plugins")),
         mcp_config: std::env::var("RUNNER_MCP_CONFIG").map(PathBuf::from).unwrap_or_else(|_| data_dir.join("mcp.json")),
         bind,
     })
@@ -113,8 +121,12 @@ fn agent_card(cfg: &Config, spec: &AgentSpec) -> AgentCard {
     }
 }
 
+fn created_dir_of<'a>(cfg: &Config, s: &'a AgentSpec) -> Option<&'a PathBuf> {
+    s.engine().map(|e| &e.dir).filter(|dir| dir.starts_with(&cfg.created_dir))
+}
+
 fn is_created(cfg: &Config, s: &AgentSpec) -> bool {
-    s.dir.starts_with(&cfg.created_dir)
+    created_dir_of(cfg, s).is_some()
 }
 
 /// Created agents also carry their model and system prompt, so a UI can edit them.
@@ -127,13 +139,13 @@ fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
         "url": agent_url(cfg, s),
         "created": is_created(cfg, s),
         "kind": if s.builtin() { "builtin" } else { "external" },
-        "harness": match &s.launch { Launch::Harness(name) => Some(name), Launch::Command(_) => None },
-        "mcp": s.mcp,
+        "harness": match &s.host { Host::Engine(_) => PIZZA_BOT, Host::Plugin(plugin) => plugin },
+        "mcp": s.engine().map(|e| e.mcp.clone()).unwrap_or_default(),
     });
-    if is_created(cfg, s) {
-        v["model"] = json!(s.env.get("MODEL"));
-        v["systemPrompt"] = json!(std::fs::read_to_string(s.dir.join("system.md")).unwrap_or_default());
-        v["skills"] = created::skills_json(&s.dir);
+    if let Some(e) = s.engine().filter(|_| is_created(cfg, s)) {
+        v["model"] = json!(e.env.get("MODEL"));
+        v["systemPrompt"] = json!(std::fs::read_to_string(e.dir.join("system.md")).unwrap_or_default());
+        v["skills"] = created::skills_json(&e.dir);
     }
     v
 }
@@ -164,6 +176,7 @@ struct App {
     sqlite: Arc<store::SqliteTaskStore>,
     store: store::SharedStore,
     runs: exec::Runs,
+    plugins: Plugins,
     mcp: mcp::McpLibrary,
     bearer: Arc<String>,
     agents: RwLock<Agents>,
@@ -174,7 +187,8 @@ impl App {
         let executor = exec::ExecAgent {
             spec: Arc::new(spec.clone()),
             runs: self.runs.clone(),
-            harnesses: self.cfg.harnesses.clone(),
+            engine: self.cfg.engine.clone(),
+            plugins: self.plugins.clone(),
             mcp_config: Arc::new(self.cfg.mcp_config.clone()),
         };
         let handler = Arc::new(DefaultRequestHandler::new(executor, self.store.clone()).with_capabilities(capabilities()));
@@ -197,7 +211,8 @@ impl App {
             "agents": on.iter().map(|s| agent_json(&self.cfg, s)).collect::<Vec<_>>(),
             "available": off.iter().map(|s| agent_json(&self.cfg, s)).collect::<Vec<_>>(),
             "canCreate": self.pizza_bot(),
-            "harnesses": self.cfg.harnesses.names(),
+            "harnesses": if self.pizza_bot() { vec![PIZZA_BOT] } else { vec![] },
+            "plugins": self.plugins.infos(),
             "mcpServers": self.mcp.servers(),
         })
     }
@@ -228,7 +243,51 @@ impl App {
     }
 
     fn pizza_bot(&self) -> bool {
-        self.cfg.harnesses.has(PIZZA_BOT)
+        self.cfg.engine.available()
+    }
+
+    /// Replaces a plugin's agents with what it lists now; one whose id another agent has is skipped.
+    fn set_plugin_agents(&self, plugin: &str, listed: Vec<AgentSpec>) {
+        let ours = |s: &AgentSpec| matches!(&s.host, Host::Plugin(p) if p == plugin);
+        let fresh: Vec<AgentSpec> = {
+            let agents = self.agents.read().unwrap();
+            let current: Vec<&String> = agents.specs.iter().filter(|s| ours(s)).map(|s| &s.id).collect();
+            if listed.len() == current.len() && listed.iter().all(|s| current.contains(&&s.id)) {
+                return;
+            }
+            listed
+                .into_iter()
+                .filter(|s| {
+                    let taken = agents.specs.iter().any(|t| t.id == s.id && !ours(t));
+                    if taken {
+                        tracing::warn!(plugin = %plugin, agent = %s.id, "plugin agent has the id of another agent; ignored");
+                    }
+                    !taken
+                })
+                .collect()
+        };
+        let routers: Vec<(String, axum::Router)> = fresh.iter().map(|s| (s.id.clone(), self.agent_router(s))).collect();
+        let mut agents = self.agents.write().unwrap();
+        let gone: Vec<String> = agents.specs.iter().filter(|s| ours(s)).map(|s| s.id.clone()).collect();
+        gone.iter().for_each(|id| {
+            agents.routers.remove(id);
+        });
+        agents.specs.retain(|s| !ours(s));
+        agents.routers.extend(routers);
+        agents.specs.extend(fresh);
+        agents.specs.sort_by(|a, b| a.id.cmp(&b.id));
+        tracing::info!(plugin = %plugin, agents = ?agents.specs.iter().filter(|s| ours(s)).map(|s| &s.id).collect::<Vec<_>>(), "plugin agents changed");
+    }
+
+    /// Health and agent lists of every plugin; a plugin that exited starts again here.
+    async fn check_plugins(&self) {
+        for plugin in self.plugins.all() {
+            plugin.check().await;
+            match plugin.agents().await {
+                Ok(listed) => self.set_plugin_agents(&plugin.def.id, listed),
+                Err(e) => tracing::warn!(plugin = %plugin.def.id, "couldn't list agents: {e}"),
+            }
+        }
     }
 
     fn parse_agent(&self, body: &Value) -> Result<created::NewAgent, ApiError> {
@@ -272,10 +331,9 @@ impl App {
         let folder = {
             let agents = self.agents.read().unwrap();
             let spec = agents.specs.iter().find(|s| s.id == id).ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("this runner has no agent {id:?}")))?;
-            if !is_created(&self.cfg, spec) {
-                return Err(api_error(StatusCode::CONFLICT, format!("{id:?} ships with the runner; only agents created here can be edited")));
-            }
-            spec.dir.clone()
+            created_dir_of(&self.cfg, spec)
+                .cloned()
+                .ok_or_else(|| api_error(StatusCode::CONFLICT, format!("{id:?} ships with the runner or a plugin; only agents created here can be edited")))?
         };
         let mut request = body.as_object().cloned().unwrap_or_default();
         request.insert("id".into(), json!(id));
@@ -299,7 +357,7 @@ impl App {
         let folder = {
             let agents = self.agents.read().unwrap();
             let spec = agents.specs.iter().find(|s| s.id == id).ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("this runner has no agent {id:?}")))?;
-            is_created(&self.cfg, spec).then(|| spec.dir.clone())
+            created_dir_of(&self.cfg, spec).cloned()
         };
         if let Some(folder) = &folder {
             std::fs::remove_dir_all(folder).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{}: {e}", folder.display())))?;
@@ -393,7 +451,7 @@ fn initial_served(cfg: &Config, specs: &[AgentSpec], saved: Option<Vec<String>>)
     }
     if let Some(only) = &cfg.only {
         if let Some(missing) = manifest::unknown(specs, only) {
-            return Err(format!("RUNNER_AGENTS lists {missing:?}, but {} has no such agent", cfg.agents_dir.display()));
+            return Err(format!("RUNNER_AGENTS lists {missing:?}, but neither {} nor a plugin has such an agent", cfg.agents_dir.display()));
         }
         return Ok(only.iter().cloned().collect());
     }
@@ -433,14 +491,16 @@ async fn main() -> Result<(), String> {
     if orphans > 0 {
         tracing::warn!(orphans, "marked tasks interrupted by restart as failed");
     }
-    let served = initial_served(&cfg, &specs, sqlite.served_agents().map_err(|e| e.to_string())?)?;
+    let plugins = Plugins::new(plugin::load_defs(&cfg.plugins_dir));
+    let saved = sqlite.served_agents().map_err(|e| e.to_string())?;
     let app = Arc::new(App {
         bearer: Arc::new(format!("Bearer {}", cfg.token)),
         store: store::SharedStore(sqlite.clone()),
         sqlite,
         runs: exec::Runs::default(),
+        plugins,
         mcp: mcp::McpLibrary::new(cfg.mcp_config.clone()),
-        agents: RwLock::new(Agents { specs: vec![], served, routers: HashMap::new() }),
+        agents: RwLock::new(Agents { specs: vec![], served: BTreeSet::new(), routers: HashMap::new() }),
         cfg,
     });
     let routers: HashMap<String, axum::Router> = specs.iter().map(|s| (s.id.clone(), app.agent_router(s))).collect();
@@ -449,6 +509,18 @@ async fn main() -> Result<(), String> {
         agents.specs = specs;
         agents.routers = routers;
     }
+    app.check_plugins().await;
+    let served = initial_served(&app.cfg, &app.agents.read().unwrap().specs, saved)?;
+    app.agents.write().unwrap().served = served;
+    let checker = app.clone();
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(PLUGIN_CHECK_EVERY);
+        every.tick().await;
+        loop {
+            every.tick().await;
+            checker.check_plugins().await;
+        }
+    });
 
     let router = axum::Router::new()
         .route("/agents", get(|State(app): State<Arc<App>>| async move { Json(app.index()) }).put(put_agents).post(post_agents))
@@ -459,6 +531,7 @@ async fn main() -> Result<(), String> {
 
     let listener = tokio::net::TcpListener::bind(&app.cfg.bind).await.map_err(|e| e.to_string())?;
     let ids: Vec<String> = app.agents.read().unwrap().served.iter().cloned().collect();
-    tracing::info!(name = %app.cfg.name, agents = ?ids, harnesses = ?app.cfg.harnesses.names(), bind = %app.cfg.bind, public_url = %app.cfg.public_url, "runner listening");
+    let plugin_ids: Vec<String> = app.plugins.all().iter().map(|p| p.def.id.clone()).collect();
+    tracing::info!(name = %app.cfg.name, agents = ?ids, engine = app.pizza_bot(), plugins = ?plugin_ids, bind = %app.cfg.bind, public_url = %app.cfg.public_url, "runner listening");
     axum::serve(listener, router).await.map_err(|e| e.to_string())
 }

@@ -58,7 +58,15 @@ const replay = (log: MsgLog): { model: Model; version: number } =>
     { model: initialModel(), version: 0 },
   );
 
-const indexFields = ({ agents, location, available, canCreate, harnesses, mcpServers }: a2a.RunnerIndex) => ({ agents, location, available, canCreate, harnesses, mcpServers });
+const indexFields = ({ agents, location, available, canCreate, harnesses, plugins, mcpServers }: a2a.RunnerIndex) => ({
+  agents,
+  location,
+  available,
+  canCreate,
+  harnesses,
+  plugins,
+  mcpServers,
+});
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 

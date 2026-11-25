@@ -71,6 +71,11 @@ describe("install script", () => {
       lines.includes("RUNNER_HARNESS_PIZZA_BOT=/opt/fleet-engine/node/bin/node /opt/fleet-engine/fleet-agent/main.js"),
     ]).toEqual([true, true]);
   });
+
+  test("installs the harness plugins and points the runner at them", () => {
+    const lines = script.split("\n");
+    expect([lines.some((l) => l.startsWith("curl") && l.includes("fleet-plugins.tar.gz")), lines.includes("RUNNER_PLUGINS_DIR=/opt/fleet-plugins")]).toEqual([true, true]);
+  });
 });
 
 describe("Bedrock check", () => {

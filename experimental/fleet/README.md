@@ -111,6 +111,7 @@ curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r3","type":"AddRunner","p
 ║  │  built-in engine: apps/fleet-agent                      │   │ auto-reconnect  │  ║
 ║  │  /agents/webresearch   agents/webresearch (built-in)    │   └────────┬────────┘  ║
 ║  │  /agents/<created>     created-agents/<id> (built-in)   │            │           ║
+║  │  /agents/slow          plugins/python (external)        │            │           ║
 ║  └─────────────────────────────────────────────────────────┘            │           ║
 ╚═════════════════════════════════════════════════════════════════════════┼═══════════╝
                                                                           │ SSH over SSM
@@ -275,15 +276,20 @@ at 30s, resync of open runs every 30s, a tick gap over 10s counts as wake.
 
 ## Runner
 
-A generic host: one process per machine, serving agent folders from `RUNNER_AGENTS_DIR`. It knows
-nothing about what agents do. Agents are separate programs (any language, or Docker); the contract
-is in [agents/README.md](agents/README.md): JSON on stdin, JSON-line events on stdout, exit code.
+An orchestrator and observer: one process per machine. It runs its own **built-in** agents on the
+Pizza Bot engine and configures them (model, prompt, skills, its MCP servers;
+[agents/README.md](agents/README.md)), and runs **external** agents through harness plugins that it
+only starts, watches and cancels ([plugins/README.md](plugins/README.md)). Either way it owns A2A,
+auth, the task store, timeouts and health.
 
 | Env | Default | |
 |---|---|---|
 | `RUNNER_TOKEN` | required | bearer token the Controller must send |
-| `RUNNER_AGENTS_DIR` | `agents` | folder of agent folders |
-| `RUNNER_AGENTS` | all | comma list of agent ids to serve at first start (an unknown id is a startup error); once the Controller sets them with `PUT /agents`, that saved list wins |
+| `RUNNER_AGENTS_DIR` | `agents` | folder of built-in agent folders; may be missing |
+| `RUNNER_HARNESS_PIZZA_BOT` | none | command that starts the built-in engine; without it the runner can't run built-in or created agents |
+| `RUNNER_PLUGINS_DIR` | `plugins` | folder of harness plugins; may be missing |
+| `RUNNER_MCP_CONFIG` | `mcp.json` next to `RUNNER_DB` | the runner's MCP servers, for built-in agents only |
+| `RUNNER_AGENTS` | all | comma list of agent ids (built-in or plugin) to serve at first start (an unknown id is a startup error); once the Controller sets them with `PUT /agents`, that saved list wins |
 | `RUNNER_BIND` | `127.0.0.1:9000` | |
 | `RUNNER_PUBLIC_URL` | `http://$RUNNER_BIND` | base URL agent cards advertise; must be the URL the Controller uses |
 | `RUNNER_DB` | `runner.db` | SQLite task store, shared by all its agents |
@@ -291,12 +297,15 @@ is in [agents/README.md](agents/README.md): JSON on stdin, JSON-line events on s
 | `RUNNER_NAME` | `runner` | runner name in `GET /agents` |
 | `RUNNER_LOCATION` | none | where it runs ("this laptop", "EC2 us-west-2"); in `GET /agents` and card `provider.organization` |
 
-Agents inherit the runner's environment (so `PATH`, AWS credentials), plus their manifest's `[env]`.
+Built-in agents and plugins inherit the runner's environment (so `PATH`, AWS credentials), plus
+their manifest's `[env]`.
 
 Endpoints:
-- `GET /agents`: public; `{runner, location, agents: [...], available: [...]}`, each entry
-  `{id, name, description, input, url}`. `agents` are served; `available` are on disk but off. The
-  Controller uses it for discovery and as the runner health check.
+- `GET /agents`: public; `{runner, location, agents: [...], available: [...], canCreate, harnesses,
+  plugins, mcpServers}`, each agent `{id, name, description, input, url, kind, harness}` (`kind` is
+  `builtin` or `external`; `harness` is `pizza-bot` or the plugin's id). `agents` are served;
+  `available` are known but off. `plugins` lists each plugin's name, version, capabilities and last
+  health. The Controller uses it for discovery and as the runner health check.
 - `POST /agents`: bearer token required; `{name, model, systemPrompt}` writes an agent for the
   built-in engine (`agent.toml`, `system.md`, `skills/`) into `RUNNER_CREATED_AGENTS_DIR`, serves it
   at once, and answers with the new index plus `created: <id>`. The index's `canCreate` says the
@@ -340,14 +349,17 @@ re-reporting its agents.
 npm test -w @pizza-bot/fleet-controller                 # from the repo root: update() + API tests
 npm run typecheck -w @pizza-bot/fleet-controller
 cd experimental/fleet/runner && cargo test
+python3 -m unittest discover -s experimental/fleet/plugins/python   # from the repo root
 ```
 
 ### Reconnect scenarios
 
-The real agents finish in seconds. Mid-run tests need an agent that runs for a while.
+The real agents finish in seconds. For mid-run tests use the Python plugin's `laptop/slow` (served by
+`npm run dev`), e.g. input `steps=20 every=3 x`.
 
 1. **Close the UI**: start a run, quit, reopen. The result is there.
-2. **Controller dies mid-run**: start a long run, kill the Controller partway, wait 30s, restart. It catches up to the current step or to `completed`.
+2. **Controller dies mid-run**: run `steps=20 every=3 x` on `laptop/slow`, kill the Controller at step 3, wait
+   30s, restart. It catches up to the current step or to `completed`.
 3. **Network to EC2 drops**: stop `tunnel.sh`. `ec2` turns `unreachable` with a retry countdown within
    ~15s; restart it and it turns healthy.
 4. **Laptop sleep**: start a long fake run, close the lid for a minute, open it. A "wake detected,

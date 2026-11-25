@@ -286,7 +286,7 @@ const syncAgents = (model: Model, runner: string, infos: AgentInfo[]): Model => 
   return { ...model, agents: { ...others, ...mine } };
 };
 
-const runnerOk = (model: Model, name: string, { agents, location, available, canCreate, harnesses, mcpServers }: RunnerIndexFields): Result => {
+const runnerOk = (model: Model, name: string, { agents, location, available, canCreate, harnesses, plugins, mcpServers }: RunnerIndexFields): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
   const recovered = runner.status !== "healthy";
@@ -302,6 +302,7 @@ const runnerOk = (model: Model, name: string, { agents, location, available, can
       available: available ?? null,
       canCreateAgents: canCreate === true,
       harnesses: harnesses ?? [],
+      plugins: plugins ?? [],
       mcpServers: mcpServers ?? {},
     }),
     name,

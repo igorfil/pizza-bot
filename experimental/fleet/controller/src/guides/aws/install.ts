@@ -11,6 +11,11 @@ export const engineTarball = (arch: Arch): string => `fleet-engine-${arch === "a
 
 const ENGINE_DIR = "/opt/fleet-engine";
 
+export const PLUGINS_TARBALL = "fleet-plugins.tar.gz";
+
+/** Harness plugins for external agents (plugins/README.md). */
+const PLUGINS_DIR = "/opt/fleet-plugins";
+
 /**
  * Bootstrap run as root over SSM RunCommand. Idempotent: running it again upgrades in place.
  * A fresh runner serves no agents; they are created on, or turned on from, the Fleet page.
@@ -37,6 +42,11 @@ rm -rf ${ENGINE_DIR}.new && mkdir -p ${ENGINE_DIR}.new
 tar -xzf /tmp/${engineTarball(o.arch)} -C ${ENGINE_DIR}.new
 rm -rf ${ENGINE_DIR} && mv ${ENGINE_DIR}.new ${ENGINE_DIR}
 
+curl -fsSL "$RELEASE/${PLUGINS_TARBALL}" -o /tmp/${PLUGINS_TARBALL}
+rm -rf ${PLUGINS_DIR}.new && mkdir -p ${PLUGINS_DIR}.new
+tar -xzf /tmp/${PLUGINS_TARBALL} -C ${PLUGINS_DIR}.new
+rm -rf ${PLUGINS_DIR} && mv ${PLUGINS_DIR}.new ${PLUGINS_DIR}
+
 id fleet-runner >/dev/null 2>&1 || useradd --system --home-dir /var/lib/fleet-runner --create-home fleet-runner
 
 umask 077
@@ -50,6 +60,7 @@ RUNNER_TOKEN=${o.token}
 RUNNER_BIND=127.0.0.1:${o.port}
 RUNNER_DB=/var/lib/fleet-runner/runner.db
 RUNNER_HARNESS_PIZZA_BOT=${ENGINE_DIR}/node/bin/node ${ENGINE_DIR}/fleet-agent/main.js
+RUNNER_PLUGINS_DIR=${PLUGINS_DIR}
 EOF
 umask 022
 
@@ -153,7 +164,7 @@ export const uninstallScript = (): string => `#!/bin/bash
 set -uo pipefail
 systemctl disable --now fleet-runner
 rm -f /etc/systemd/system/fleet-runner.service /etc/fleet-runner.env /usr/local/bin/fleet-runner
-rm -rf /opt/fleet-agents ${ENGINE_DIR} /tmp/fleet-local
+rm -rf /opt/fleet-agents ${ENGINE_DIR} ${PLUGINS_DIR} /tmp/fleet-local
 userdel -r fleet-runner
 rm -rf /var/lib/fleet-runner
 systemctl daemon-reload

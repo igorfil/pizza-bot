@@ -13,9 +13,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Notify;
 
+use crate::engine::Engine;
 use crate::events::{artifact, prompt_text, status};
-use crate::harness::Harnesses;
-use crate::manifest::AgentSpec;
+use crate::manifest::{AgentSpec, EngineAgent, Host};
+use crate::plugin::{Plugins, TaskEvent};
 
 const KILL_GRACE: Duration = Duration::from_secs(5);
 const STDERR_TAIL: usize = 20;
@@ -81,7 +82,8 @@ impl Runs {
 pub struct ExecAgent {
     pub spec: Arc<AgentSpec>,
     pub runs: Runs,
-    pub harnesses: Arc<Harnesses>,
+    pub engine: Arc<Engine>,
+    pub plugins: Plugins,
     pub mcp_config: Arc<PathBuf>,
 }
 
@@ -102,21 +104,22 @@ async fn stop(child: &mut Child) {
     }
 }
 
-/// What a run gets on top of the runner's environment; only built-in agents see the runner's MCP library.
-pub fn run_env(spec: &AgentSpec, task_id: &str, mcp_config: &Path) -> Vec<(String, String)> {
-    let base = spec.env.iter().map(|(k, v)| (k.clone(), v.clone())).chain([("FLEET_TASK_ID".to_string(), task_id.to_string())]);
-    let mcp = spec
-        .builtin()
-        .then(|| [("FLEET_MCP_CONFIG".to_string(), mcp_config.display().to_string()), ("FLEET_MCP_SERVERS".to_string(), spec.mcp.join(","))]);
-    base.chain(mcp.into_iter().flatten()).collect()
+/// What an engine run gets on top of the runner's environment, including the runner's MCP library and the agent's picks.
+pub fn run_env(agent: &EngineAgent, task_id: &str, mcp_config: &Path) -> Vec<(String, String)> {
+    let extra = [
+        ("FLEET_TASK_ID", task_id.to_string()),
+        ("FLEET_MCP_CONFIG", mcp_config.display().to_string()),
+        ("FLEET_MCP_SERVERS", agent.mcp.join(",")),
+    ];
+    agent.env.iter().map(|(k, v)| (k.clone(), v.clone())).chain(extra.map(|(k, v)| (k.to_string(), v))).collect()
 }
 
-fn spawn(spec: &AgentSpec, command: &str, task_id: &str, mcp_config: &Path) -> std::io::Result<Child> {
+fn spawn(agent: &EngineAgent, command: &str, task_id: &str, mcp_config: &Path) -> std::io::Result<Child> {
     Command::new("sh")
         .arg("-c")
         .arg(command)
-        .current_dir(&spec.dir)
-        .envs(run_env(spec, task_id, mcp_config))
+        .current_dir(&agent.dir)
+        .envs(run_env(agent, task_id, mcp_config))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -125,13 +128,14 @@ fn spawn(spec: &AgentSpec, command: &str, task_id: &str, mcp_config: &Path) -> s
         .spawn()
 }
 
-impl AgentExecutor for ExecAgent {
-    fn execute(&self, ctx: ExecutorContext) -> BoxStream<'static, Result<StreamResponse, A2AError>> {
-        let (task_id, context_id) = ctx.task_info();
-        let input = prompt_text(&ctx);
+type Events = BoxStream<'static, Result<StreamResponse, A2AError>>;
+
+impl ExecAgent {
+    /// One engine process per run, speaking the agent contract (agents/README.md).
+    fn run_on_engine(&self, agent: EngineAgent, task_id: String, context_id: String, input: String) -> Events {
         let spec = self.spec.clone();
         let runs = self.runs.clone();
-        let command = self.harnesses.command(&spec.launch);
+        let command = self.engine.command();
         let mcp_config = self.mcp_config.clone();
 
         Box::pin(async_stream::stream! {
@@ -142,7 +146,7 @@ impl AgentExecutor for ExecAgent {
                     return;
                 }
             };
-            let mut child = match spawn(&spec, &command, &task_id, &mcp_config) {
+            let mut child = match spawn(&agent, &command, &task_id, &mcp_config) {
                 Ok(c) => c,
                 Err(e) => {
                     yield Ok(status(&task_id, &context_id, TaskState::Failed, &format!("could not start {command:?}: {e}")));
@@ -212,7 +216,76 @@ impl AgentExecutor for ExecAgent {
         })
     }
 
-    fn cancel(&self, ctx: ExecutorContext) -> BoxStream<'static, Result<StreamResponse, A2AError>> {
+    /// The plugin runs it; the runner relays its events and still owns the timeout.
+    fn run_on_plugin(&self, plugin_id: String, task_id: String, context_id: String, input: String) -> Events {
+        let spec = self.spec.clone();
+        let runs = self.runs.clone();
+        let plugin = self.plugins.get(&plugin_id);
+
+        Box::pin(async_stream::stream! {
+            let Some(plugin) = plugin else {
+                yield Ok(status(&task_id, &context_id, TaskState::Failed, &format!("this runner has no {plugin_id} plugin")));
+                return;
+            };
+            let mut events = match plugin.run(&task_id, &context_id, &spec.id, &input).await {
+                Ok(rx) => rx,
+                Err(e) => {
+                    yield Ok(status(&task_id, &context_id, TaskState::Failed, &e));
+                    return;
+                }
+            };
+            let cancelled = runs.register(&task_id);
+            yield Ok(status(&task_id, &context_id, TaskState::Working, "starting"));
+            let deadline = tokio::time::sleep(Duration::from_secs(spec.timeout_secs));
+            tokio::pin!(deadline);
+            let (mut error, mut last_status) = (None::<String>, None::<String>);
+
+            loop {
+                tokio::select! {
+                    event = events.recv() => match event {
+                        Some(TaskEvent::Status(s)) => {
+                            last_status = Some(s.clone());
+                            yield Ok(status(&task_id, &context_id, TaskState::Working, &s));
+                        }
+                        Some(TaskEvent::Artifact { name, text }) => yield Ok(artifact(&task_id, &context_id, &name, text)),
+                        Some(TaskEvent::Error(e)) => error = Some(e),
+                        Some(TaskEvent::Done) | None => break,
+                    },
+                    _ = cancelled.notified() => {
+                        plugin.cancel(&task_id).await;
+                        runs.finish(&task_id);
+                        return;
+                    }
+                    _ = &mut deadline => {
+                        plugin.cancel(&task_id).await;
+                        runs.finish(&task_id);
+                        yield Ok(status(&task_id, &context_id, TaskState::Failed, &format!("timed out after {}s", spec.timeout_secs)));
+                        return;
+                    }
+                }
+            }
+
+            runs.finish(&task_id);
+            let (state, text) = match error {
+                Some(e) => (TaskState::Failed, e),
+                None => (TaskState::Completed, last_status.unwrap_or_else(|| "done".to_string())),
+            };
+            yield Ok(status(&task_id, &context_id, state, &text));
+        })
+    }
+}
+
+impl AgentExecutor for ExecAgent {
+    fn execute(&self, ctx: ExecutorContext) -> Events {
+        let (task_id, context_id) = ctx.task_info();
+        let input = prompt_text(&ctx);
+        match self.spec.host.clone() {
+            Host::Engine(agent) => self.run_on_engine(agent, task_id, context_id, input),
+            Host::Plugin(plugin) => self.run_on_plugin(plugin, task_id, context_id, input),
+        }
+    }
+
+    fn cancel(&self, ctx: ExecutorContext) -> Events {
         let (task_id, context_id) = ctx.task_info();
         self.runs.cancel(&task_id);
         let event = status(&task_id, &context_id, TaskState::Canceled, "canceled");
@@ -267,19 +340,15 @@ mod tests {
         assert_eq!(outcome(Some(1), None, Some("KeyError: x"), None), (TaskState::Failed, "KeyError: x".into()));
     }
 
-    fn env_keys(toml_text: &str) -> Vec<String> {
-        let spec = crate::manifest::parse("a", Path::new("/a"), toml_text).unwrap();
-        run_env(&spec, "t1", Path::new("/data/mcp.json")).into_iter().map(|(k, _)| k).collect()
-    }
-
     #[test]
-    fn a_builtin_agent_gets_the_runner_mcp_library() {
-        assert_eq!(env_keys("name = \"A\"\nharness = \"pizza-bot\""), ["FLEET_TASK_ID", "FLEET_MCP_CONFIG", "FLEET_MCP_SERVERS"]);
-    }
-
-    #[test]
-    fn an_external_agent_never_sees_the_runner_mcp_library() {
-        assert_eq!(env_keys("name = \"A\"\ncommand = \"true\"\n[env]\nX = \"1\""), ["X", "FLEET_TASK_ID"]);
+    fn an_engine_run_gets_the_runner_mcp_library_and_its_picks() {
+        let spec = crate::manifest::parse("a", Path::new("/a"), "name = \"A\"\nharness = \"pizza-bot\"\nmcp = [\"fetch\", \"github\"]\n[env]\nMODEL = \"m\"").unwrap();
+        let env = run_env(spec.engine().unwrap(), "t1", Path::new("/data/mcp.json"));
+        assert_eq!(
+            env,
+            [("MODEL", "m"), ("FLEET_TASK_ID", "t1"), ("FLEET_MCP_CONFIG", "/data/mcp.json"), ("FLEET_MCP_SERVERS", "fetch,github")]
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+        );
     }
 
     #[test]

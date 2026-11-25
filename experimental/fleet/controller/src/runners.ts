@@ -30,6 +30,7 @@ export const addRunner = (model: Model, spec: NewRunner): Model =>
       available: null,
       canCreateAgents: false,
       harnesses: [],
+      plugins: [],
       mcpServers: {},
       agentsChange: null,
     }),
