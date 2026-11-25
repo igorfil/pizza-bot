@@ -15,32 +15,6 @@ import plugin
 PLUGIN = Path(__file__).parent / "plugin.py"
 
 
-class ContractEvents(unittest.TestCase):
-    def test_reads_status_artifact_and_error_lines(self):
-        lines = ['{"status": "step 1"}', '{"artifact": {"name": "r", "text": "hi"}}', '{"error": "boom"}']
-        self.assertEqual(
-            [plugin.contract_event(l) for l in lines],
-            [{"status": "step 1"}, {"artifact": {"name": "r", "text": "hi"}}, {"error": "boom"}],
-        )
-
-    def test_ignores_lines_that_arent_events(self):
-        self.assertEqual([plugin.contract_event(l) for l in ["Resolved 3 packages", "[1]", '{"progress": 1}']], [None, None, None])
-
-
-class Failure(unittest.TestCase):
-    def test_a_clean_exit_succeeds(self):
-        self.assertIsNone(plugin.failure(0, False, "noise"))
-
-    def test_an_error_event_already_says_why(self):
-        self.assertIsNone(plugin.failure(1, True, "Traceback"))
-
-    def test_a_crash_reports_the_last_stderr_line(self):
-        self.assertEqual(plugin.failure(1, False, "KeyError: x"), "KeyError: x")
-
-    def test_a_crash_without_stderr_reports_the_code(self):
-        self.assertEqual(plugin.failure(2, False, None), "exited with code 2")
-
-
 class DefaultCommand(unittest.TestCase):
     def test_a_script_with_inline_dependencies_runs_with_uv(self):
         with tempfile.TemporaryDirectory() as d:

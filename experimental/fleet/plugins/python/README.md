@@ -53,5 +53,5 @@ Test an agent alone: `cd agents/slow && echo '{"input":"steps=2 every=1 hi"}' | 
 ## Testing
 
 ```bash
-python3 -m unittest discover -s experimental/fleet/plugins/python
+python3 -m unittest discover -s experimental/fleet/plugins/python   # needs Python 3.11+
 ```
