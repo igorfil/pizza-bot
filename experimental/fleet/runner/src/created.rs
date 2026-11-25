@@ -1,5 +1,5 @@
-//! Agents made over `POST /agents`: a folder with agent.toml and system.md, run by the `pizza-bot`
-//! harness when the runner has one, else by the built-in single-call prompt script.
+//! Agents made over `POST /agents`: a folder with agent.toml, system.md and skills, run on the
+//! runner's built-in engine (the `pizza-bot` harness).
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
@@ -10,13 +10,14 @@ use serde_json::{Value, json};
 use crate::harness::PIZZA_BOT;
 use crate::manifest;
 
-const HARNESS: &str = include_str!("prompt_agent.py");
 const MAX_NAME: usize = 60;
 const MAX_PROMPT: usize = 20_000;
 const MAX_SKILLS: usize = 20;
 const MAX_SKILL_BYTES: usize = 2_000_000;
 /// Agents written before the runner kept an MCP library had their own; agents now pick from the runner's.
 const LEGACY_MCP_FILE: &str = ".mcp.json";
+/// Agents created on a runner without the engine ran this single-call script instead.
+const LEGACY_SCRIPT: &str = "agent.py";
 const SKILLS_DIR: &str = "skills";
 const SKILL_FILE: &str = "SKILL.md";
 
@@ -52,13 +53,6 @@ pub struct NewAgent {
     /// Ids of the runner's MCP servers.
     pub mcp: Vec<String>,
     pub skills: Vec<SkillCopy>,
-}
-
-impl NewAgent {
-    /// Only the `pizza-bot` harness can use MCP servers and skills.
-    pub fn needs_pizza_bot(&self) -> bool {
-        !self.mcp.is_empty() || !self.skills.is_empty()
-    }
 }
 
 /// "Release notes bot!" → "release-notes-bot".
@@ -185,8 +179,7 @@ pub fn skills_json(folder: &Path) -> Value {
     Value::Array(skills)
 }
 
-/// `pizza_bot`: run with the `pizza-bot` harness instead of the `agent.py` prompt script.
-pub fn manifest_toml(agent: &NewAgent, pizza_bot: bool) -> String {
+pub fn manifest_toml(agent: &NewAgent) -> String {
     let mut input = toml::Table::new();
     input.insert("label".into(), "Message".into());
     input.insert("hint".into(), "optional; leave empty to just run it".into());
@@ -195,11 +188,7 @@ pub fn manifest_toml(agent: &NewAgent, pizza_bot: bool) -> String {
     let mut doc = toml::Table::new();
     doc.insert("name".into(), agent.name.clone().into());
     doc.insert("description".into(), agent.description.clone().into());
-    if pizza_bot {
-        doc.insert("harness".into(), PIZZA_BOT.into());
-    } else {
-        doc.insert("command".into(), "uv run --quiet agent.py".into());
-    }
+    doc.insert("harness".into(), PIZZA_BOT.into());
     doc.insert("timeout_secs".into(), 300.into());
     if !agent.mcp.is_empty() {
         doc.insert("mcp".into(), toml::Value::Array(agent.mcp.iter().cloned().map(Into::into).collect()));
@@ -210,38 +199,30 @@ pub fn manifest_toml(agent: &NewAgent, pizza_bot: bool) -> String {
 }
 
 /// Writes `<dir>/<id>/` and returns the folder; refuses to overwrite one that exists.
-pub fn write(dir: &Path, agent: &NewAgent, pizza_bot: bool) -> Result<PathBuf, String> {
+pub fn write(dir: &Path, agent: &NewAgent) -> Result<PathBuf, String> {
     let folder = dir.join(&agent.id);
     if folder.exists() {
         return Err(format!("an agent folder {} already exists", folder.display()));
     }
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    if let Err(e) = rewrite(&folder, agent, pizza_bot) {
+    if let Err(e) = rewrite(&folder, agent) {
         let _ = std::fs::remove_dir_all(&folder);
         return Err(e);
     }
     Ok(folder)
 }
 
-/// Replaces the manifest, system prompt, skills and harness of an existing agent folder.
-pub fn rewrite(folder: &Path, agent: &NewAgent, pizza_bot: bool) -> Result<(), String> {
+/// Replaces the manifest, system prompt and skills of an existing agent folder.
+pub fn rewrite(folder: &Path, agent: &NewAgent) -> Result<(), String> {
     let io = |e: std::io::Error| format!("{}: {e}", folder.display());
     write_skills(folder, &agent.skills)?;
-    std::fs::write(folder.join("agent.toml"), manifest_toml(agent, pizza_bot)).map_err(io)?;
+    std::fs::write(folder.join("agent.toml"), manifest_toml(agent)).map_err(io)?;
     std::fs::write(folder.join("system.md"), &agent.system_prompt).map_err(io)?;
-    let legacy = folder.join(LEGACY_MCP_FILE);
-    if legacy.exists() {
-        std::fs::remove_file(&legacy).map_err(io)?;
-    }
-    let script = folder.join("agent.py");
-    if pizza_bot {
-        if script.exists() {
-            std::fs::remove_file(&script).map_err(io)?;
-        }
-    } else {
-        std::fs::write(&script, HARNESS).map_err(io)?;
-    }
-    Ok(())
+    [LEGACY_MCP_FILE, LEGACY_SCRIPT]
+        .map(|f| folder.join(f))
+        .iter()
+        .filter(|p| p.exists())
+        .try_for_each(|p| std::fs::remove_file(p).map_err(io))
 }
 
 /// Builds the new `skills/` beside the old one, then swaps, so a failed write leaves the agent as it was.
@@ -288,15 +269,26 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Brings every created agent's `agent.py` up to the harness in this binary; returns how many changed.
-pub fn refresh_harness(dir: &Path) -> usize {
+/// Moves created agents still on the single-call script to the engine; returns how many moved.
+pub fn migrate_to_engine(dir: &Path) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
-    entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path().join("agent.py"))
-        .filter(|p| p.is_file() && std::fs::read_to_string(p).is_ok_and(|text| text != HARNESS))
-        .filter(|p| std::fs::write(p, HARNESS).is_ok())
-        .count()
+    entries.filter_map(|e| e.ok()).filter(|e| move_to_engine(&e.path()).unwrap_or(false)).count()
+}
+
+fn move_to_engine(folder: &Path) -> Result<bool, String> {
+    let manifest = folder.join("agent.toml");
+    let Ok(text) = std::fs::read_to_string(&manifest) else { return Ok(false) };
+    let mut doc: toml::Table = toml::from_str(&text).map_err(|e| e.to_string())?;
+    if doc.remove("command").is_none() {
+        return Ok(false);
+    }
+    doc.insert("harness".into(), PIZZA_BOT.into());
+    std::fs::write(&manifest, toml::to_string(&doc).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let script = folder.join(LEGACY_SCRIPT);
+    if script.exists() {
+        std::fs::remove_file(&script).map_err(|e| e.to_string())?;
+    }
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -328,7 +320,7 @@ mod tests {
     #[test]
     fn the_manifest_reads_back_as_an_agent_with_its_model() {
         let a = parse_request(&json!({"name": "Say \"hi\"", "model": "us.openai.gpt-5.5", "systemPrompt": ""})).unwrap();
-        let spec = manifest::parse(&a.id, Path::new("/x"), &manifest_toml(&a, false)).unwrap();
+        let spec = manifest::parse(&a.id, Path::new("/x"), &manifest_toml(&a)).unwrap();
         assert_eq!((spec.name.as_str(), spec.env["MODEL"].as_str()), ("Say \"hi\"", "us.openai.gpt-5.5"));
     }
 
@@ -347,7 +339,7 @@ mod tests {
     #[test]
     fn writes_a_skill_copy_with_its_files() {
         let dir = std::env::temp_dir().join(format!("fleet-skillcopy-{}", std::process::id()));
-        let folder = write(&dir, &agent(json!([copy("brief")]), json!([])), true).unwrap();
+        let folder = write(&dir, &agent(json!([copy("brief")]), json!([]))).unwrap();
         let reference = std::fs::read_to_string(folder.join("skills/brief/references/style.md")).unwrap();
         let listed = skills_json(&folder);
         let _ = std::fs::remove_dir_all(&dir);
@@ -357,8 +349,8 @@ mod tests {
     #[test]
     fn keeps_an_attached_copy_and_drops_a_detached_one() {
         let dir = std::env::temp_dir().join(format!("fleet-skillkeep-{}", std::process::id()));
-        let folder = write(&dir, &agent(json!([copy("brief"), copy("other")]), json!([])), true).unwrap();
-        rewrite(&folder, &agent(json!([{"id": "brief"}]), json!([])), true).unwrap();
+        let folder = write(&dir, &agent(json!([copy("brief"), copy("other")]), json!([]))).unwrap();
+        rewrite(&folder, &agent(json!([{"id": "brief"}]), json!([]))).unwrap();
         let ids: Vec<String> = skills_json(&folder).as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect();
         let reference = folder.join("skills/brief/references/style.md").is_file();
         let _ = std::fs::remove_dir_all(&dir);
@@ -368,7 +360,7 @@ mod tests {
     #[test]
     fn refuses_to_keep_a_skill_the_agent_doesnt_have() {
         let dir = std::env::temp_dir().join(format!("fleet-skillmissing-{}", std::process::id()));
-        let result = write(&dir, &agent(json!([{"id": "brief"}]), json!([])), true);
+        let result = write(&dir, &agent(json!([{"id": "brief"}]), json!([])));
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_err());
     }
@@ -395,52 +387,61 @@ mod tests {
     #[test]
     fn names_the_runner_mcp_servers_it_uses_in_the_manifest() {
         let a = agent(json!([]), json!(["fetch", "github"]));
-        let spec = manifest::parse("r", Path::new("/x"), &manifest_toml(&a, true)).unwrap();
+        let spec = manifest::parse("r", Path::new("/x"), &manifest_toml(&a)).unwrap();
         assert_eq!(spec.mcp, vec!["fetch".to_string(), "github".to_string()]);
     }
 
     #[test]
-    fn a_pizza_bot_agent_names_the_harness_and_has_no_script() {
-        let dir = std::env::temp_dir().join(format!("fleet-pizza-{}", std::process::id()));
+    fn a_created_agent_runs_on_the_engine() {
         let a = parse_request(&json!({"name": "Researcher", "model": "m", "systemPrompt": ""})).unwrap();
-        let folder = write(&dir, &a, false).unwrap();
-        rewrite(&folder, &a, true).unwrap();
-        let spec = manifest::parse(&a.id, &folder, &std::fs::read_to_string(folder.join("agent.toml")).unwrap()).unwrap();
-        let script = folder.join("agent.py").exists();
-        let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!((spec.launch, script), (manifest::Launch::Harness(PIZZA_BOT.into()), false));
+        let spec = manifest::parse(&a.id, Path::new("/x"), &manifest_toml(&a)).unwrap();
+        assert_eq!(spec.launch, manifest::Launch::Harness(PIZZA_BOT.into()));
     }
 
     #[test]
-    fn refreshes_an_outdated_harness() {
-        let dir = std::env::temp_dir().join(format!("fleet-refresh-{}", std::process::id()));
+    fn rewriting_drops_the_old_single_call_script() {
+        let dir = std::env::temp_dir().join(format!("fleet-dropscript-{}", std::process::id()));
         let a = parse_request(&json!({"name": "Old", "model": "m", "systemPrompt": ""})).unwrap();
-        let folder = write(&dir, &a, false).unwrap();
-        std::fs::write(folder.join("agent.py"), "old harness").unwrap();
-        let (first, second) = (refresh_harness(&dir), refresh_harness(&dir));
-        let text = std::fs::read_to_string(folder.join("agent.py")).unwrap();
+        let folder = write(&dir, &a).unwrap();
+        std::fs::write(folder.join("agent.py"), "print()").unwrap();
+        rewrite(&folder, &a).unwrap();
+        let script = folder.join("agent.py").exists();
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!((first, second, text == HARNESS), (1, 0, true));
+        assert!(!script);
+    }
+
+    #[test]
+    fn moves_an_agent_on_the_single_call_script_to_the_engine_once() {
+        let dir = std::env::temp_dir().join(format!("fleet-migrate-{}", std::process::id()));
+        let folder = dir.join("old");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("agent.toml"), "name = \"Old\"\ncommand = \"uv run --quiet agent.py\"\n[env]\nMODEL = \"m\"\n").unwrap();
+        std::fs::write(folder.join("agent.py"), "print()").unwrap();
+        let (first, second) = (migrate_to_engine(&dir), migrate_to_engine(&dir));
+        let spec = manifest::parse("old", &folder, &std::fs::read_to_string(folder.join("agent.toml")).unwrap()).unwrap();
+        let script = folder.join("agent.py").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((first, second, spec.launch, spec.env["MODEL"].as_str(), script), (1, 0, manifest::Launch::Harness(PIZZA_BOT.into()), "m", false));
     }
 
     #[test]
     fn writes_a_runnable_folder_once() {
         let dir = std::env::temp_dir().join(format!("fleet-created-{}", std::process::id()));
         let a = parse_request(&json!({"name": "Tester", "model": "m", "systemPrompt": "Be kind."})).unwrap();
-        let folder = write(&dir, &a, false).unwrap();
-        let files = ["agent.toml", "system.md", "agent.py"].map(|f| folder.join(f).is_file());
-        let again = write(&dir, &a, false).is_err();
+        let folder = write(&dir, &a).unwrap();
+        let files = ["agent.toml", "system.md"].map(|f| folder.join(f).is_file());
+        let again = write(&dir, &a).is_err();
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!((files, again), ([true, true, true], true));
+        assert_eq!((files, again), ([true, true], true));
     }
 
     #[test]
     fn rewrites_an_agent_in_place() {
         let dir = std::env::temp_dir().join(format!("fleet-rewrite-{}", std::process::id()));
         let a = parse_request(&json!({"name": "Tester", "model": "m", "systemPrompt": "Be kind."})).unwrap();
-        let folder = write(&dir, &a, false).unwrap();
+        let folder = write(&dir, &a).unwrap();
         let b = parse_request(&json!({"id": "tester", "name": "Renamed", "model": "m2", "systemPrompt": "Be brief."})).unwrap();
-        rewrite(&folder, &b, false).unwrap();
+        rewrite(&folder, &b).unwrap();
         let spec = manifest::parse("tester", &folder, &std::fs::read_to_string(folder.join("agent.toml")).unwrap()).unwrap();
         let prompt = std::fs::read_to_string(folder.join("system.md")).unwrap();
         let _ = std::fs::remove_dir_all(&dir);

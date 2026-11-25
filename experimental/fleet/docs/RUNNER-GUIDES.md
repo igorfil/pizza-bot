@@ -180,7 +180,7 @@ Listed in Add runner as "Coming soon" (`comingSoon` in the catalog); it can't be
 | verify | `whoAmI` and `canUseEc2`. Shows the account and ARN, or the exact error. |
 | target | Running instances across every enabled region (`DescribeRegions`, searched in parallel; a region that can't be searched is skipped and named), usable ones first, each with its region and SSM status; the picked instance's region becomes the transport's; only SSM-online ones are selectable. If none is, it says what an instance needs (a role with `AmazonSSMManagedInstanceCore`, outbound internet). Plus runner name and agents to serve. Launching new instances is out of scope for now. |
 | detect | Runs a check script over SSM RunCommand. If `/etc/fleet-runner.env` exists and the runner answers `GET /agents`, the guide stores its `RUNNER_TOKEN` in the vault, uses its `RUNNER_BIND` port and skips to check. The token passes through SSM command output. |
-| install | Only when detect found no running runner. Generates the runner token (vault) and runs the bootstrap script over SSM RunCommand: downloads the runner binary and the agents tarball from the GitHub release, installs uv, creates the `fleet-runner` user, env file and systemd unit, pre-warms agents, starts the service. |
+| install | Only when detect found no running runner. Generates the runner token (vault) and runs the bootstrap script over SSM RunCommand: downloads the runner binary, the agents tarball and the built-in engine (unpacked to `/opt/fleet-engine`, named in the env file as `RUNNER_HARNESS_PIZZA_BOT`), installs uv, creates the `fleet-runner` user, env file and systemd unit, pre-warms agents, starts the service. |
 | check | Opens the `aws_ssm` transport and reads `GET /agents`. |
 | bedrock | Over SSM RunCommand, calls the cheapest offered model (`BEDROCK_PROBE_MODEL`, Amazon Nova Micro) once, 1 token, with the instance role, the way agents will. Fails, with what to allow on the role, when it can't. |
 | done | Saves the runner: `aws_ssm` transport, token ref, origin with teardown data. |
@@ -191,15 +191,17 @@ a failed one is marked, and an adopted runner's install is shown as skipped.
 
 **Temporary, until runner releases are published:** the guide always installs this checkout's
 build; nothing needs to be set. `npm run build` makes it: `deploy/dev-build.sh` cross-compiles the
-static musl runner for arm64 and x86_64 with `cargo zigbuild` and packs the agents into
-`runner/target-linux/dist` (needs `brew install zig`, `cargo install cargo-zigbuild`,
+static musl runner for arm64 and x86_64 with `cargo zigbuild`, packs the agents, and packs the
+built-in engine (`fleet-engine-<arm64|x64>-linux.tar.gz`: a pinned Linux Node 24, the
+`apps/fleet-agent` bundle and `better-sqlite3`'s Linux binaries) into `runner/target-linux/dist` (needs `brew install zig`, `cargo install cargo-zigbuild`,
 `rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl`; without zig the build
 skips this with a warning, as on CI). The guide's "Copy the local build" step runs
 `deploy/dev-push.sh`, which scp's that build over SSM to `/tmp/fleet-local` using a 60-second EC2
 Instance Connect key, and the install script reads it through `file://`.
 `.github/workflows/fleet-runner-release.yml` already publishes the same assets
-(`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`) on a `fleet-runner-v*` tag; once the guide
-downloads those instead, remove `local-build.ts`, the `push` step and both scripts.
+(`fleet-runner-<arch>-linux-musl`, `fleet-agents.tar.gz`, but not the engine yet) on a
+`fleet-runner-v*` tag; once the guide downloads those instead, remove `local-build.ts`, the `push`
+step and both scripts.
 
 ## Testing
 

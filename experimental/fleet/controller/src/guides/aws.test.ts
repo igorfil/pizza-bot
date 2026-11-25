@@ -63,6 +63,14 @@ describe("install script", () => {
   test("binds the runner to localhost only", () => {
     expect(script).toContain("RUNNER_BIND=127.0.0.1:9000");
   });
+
+  test("installs the built-in engine for the instance's architecture and runs created agents on it", () => {
+    const lines = script.split("\n");
+    expect([
+      lines.some((l) => l.startsWith("curl") && l.includes("fleet-engine-x64-linux.tar.gz")),
+      lines.includes("RUNNER_HARNESS_PIZZA_BOT=/opt/fleet-engine/node/bin/node /opt/fleet-engine/fleet-agent/main.js"),
+    ]).toEqual([true, true]);
+  });
 });
 
 describe("Bedrock check", () => {

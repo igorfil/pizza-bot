@@ -6,6 +6,11 @@ const binaryName = (arch: Arch): string => `fleet-runner-${arch === "arm64" ? "a
 
 export const AGENTS_TARBALL = "fleet-agents.tar.gz";
 
+/** The built-in engine: Node and the Pizza Bot agent runtime (deploy/dev-build.sh). */
+export const engineTarball = (arch: Arch): string => `fleet-engine-${arch === "arm64" ? "arm64" : "x64"}-linux.tar.gz`;
+
+const ENGINE_DIR = "/opt/fleet-engine";
+
 /**
  * Bootstrap run as root over SSM RunCommand. Idempotent: running it again upgrades in place.
  * A fresh runner serves `dadjokes` and `geofact`, for an easy first test; the Controller changes that with `PUT /agents`.
@@ -27,6 +32,11 @@ rm -rf "$AGENTS_DIR.new" && mkdir -p "$AGENTS_DIR.new"
 tar -xzf /tmp/${AGENTS_TARBALL} -C "$AGENTS_DIR.new"
 rm -rf "$AGENTS_DIR" && mv "$AGENTS_DIR.new" "$AGENTS_DIR"
 
+curl -fsSL "$RELEASE/${engineTarball(o.arch)}" -o /tmp/${engineTarball(o.arch)}
+rm -rf ${ENGINE_DIR}.new && mkdir -p ${ENGINE_DIR}.new
+tar -xzf /tmp/${engineTarball(o.arch)} -C ${ENGINE_DIR}.new
+rm -rf ${ENGINE_DIR} && mv ${ENGINE_DIR}.new ${ENGINE_DIR}
+
 id fleet-runner >/dev/null 2>&1 || useradd --system --home-dir /var/lib/fleet-runner --create-home fleet-runner
 
 umask 077
@@ -39,6 +49,7 @@ AWS_REGION=${o.region}
 RUNNER_TOKEN=${o.token}
 RUNNER_BIND=127.0.0.1:${o.port}
 RUNNER_DB=/var/lib/fleet-runner/runner.db
+RUNNER_HARNESS_PIZZA_BOT=${ENGINE_DIR}/node/bin/node ${ENGINE_DIR}/fleet-agent/main.js
 EOF
 umask 022
 
@@ -148,7 +159,7 @@ export const uninstallScript = (): string => `#!/bin/bash
 set -uo pipefail
 systemctl disable --now fleet-runner
 rm -f /etc/systemd/system/fleet-runner.service /etc/fleet-runner.env /usr/local/bin/fleet-runner
-rm -rf /opt/fleet-agents /tmp/fleet-local
+rm -rf /opt/fleet-agents ${ENGINE_DIR} /tmp/fleet-local
 userdel -r fleet-runner
 rm -rf /var/lib/fleet-runner
 systemctl daemon-reload

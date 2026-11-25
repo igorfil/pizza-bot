@@ -296,10 +296,10 @@ Endpoints:
 - `GET /agents`: public; `{runner, location, agents: [...], available: [...]}`, each entry
   `{id, name, description, input, url}`. `agents` are served; `available` are on disk but off. The
   Controller uses it for discovery and as the runner health check.
-- `POST /agents`: bearer token required; `{name, model, systemPrompt}` writes a prompt agent
-  (`agent.toml`, `system.md`, and the built-in `agent.py` harness) into `RUNNER_CREATED_AGENTS_DIR`,
-  serves it at once, and answers with the new index plus `created: <id>`. The index's `canCreate`
-  says a runner supports it.
+- `POST /agents`: bearer token required; `{name, model, systemPrompt}` writes an agent for the
+  built-in engine (`agent.toml`, `system.md`, `skills/`) into `RUNNER_CREATED_AGENTS_DIR`, serves it
+  at once, and answers with the new index plus `created: <id>`. The index's `canCreate` says the
+  runner has the engine (`RUNNER_HARNESS_PIZZA_BOT`); without it the request answers 409.
 - `PUT /agents/<id>`: bearer token required; `{name, model, systemPrompt}` rewrites a created agent
   in place (same id, so its URL and runs stay) and answers with the new index. Shipped agents
   answer 409. Created agents' index entries carry `model` and `systemPrompt` for editing.

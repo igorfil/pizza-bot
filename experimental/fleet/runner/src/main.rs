@@ -186,7 +186,7 @@ impl App {
 
     /// Discovery for the Controller; also its health check. Public, like agent cards.
     /// `available` lists agents the runner has but doesn't serve; `PUT /agents` turns them on.
-    /// `canCreate` tells the Controller this runner takes `POST /agents`.
+    /// `canCreate`: the runner has the built-in engine, so it takes `POST /agents`.
     fn index(&self) -> Value {
         let agents = self.agents.read().unwrap();
         let (on, off): (Vec<&AgentSpec>, Vec<&AgentSpec>) = agents.specs.iter().partition(|s| agents.served.contains(&s.id));
@@ -195,7 +195,7 @@ impl App {
             "location": self.cfg.location,
             "agents": on.iter().map(|s| agent_json(&self.cfg, s)).collect::<Vec<_>>(),
             "available": off.iter().map(|s| agent_json(&self.cfg, s)).collect::<Vec<_>>(),
-            "canCreate": true,
+            "canCreate": self.pizza_bot(),
             "harnesses": self.cfg.harnesses.names(),
             "mcpServers": self.mcp.servers(),
         })
@@ -231,10 +231,10 @@ impl App {
     }
 
     fn parse_agent(&self, body: &Value) -> Result<created::NewAgent, ApiError> {
-        let agent = created::parse_request(body).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
-        if agent.needs_pizza_bot() && !self.pizza_bot() {
-            return Err(api_error(StatusCode::BAD_REQUEST, "MCP servers and skills need the pizza-bot harness, which this runner doesn't have"));
+        if !self.pizza_bot() {
+            return Err(api_error(StatusCode::CONFLICT, "this runner has no built-in engine to run created agents; set RUNNER_HARNESS_PIZZA_BOT"));
         }
+        let agent = created::parse_request(body).map_err(|e| api_error(StatusCode::BAD_REQUEST, e))?;
         let known = self.mcp.ids();
         if let Some(missing) = agent.mcp.iter().find(|id| !known.contains(id)) {
             return Err(api_error(StatusCode::BAD_REQUEST, format!("this runner has no MCP server {missing:?}")));
@@ -248,8 +248,8 @@ impl App {
         if self.agents.read().unwrap().specs.iter().any(|s| s.id == agent.id) {
             return Err(api_error(StatusCode::CONFLICT, format!("this runner already has an agent {:?}", agent.id)));
         }
-        let folder = created::write(&self.cfg.created_dir, &agent, self.pizza_bot()).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        let spec = manifest::parse(&agent.id, &folder, &created::manifest_toml(&agent, self.pizza_bot())).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let folder = created::write(&self.cfg.created_dir, &agent).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let spec = manifest::parse(&agent.id, &folder, &created::manifest_toml(&agent)).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         let router = self.agent_router(&spec);
         let served = {
             let mut agents = self.agents.write().unwrap();
@@ -279,8 +279,8 @@ impl App {
         let mut request = body.as_object().cloned().unwrap_or_default();
         request.insert("id".into(), json!(id));
         let agent = self.parse_agent(&Value::Object(request))?;
-        created::rewrite(&folder, &agent, self.pizza_bot()).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        let spec = manifest::parse(id, &folder, &created::manifest_toml(&agent, self.pizza_bot())).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        created::rewrite(&folder, &agent).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let spec = manifest::parse(id, &folder, &created::manifest_toml(&agent)).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         let router = self.agent_router(&spec);
         {
             let mut agents = self.agents.write().unwrap();
@@ -421,9 +421,9 @@ async fn main() -> Result<(), String> {
         .init();
 
     let cfg = load_config()?;
-    let refreshed = created::refresh_harness(&cfg.created_dir);
-    if refreshed > 0 {
-        tracing::info!(refreshed, "updated the harness of created agents");
+    let moved = created::migrate_to_engine(&cfg.created_dir);
+    if moved > 0 {
+        tracing::info!(moved, "moved created agents to the built-in engine");
     }
     let specs = load_specs(&cfg)?;
 

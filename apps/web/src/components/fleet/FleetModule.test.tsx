@@ -285,6 +285,11 @@ describe("Add agent", () => {
     expect("blocker" in r && r.blocker).toContain("Update the runner");
   });
 
+  it("explains that a runner without the built-in engine can't run new agents", () => {
+    const r = offer({ canCreateAgents: false, available: [] });
+    expect("blocker" in r && r.blocker).toContain("no built-in engine");
+  });
+
   it("waits for an unreachable runner", () => {
     const r = offer({ status: "unreachable", canCreateAgents: true });
     expect("blocker" in r && r.blocker).toContain("isn't reachable");

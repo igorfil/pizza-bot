@@ -44,7 +44,7 @@ over SSM (see POC-GAPS.md, "Deploy simplified").
   project folder) and **AgentCore** (`InvokeAgentRuntime`), one at a time.
 
 ## Status
-- [ ] Step 1
+- [x] Step 1
 - [ ] Step 2
 - [ ] Step 3: interface + Python plugin
 - [ ] Step 3: Docker plugin

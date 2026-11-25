@@ -109,14 +109,12 @@ from then on.
 ## Created agents
 
 Add agent → Create new on the Fleet page makes the bare-minimum agent: a name, a Bedrock model and a
-system prompt. On a runner with the `pizza-bot` harness it is written as `harness = "pizza-bot"`, and
-the dialog also picks the runner's MCP servers and skills from Pizza Bot's skill library. The agent
-holds a copy of each skill under `skills/<id>/`; an edit that keeps a skill sends only its id, so the
-copy stays as it was until the skill is picked again. Otherwise it runs the single-call script below. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR`
-(`agent.toml` with `MODEL` in `[env]`, `system.md`, and `agent.py`, a copy of the harness built into
-the runner from `runner/src/prompt_agent.py`). Each run sends the input to the model with the system
-prompt through Bedrock Converse and returns the reply as a `reply` artifact; an empty input is sent
-as "Go.", so agents that need no input just run. There are no tools and no memory between runs. The
-runner rewrites every created agent's `agent.py` from its built-in copy on start, so harness fixes
-reach existing agents. Deleting a created agent (trash icon on its card) deletes its folder; a
-shipped agent is only turned off and can be added back. The runner's AWS credentials (on EC2, the instance role) must allow the model.
+system prompt, plus the runner's MCP servers and skills from Pizza Bot's skill library. It runs on
+the runner's built-in engine (`harness = "pizza-bot"`); a runner without the engine has `canCreate`
+false and refuses to create agents. The agent holds a copy of each skill under `skills/<id>/`; an
+edit that keeps a skill sends only its id, so the copy stays as it was until the skill is picked
+again. The runner writes it as an ordinary agent folder in `RUNNER_CREATED_AGENTS_DIR` (`agent.toml`
+with `MODEL` in `[env]`, `system.md`, `skills/`). Created agents from before the engine ran a
+single-call `agent.py`; the runner moves them to the engine on start. Deleting a created agent
+deletes its folder; a shipped agent is only turned off and can be added back. The runner's AWS
+credentials (on EC2, the instance role) must allow the model.

@@ -20,7 +20,9 @@ export const addAgentModes = (runner: FleetRunner): { blocker: string } | { mode
     blocker:
       runner.available == null
         ? `${runnerLabel(runner)} can't change its agents from here. Update the runner to a version that supports adding agents.`
-        : `Every agent on ${runnerLabel(runner)} is already added.`,
+        : !runner.canCreateAgents
+          ? `${runnerLabel(runner)} has no built-in engine, so it can't run agents created here. Reinstall it with the engine.`
+          : `Every agent on ${runnerLabel(runner)} is already added.`,
   };
 };
 

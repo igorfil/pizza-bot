@@ -1,5 +1,5 @@
 #!/bin/bash
-# TEMPORARY, until runner releases are published: copies the Linux runner and agents that `npm run build`
+# TEMPORARY, until runner releases are published: copies the Linux runner, agents and built-in engine that `npm run build`
 # made (dev-build.sh) with scp over SSM into /tmp/fleet-local on the instance, where the guide's install
 # script reads them through file:// instead of downloading a release.
 # A throwaway key goes to the instance through EC2 Instance Connect (valid 60 s), so no key needs to be
@@ -15,12 +15,12 @@ DIST="$FLEET/runner/target-linux/dist"
 REMOTE=/tmp/fleet-local
 
 case "$ARCH" in
-  arm64) ASSET=fleet-runner-aarch64-linux-musl ;;
-  x86_64) ASSET=fleet-runner-x86_64-linux-musl ;;
+  arm64) ASSET=fleet-runner-aarch64-linux-musl ENGINE=fleet-engine-arm64-linux.tar.gz ;;
+  x86_64) ASSET=fleet-runner-x86_64-linux-musl ENGINE=fleet-engine-x64-linux.tar.gz ;;
   *) echo "unknown arch $ARCH" >&2; exit 2 ;;
 esac
 
-[ -f "$DIST/$ASSET" ] && [ -f "$DIST/fleet-agents.tar.gz" ] || {
+[ -f "$DIST/$ASSET" ] && [ -f "$DIST/fleet-agents.tar.gz" ] && [ -f "$DIST/$ENGINE" ] || {
   echo "there is no $ARCH Linux runner build yet; run npm run build (it needs zig and cargo-zigbuild)" >&2
   exit 1
 }
@@ -42,5 +42,5 @@ SSH_OPTS=(
   ${IDENTITY[@]+"${IDENTITY[@]}"}
 )
 ssh "${SSH_OPTS[@]}" "$SSH_USER@$INSTANCE" "rm -rf $REMOTE && mkdir -p $REMOTE"
-scp "${SSH_OPTS[@]}" "$DIST/$ASSET" "$DIST/fleet-agents.tar.gz" "$SSH_USER@$INSTANCE:$REMOTE/"
+scp "${SSH_OPTS[@]}" "$DIST/$ASSET" "$DIST/fleet-agents.tar.gz" "$DIST/$ENGINE" "$SSH_USER@$INSTANCE:$REMOTE/"
 echo "copied the local build to $INSTANCE:$REMOTE"
