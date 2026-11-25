@@ -8,12 +8,18 @@ import { duration, initialDraft, runnerLabel, stuckFor } from "./fleet-view-mode
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
 /** A wide modal for the Fleet page's multi-field flows; closing it never cancels anything. */
-export function FleetDialog({ title, className, onClose, children }: { title: string; className?: string; onClose: () => void; children: ReactNode }) {
+export function FleetDialog({ title, className, onClose, children }: { title: ReactNode; className?: string; onClose: () => void; children: ReactNode }) {
   return (
     <DialogPrimitive.Root open onOpenChange={(open) => !open && onClose()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="sidebar-modal-backdrop" />
-        <DialogPrimitive.Content className={`sidebar-modal sidebar-modal--wide fleet-dialog${className ? ` ${className}` : ""}`} aria-describedby={undefined}>
+        <DialogPrimitive.Content
+          className={`sidebar-modal sidebar-modal--wide fleet-dialog${className ? ` ${className}` : ""}`}
+          aria-describedby={undefined}
+          onEscapeKeyDown={(e) => {
+            if (e.target instanceof Element && e.target.closest("[data-escape-cancels]")) e.preventDefault();
+          }}
+        >
           <div className="fleet-dialog-head">
             <DialogPrimitive.Title className="sidebar-modal-title">{title}</DialogPrimitive.Title>
             <DialogPrimitive.Close asChild>

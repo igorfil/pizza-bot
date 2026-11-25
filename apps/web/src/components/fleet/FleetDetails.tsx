@@ -1,6 +1,7 @@
-import { useState, type FormEvent, type ReactNode } from "react";
-import { Cloud, KeyRound, Laptop, LoaderCircle, Plug, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Cloud, KeyRound, Laptop, LoaderCircle, Pencil, Plug, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { Tabs } from "radix-ui";
+import { useAppToast } from "../AppToast.js";
 import { EditAgentForm, mcpServerSummary, runsTools } from "./AddAgentDialog.js";
 import { McpServersPanel } from "./McpServersDialog.js";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
@@ -89,45 +90,59 @@ function PermissionsSoon({ agent }: { agent: FleetAgent }) {
 
 const MAX_LABEL = 40;
 
-function RenameRunner({ runner, send }: { runner: FleetRunner; send: FleetSend }) {
-  const [label, setLabel] = useState(runnerLabel(runner));
+/** The runner's name as the dialog title; the pencil turns it into an input. Enter or leaving saves, Esc cancels. */
+function RunnerTitle({ runner, send }: { runner: FleetRunner; send: FleetSend }) {
+  const notify = useAppToast();
+  const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const changed = label.trim() !== runnerLabel(runner);
+  const shown = runnerLabel(runner);
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
+  const save = async () => {
+    if (draft === null || saving) return;
+    const next = draft.trim();
+    if (next === shown || (next === "" && !runner.label)) return setDraft(null);
     setSaving(true);
-    setError(null);
     try {
-      await send("RenameRunner", { name: runner.name, label: label.trim() });
+      await send("RenameRunner", { name: runner.name, label: next });
+      setDraft(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The Controller didn't take that.");
+      notify({ title: "Couldn't rename the runner", description: e instanceof Error ? e.message : undefined, tone: "error" });
     } finally {
       setSaving(false);
     }
   };
 
+  if (draft === null) {
+    return (
+      <span className="fleet-title-edit">
+        {shown}
+        <button type="button" className="fleet-ghost-btn fleet-title-edit-btn" onClick={() => setDraft(shown)} aria-label={`Rename runner ${shown}`} title="Rename">
+          <Pencil size={13} aria-hidden="true" />
+        </button>
+      </span>
+    );
+  }
   return (
-    <form className="fleet-rename" onSubmit={(e) => void save(e)}>
-      <label className="field">
-        <span className="field-label">Name</span>
-        <span className="fleet-rename-row">
-          <input className="field-input" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={MAX_LABEL} placeholder={runner.name} />
-          <button type="submit" className="btn-primary fleet-small-btn" disabled={saving || !changed}>
-            {saving && <LoaderCircle size={13} className="spin" aria-hidden="true" />} Save
-          </button>
-        </span>
-        <span className="field-hint">
-          Only changes how the runner is shown. Its id <code>{runner.name}</code> stays the same; leave the name empty to go back to it.
-        </span>
-      </label>
-      {error && (
-        <div className="schedule-editor-error" role="alert">
-          {error}
-        </div>
-      )}
-    </form>
+    <span className="fleet-title-edit editing">
+      <input
+        className="fleet-title-input"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={() => void save()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void save();
+          if (e.key === "Escape") setDraft(null);
+        }}
+        maxLength={MAX_LABEL}
+        placeholder={runner.name}
+        aria-label={`Name for runner ${runner.name}; empty goes back to ${runner.name}`}
+        data-escape-cancels=""
+        disabled={saving}
+        autoFocus
+      />
+      {saving && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
+    </span>
   );
 }
 
@@ -155,7 +170,6 @@ export function RunnerDetailsDialog({
   const link = runner.link.state === "up" ? runner.link.url : (runner.link.error ?? "not connected");
   const overview = (
     <>
-      <RenameRunner key={runnerLabel(runner)} runner={runner} send={send} />
       <Facts
         rows={[
           ["Status", runnerStatusText(model, runner)],
@@ -216,7 +230,7 @@ export function RunnerDetailsDialog({
     { id: "secrets", label: "Secrets", content: <SecretsSoon runner={runner} /> },
   ];
   return (
-    <FleetDialog title={runnerLabel(runner)} className="fleet-details" onClose={onClose}>
+    <FleetDialog title={<RunnerTitle key={runnerLabel(runner)} runner={runner} send={send} />} className="fleet-details" onClose={onClose}>
       <div className="fleet-details-meta">
         <span className={`dot dot-${runnerTone(runner.status)}`} aria-hidden="true" />
         <span className="fleet-muted">
