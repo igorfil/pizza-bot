@@ -279,7 +279,8 @@ export function AgentDetailsDialog({
   const tone = down ? "bad" : active ? "info" : "ok";
   const builtin = isBuiltin(agent);
   const editable = builtin && agent.created === true && agent.model !== undefined && !down;
-  const runBy = builtin ? "the built-in engine" : agent.harness ? `the ${agent.harness} harness` : "its own command";
+  const harness = runner.plugins?.find((p) => p.id === agent.harness)?.name ?? agent.harness;
+  const runBy = builtin ? "the built-in engine" : harness ? `the ${harness} harness` : "its own command";
 
   const overview = (
     <>
@@ -288,7 +289,7 @@ export function AgentDetailsDialog({
         rows={[
           ["Status", active ? `${active.statusText ?? active.state} · started ${ago(model.now, active.createdAt)}` : status],
           ["Runner", <RunnerPill key="r" model={model} runner={runner} />],
-          ["Runs with", builtin ? "Built-in engine" : agent.harness ? `${agent.harness} harness` : "Its own command"],
+          ["Runs with", builtin ? "Built-in engine" : harness ? `${harness} harness` : "Its own command"],
           ...(agent.model ? ([["Model", model.agentModels?.find((m) => m.id === agent.model)?.label ?? agent.model]] as [string, ReactNode][]) : []),
           ["Schedule", agent.schedule ? `Daily at ${agent.schedule.at}` : "Not scheduled"],
           ...(agent.skills?.length ? ([["Skills", agent.skills.map((s) => s.name).join(", ")]] as [string, ReactNode][]) : []),
