@@ -1,0 +1,5 @@
+name = "Hello container"
+description = "Answers from an Alpine container with the machine it ran on. A Docker plugin example; no LLM."
+image = "alpine:3.21"
+command = ["sh", "-c", "read -r task; printf '{\"artifact\":{\"name\":\"reply\",\"text\":\"Hello from a container on %s\"}}\\n' \"$(uname -m)\""]
+timeout_secs = 120

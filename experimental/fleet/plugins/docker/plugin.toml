@@ -1,0 +1,2 @@
+name = "Docker"
+command = "uv run --quiet --script plugin.py"
