@@ -50,6 +50,12 @@ describe("update", () => {
     expect(model.runners.local?.plugins).toEqual([python]);
   });
 
+  test("plugin icons outlast the health checks that don't carry them", () => {
+    const icons = { docker: "<svg/>" };
+    const [model] = run([...withRunningTask.slice(0, 3), { type: "PluginIcons", runner: "local", icons }, healthy()]);
+    expect(model.runners.local?.pluginIcons).toEqual(icons);
+  });
+
   test("an agent the runner stops serving disappears", () => {
     const [model] = run([...withRunningTask.slice(0, 4), healthy([])]);
     expect(model.agents).toEqual({});

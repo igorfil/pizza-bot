@@ -107,6 +107,7 @@ export function ChoiceCard({
   disabled,
   title,
   detail,
+  icon,
   onChange,
 }: {
   type: "radio" | "checkbox";
@@ -116,6 +117,7 @@ export function ChoiceCard({
   disabled?: boolean;
   title: string;
   detail?: string;
+  icon?: ReactNode;
   onChange: () => void;
 }) {
   return (
@@ -124,7 +126,10 @@ export function ChoiceCard({
       <span className={`fleet-choice-mark ${type}`} aria-hidden="true">
         {checked && <Check size={12} strokeWidth={3} />}
       </span>
-      <span className="fleet-choice-title">{title}</span>
+      <span className="fleet-choice-title">
+        {icon}
+        {title}
+      </span>
       {detail && <span className="fleet-choice-detail">{detail}</span>}
     </label>
   );

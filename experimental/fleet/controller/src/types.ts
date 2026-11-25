@@ -55,6 +55,9 @@ export type SkillCopy = { id: string; files?: SkillFile[] };
 /** A harness plugin on a runner, as its `GET /agents` reports it. */
 export type PluginInfo = { id: string; name: string; version: string; capabilities: string[]; healthy: boolean; detail: string; addFields?: AddField[] };
 
+/** Plugin id → the SVG markup of its folder's `icon.svg`; UIs show it as an image. */
+export type PluginIcons = Record<string, string>;
+
 /** One thing a plugin asks for to add an agent (plugins/README.md). */
 export type AddField = { id: string; label: string; kind: "text" | "path" | "list"; required?: boolean; hint?: string; placeholder?: string };
 
@@ -99,6 +102,8 @@ export type Runner = NewRunner & {
   harnesses: string[];
   /** Harness plugins that run the runner's external agents, with their last health check. */
   plugins: PluginInfo[];
+  /** Kept apart from `plugins` so the health-check Msg logged every interval doesn't carry them. */
+  pluginIcons?: PluginIcons;
   /** The MCP servers on the runner's machine, which its agents pick from. */
   mcpServers: McpServers;
   /** The last agent change for this runner, until it lands or a new one starts. */
@@ -296,6 +301,7 @@ export type WorldMsg =
   | ({ type: "McpServersSet"; runner: string; text: string } & RunnerIndexFields)
   | { type: "McpServerFailed"; runner: string; text: string }
   | { type: "RunnerFailed"; name: string; error: string }
+  | { type: "PluginIcons"; runner: string; icons: PluginIcons }
   | { type: "RunnerRetired"; name: string; text: string; ok: boolean }
   | { type: "Dispatched"; taskId: string; snapshot: TaskSnapshot }
   | { type: "DispatchFailed"; taskId: string; error: string }

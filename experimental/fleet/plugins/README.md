@@ -29,8 +29,14 @@ A plugin doesn't have to be TypeScript: any program that speaks the protocol wor
 ```
 plugins/<id>/
 ├── plugin.toml    name, command, env
+├── icon.svg       optional; shown beside the plugin's agents and in Add agent
 └── …              whatever the command needs
 ```
+
+`icon.svg` is a square SVG under 32 KiB with its colors set in the file: UIs draw it as an image,
+so `currentColor` and scripts don't apply. The runner reads it at startup and reports it with the
+plugin; without one, UIs show a generic icon. The icons here are from
+[Simple Icons](https://simpleicons.org) (CC0).
 
 ```toml
 name = "Python"                                  # shown in UIs until the plugin describes itself

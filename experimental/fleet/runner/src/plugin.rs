@@ -33,6 +33,8 @@ pub struct PluginDef {
     pub env: BTreeMap<String, String>,
     /// Writable folder for what the plugin keeps, e.g. agents added from the Fleet page; its own folder may be read-only.
     pub data_dir: PathBuf,
+    /// The plugin's `icon.svg`, which UIs show beside its agents.
+    pub icon: Option<String>,
 }
 
 pub fn parse_def(id: &str, dir: &Path, data_root: &Path, toml_text: &str) -> Result<PluginDef, String> {
@@ -40,7 +42,20 @@ pub fn parse_def(id: &str, dir: &Path, data_root: &Path, toml_text: &str) -> Res
         return Err(format!("plugin folder {id:?} must be lowercase letters, digits, - or _"));
     }
     let t: PluginToml = toml::from_str(toml_text).map_err(|e| format!("{id}/plugin.toml: {e}"))?;
-    Ok(PluginDef { id: id.to_string(), name: t.name, dir: dir.to_path_buf(), command: t.command, env: t.env, data_dir: data_root.join(id) })
+    Ok(PluginDef { id: id.to_string(), name: t.name, dir: dir.to_path_buf(), command: t.command, env: t.env, data_dir: data_root.join(id), icon: None })
+}
+
+const MAX_ICON_BYTES: usize = 32 * 1024;
+
+/// The folder's `icon.svg`, if it has one that looks like an SVG and is small enough to send with every index.
+pub fn read_icon(id: &str, dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("icon.svg")).ok()?;
+    let head = text.trim_start();
+    if text.len() > MAX_ICON_BYTES || !(head.starts_with("<svg") || head.starts_with("<?xml")) {
+        tracing::warn!(plugin = %id, "ignoring icon.svg: not an SVG under {} KiB", MAX_ICON_BYTES / 1024);
+        return None;
+    }
+    Some(text)
 }
 
 /// Every `<dir>/<id>/plugin.toml`; a folder that doesn't parse is skipped with a warning, and no folder means no plugins.
@@ -53,7 +68,8 @@ pub fn load_defs(dir: &Path, data_root: &Path) -> Vec<PluginDef> {
         .filter_map(|p| {
             let id = p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
             let parsed = std::fs::read_to_string(p.join("plugin.toml")).map_err(|e| e.to_string()).and_then(|t| parse_def(&id, &p, data_root, &t));
-            parsed.map_err(|e| tracing::warn!(plugin = %id, "skipping plugin: {e}")).ok()
+            let def = parsed.map_err(|e| tracing::warn!(plugin = %id, "skipping plugin: {e}")).ok()?;
+            Some(PluginDef { icon: read_icon(&id, &p), ..def })
         })
         .collect();
     defs.sort_by(|a, b| a.id.cmp(&b.id));
@@ -146,6 +162,9 @@ pub struct PluginInfo {
     /// What a UI asks for to add an agent through this plugin, as the plugin describes it; empty when it can't.
     #[serde(rename = "addFields")]
     pub add_fields: Value,
+    /// SVG markup; UIs render it as an image, never inline, so a script in it can't run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 struct Conn {
@@ -209,6 +228,7 @@ impl Plugin {
             healthy: false,
             detail: "starting".to_string(),
             add_fields: Value::Array(vec![]),
+            icon: def.icon.clone(),
         };
         Self { def, conn: tokio::sync::Mutex::new(None), info: RwLock::new(info) }
     }
@@ -463,6 +483,19 @@ mod tests {
         assert_eq!(ids, vec!["good".to_string()]);
     }
 
+    #[test]
+    fn reads_the_icon_and_refuses_what_isnt_an_svg() {
+        let dir = std::env::temp_dir().join(format!("fleet-plugin-icons-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("svg")).unwrap();
+        std::fs::create_dir_all(dir.join("png")).unwrap();
+        std::fs::create_dir_all(dir.join("none")).unwrap();
+        std::fs::write(dir.join("svg/icon.svg"), "<svg viewBox=\"0 0 24 24\"/>").unwrap();
+        std::fs::write(dir.join("png/icon.svg"), "\u{89}PNG").unwrap();
+        let icons = ["svg", "png", "none"].map(|id| read_icon(id, &dir.join(id)));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(icons, [Some("<svg viewBox=\"0 0 24 24\"/>".to_string()), None, None]);
+    }
+
     #[tokio::test]
     async fn talks_to_a_plugin_process() {
         let dir = std::env::temp_dir().join(format!("fleet-plugin-echo-{}", std::process::id()));
@@ -480,7 +513,7 @@ mod tests {
   esac
 done"#;
         std::fs::write(dir.join("plugin.sh"), script).unwrap();
-        let plugin = Plugin::new(PluginDef { id: "echo".into(), name: "Echo".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new(), data_dir: dir.join("data") });
+        let plugin = Plugin::new(PluginDef { id: "echo".into(), name: "Echo".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new(), data_dir: dir.join("data"), icon: None });
         plugin.check().await;
         let agents: Vec<String> = plugin.agents().await.unwrap().into_iter().map(|a| a.id).collect();
         let added = plugin.add(&json!({"name": "Made"})).await;
@@ -518,7 +551,7 @@ done"#;
         let dir = std::env::temp_dir().join(format!("fleet-plugin-crash-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("plugin.sh"), "read -r line; id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\\([0-9]*\\).*/\\1/p'); echo \"{\\\"id\\\":$id,\\\"result\\\":{}}\"; exit 3").unwrap();
-        let plugin = Plugin::new(PluginDef { id: "crash".into(), name: "Crash".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new(), data_dir: dir.join("data") });
+        let plugin = Plugin::new(PluginDef { id: "crash".into(), name: "Crash".into(), dir: dir.clone(), command: "sh plugin.sh".into(), env: BTreeMap::new(), data_dir: dir.join("data"), icon: None });
         let mut rx = plugin.run("t1", "c1", "x", "").await.unwrap();
         let (first, second) = (rx.recv().await, rx.recv().await);
         let _ = std::fs::remove_dir_all(&dir);

@@ -70,6 +70,9 @@ const indexFields = ({ agents, location, canCreate, harnesses, plugins, mcpServe
   mcpServers,
 });
 
+const sameIcons = (a: Record<string, string>, b: Record<string, string>): boolean =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([id, svg]) => b[id] === svg);
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
@@ -99,6 +102,8 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
     switch (effect.type) {
       case "CheckRunner": {
         const r = await a2a.checkRunner(effect.url);
+        const known = model.runners[effect.runner];
+        if (r.ok && known && !sameIcons(known.pluginIcons ?? {}, r.value.pluginIcons)) world({ type: "PluginIcons", runner: effect.runner, icons: r.value.pluginIcons });
         return r.ok
           ? { type: "RunnerOk", name: effect.runner, ...indexFields(r.value) }
           : { type: "RunnerFailed", name: effect.runner, error: r.error };

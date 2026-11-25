@@ -5,6 +5,7 @@ import { useAppToast } from "../AppToast.js";
 import { EditAgentForm, mcpServerSummary } from "./AddAgentDialog.js";
 import { McpServersPanel } from "./McpServersDialog.js";
 import { AgentRuns, RunButton, ScheduleRow } from "./AgentParts.js";
+import { AgentTypeIcon } from "./AgentTypeIcon.js";
 import type { OpenChat } from "./RunCard.js";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
@@ -350,7 +351,16 @@ export function AgentDetailsDialog({
     </>
   );
   return (
-    <FleetDialog title={agent.name} className="fleet-details" onClose={onClose}>
+    <FleetDialog
+      title={
+        <span className="fleet-title-with-icon">
+          <AgentTypeIcon agent={agent} runner={runner} size={18} />
+          {agent.name}
+        </span>
+      }
+      className="fleet-details"
+      onClose={onClose}
+    >
       <div className="fleet-details-meta">
         <span className={`fleet-pill fleet-pill-${tone}`}>
           <span className={`dot dot-${tone}`} aria-hidden="true" />

@@ -558,6 +558,11 @@ export const update = (model: Model, msg: Msg): Result => {
     case "RunnerFailed":
       return [runnerFailed(model, msg.name, msg.error), []];
 
+    case "PluginIcons": {
+      const runner = model.runners[msg.runner];
+      return [runner ? setRunner(model, { ...runner, pluginIcons: msg.icons }) : model, []];
+    }
+
     case "Dispatched":
     case "TaskSnapshot":
       return withTask(model, msg.taskId, (task) => [setTask(model, applySnapshot(task, msg.snapshot, model.now)), []]);

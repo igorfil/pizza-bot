@@ -377,6 +377,12 @@ describe("AgentCard", () => {
     expect(card(scheduled)).toContain("Topic: otters");
   });
 
+  it("shows the icon its plugin ships, and a generic one when the plugin has none", () => {
+    const docker = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, kind: "external" as const, harness: "docker" } } };
+    const withIcon = { ...docker, runners: { ec2: { ...model.runners.ec2!, pluginIcons: { docker: "<svg/>" } } } };
+    expect([card(withIcon).includes('src="data:image/svg+xml;charset=utf-8,%3Csvg%2F%3E"'), card(docker).includes("<img")]).toEqual([true, false]);
+  });
+
   it("leaves the schedule out when there is none", () => {
     expect(card(model)).not.toContain("Daily at");
   });

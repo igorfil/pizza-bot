@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AlarmClock, Cpu, LoaderCircle, Plug, Plus, Settings, Trash2 } from "lucide-react";
 import { AddAgentDialog, mcpServerSummary } from "./AddAgentDialog.js";
 import { AgentActivity, AgentRuns, RunButton, RunStrip, ScheduleRow } from "./AgentParts.js";
+import { AgentTypeIcon } from "./AgentTypeIcon.js";
 import { RunnerDetailsDialog, RunnerPill, type RunnerTab } from "./FleetDetails.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
@@ -210,6 +211,7 @@ export function AgentCard({
       }}
     >
       <h3 className="fleet-agent-name">
+        <AgentTypeIcon agent={agent} runner={runner} />
         <button type="button" className="fleet-agent-open" onClick={() => onOpen(agent.key)} aria-label={`Open ${agent.name}`} title={agent.key}>
           {agent.name}
         </button>
@@ -263,6 +265,7 @@ function AgentPanel({ model, agent, runner, send, onOpenChat, onOpen }: { model:
   return (
     <article className="fleet-agent-panel" aria-label={agent.name}>
       <header className="fleet-agent-panel-head">
+        <AgentTypeIcon agent={agent} runner={runner} size={18} />
         <h3 className="fleet-agent-panel-title">{agent.name}</h3>
         <span className="fleet-agent-links-spacer" />
         <button type="button" className="btn-secondary fleet-small-btn" onClick={() => onOpen(agent.key)} aria-label={`Open ${agent.name}`}>
@@ -351,9 +354,12 @@ export function ListLayout({ model, runners, send, onOpenChat, onOpen }: LayoutP
                         aria-current={current || undefined}
                         onClick={() => setSelectedKey(a.key)}
                       >
-                        <span className={`dot dot-${agentTone(model, runner, a.key)}`} aria-hidden="true" />
+                        <AgentTypeIcon agent={a} runner={runner} size={16} />
                         <span className="fleet-run-line-text">
-                          <span className="fleet-run-line-title">{a.name}</span>
+                          <span className="fleet-run-line-title">
+                            <span className={`dot dot-${agentTone(model, runner, a.key)}`} aria-hidden="true" />
+                            {a.name}
+                          </span>
                           <span className="fleet-run-line-sub">{runsWith(model, runner, a) ?? a.description}</span>
                         </span>
                       </button>
@@ -412,17 +418,20 @@ export function TableLayout({ model, runners, send, onOpen }: LayoutProps) {
                 <tr key={a.key} className={removing ? "busy" : r.status === "unreachable" ? "down" : undefined} onClick={() => onOpen(a.key)}>
                   <td>
                     <div className="fleet-agents-table-name">
-                      <button
-                        type="button"
-                        className="fleet-table-open"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpen(a.key);
-                        }}
-                        aria-label={`Open ${a.name}`}
-                      >
-                        {a.name}
-                      </button>
+                      <span className="fleet-agents-table-title">
+                        <AgentTypeIcon agent={a} runner={r} />
+                        <button
+                          type="button"
+                          className="fleet-table-open"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpen(a.key);
+                          }}
+                          aria-label={`Open ${a.name}`}
+                        >
+                          {a.name}
+                        </button>
+                      </span>
                       <span className="fleet-agents-table-desc" title={a.description}>
                         {a.description}
                       </span>

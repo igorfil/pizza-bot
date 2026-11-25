@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Pizza, Puzzle } from "lucide-react";
 import type { FleetAgent, FleetModel, FleetPlugin, FleetRunner } from "./fleet-types.js";
 import type { FleetPayload } from "./fleet-client.js";
 import { useSkillLibrary, type FleetSkillLibrary, type LibrarySkill, type SkillsState } from "./fleet-skills.js";
 import type { FleetSend } from "./FleetModule.js";
 import { ChoiceCard, FleetDialog } from "./GuideCard.js";
+import { PluginIcon } from "./AgentTypeIcon.js";
 import { runnerLabel } from "./fleet-view-model.js";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : "The Controller didn't take that.");
@@ -306,6 +307,7 @@ function ExistingAgentForm({ runner, send, onClose }: { runner: FleetRunner; sen
               checked={pluginId === p.id}
               disabled={!p.healthy}
               title={p.name}
+              icon={<PluginIcon runner={runner} pluginId={p.id} size={16} />}
               detail={p.healthy ? PLUGIN_BLURBS[p.id] ?? `Agents run by the ${p.name} plugin.` : `Unavailable on ${runnerLabel(runner)}: ${p.detail}`}
               onChange={() => {
                 setPluginId(p.id);
@@ -363,9 +365,10 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
       ) : (
         <>
           {offer.modes.length > 1 && (
-            <div className="fleet-segmented" role="tablist" aria-label="How to add the agent">
+            <div className="fleet-segmented fleet-add-modes" role="tablist" aria-label="How to add the agent">
               {offer.modes.map((m) => (
                 <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "active" : undefined} onClick={() => setMode(m)}>
+                  {m === "create" ? <Pizza size={13} aria-hidden="true" /> : <Puzzle size={13} aria-hidden="true" />}
                   {MODE_LABELS[m]}
                 </button>
               ))}

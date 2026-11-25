@@ -34,6 +34,8 @@ export interface FleetRunner {
   harnesses?: string[];
   /** Harness plugins that run its external agents, with their last health check. */
   plugins?: FleetPlugin[];
+  /** Plugin id → its `icon.svg` markup; shown only as an image. */
+  pluginIcons?: Record<string, string>;
   /** The MCP servers on the runner's machine, which its agents pick from. */
   mcpServers?: Record<string, Record<string, unknown>>;
   agentsChange?: FleetAgentsChange | null;

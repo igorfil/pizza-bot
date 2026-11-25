@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addFieldsOf, agentKind, pluginsOf } from "./a2a.js";
+import { addFieldsOf, agentKind, pluginIconsOf, pluginsOf } from "./a2a.js";
 
 describe("agent kind", () => {
   test.each([
@@ -21,6 +21,11 @@ describe("plugins in a runner's index", () => {
 
   test("a runner from before plugins has none", () => {
     expect(pluginsOf(undefined)).toEqual([]);
+  });
+
+  test("keeps icons apart from the plugins, only for plugins that have one", () => {
+    const reported = [{ id: "docker", icon: "<svg/>" }, { id: "python" }, { icon: "<svg/>" }];
+    expect([pluginIconsOf(reported), "icon" in (pluginsOf(reported)[0] ?? {})]).toEqual([{ docker: "<svg/>" }, false]);
   });
 });
 

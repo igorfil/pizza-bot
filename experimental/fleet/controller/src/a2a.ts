@@ -1,7 +1,7 @@
 import { ClientFactory, ClientFactoryOptions, DefaultAgentCardResolver, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
 import { attempt, type Outcome } from "./outcome.js";
-import type { AddField, AgentInfo, AgentKind, AgentSkill, Artifact, McpServers, NewAgentSpec, PluginInfo, TaskSnapshot, TaskUpdate } from "./types.js";
+import type { AddField, AgentInfo, AgentKind, AgentSkill, Artifact, McpServers, NewAgentSpec, PluginIcons, PluginInfo, TaskSnapshot, TaskUpdate } from "./types.js";
 
 /** One agent behind a runner link, with its token already read from the vault. */
 export type AgentEndpoint = { url: string; token: string };
@@ -147,6 +147,7 @@ export type RunnerIndex = {
   canCreate: boolean;
   harnesses: string[];
   plugins: PluginInfo[];
+  pluginIcons: PluginIcons;
   mcpServers: McpServers;
 };
 
@@ -166,6 +167,14 @@ export const addFieldsOf = (v: unknown): AddField[] =>
           ...(str(f.placeholder) ? { placeholder: str(f.placeholder) } : {}),
         }))
     : [];
+
+export const pluginIconsOf = (v: unknown): PluginIcons =>
+  Object.fromEntries(
+    (Array.isArray(v) ? v : [])
+      .filter(isObject)
+      .filter((p) => str(p.id) !== "" && str(p.icon) !== "")
+      .map((p) => [str(p.id), str(p.icon)]),
+  );
 
 export const pluginsOf = (v: unknown): PluginInfo[] =>
   Array.isArray(v)
@@ -191,6 +200,7 @@ const toIndex = (index: IndexJson): RunnerIndex => ({
   canCreate: index.canCreate === true,
   harnesses: strings(index.harnesses),
   plugins: pluginsOf(index.plugins),
+  pluginIcons: pluginIconsOf(index.plugins),
   mcpServers: mcpServersOf(index.mcpServers),
 });
 
