@@ -1,0 +1,2 @@
+name = "AgentCore"
+command = "uv run --quiet --script plugin.py"

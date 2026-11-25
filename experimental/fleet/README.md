@@ -349,7 +349,7 @@ re-reporting its agents.
 npm test -w @pizza-bot/fleet-controller                 # from the repo root: update() + API tests
 npm run typecheck -w @pizza-bot/fleet-controller
 cd experimental/fleet/runner && cargo test
-python3 -m unittest discover -s experimental/fleet/plugins/python   # from the repo root
+# harness plugins, from the repo root: see plugins/README.md#testing
 ```
 
 ### Reconnect scenarios

@@ -41,12 +41,18 @@ over SSM (see POC-GAPS.md, "Deploy simplified").
 - First plugin: **Python** (plain agent folders with the old stdin/stdout contract). The runner's
   own run-a-command path moves into it.
 - Then **Docker** (`docker run -i`, `docker kill` on cancel), **Claude Code** (`claude -p` in a
-  project folder) and **AgentCore** (`InvokeAgentRuntime`), one at a time.
+  project folder, `--resume` for follow-ups) and **AgentCore** (`InvokeAgentRuntime`, one runtime
+  session per conversation, `StopRuntimeSession` on cancel), one at a time.
+
+## Not done yet
+- AgentCore was tested against botocore's API model and one real call, not a deployed runtime.
+- The release workflow doesn't publish the engine or plugins yet; deploys copy this machine's build.
+- Built-in agents still start one engine process per run (about 1s on an EC2-sized Linux box).
 
 ## Status
 - [x] Step 1
 - [x] Step 2
 - [x] Step 3: interface + Python plugin
-- [ ] Step 3: Docker plugin
-- [ ] Step 3: Claude Code plugin
-- [ ] Step 3: AgentCore plugin
+- [x] Step 3: Docker plugin
+- [x] Step 3: Claude Code plugin
+- [x] Step 3: AgentCore plugin

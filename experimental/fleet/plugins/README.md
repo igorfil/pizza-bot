@@ -5,9 +5,18 @@ the plugin, asks it what agents it has, gives it tasks, relays what it reports, 
 The runner's MCP servers, skills and model settings never reach a plugin agent; it brings its own
 tools. Built-in agents run on the runner's engine instead ([agents/README.md](../agents/README.md)).
 
-| Plugin | Runs |
-|---|---|
-| [`python`](python/README.md) | plain Python agent folders, one process per run |
+| Plugin | Runs | Healthy when |
+|---|---|---|
+| [`python`](python/README.md) | plain Python agent folders, one process per run | always |
+| [`docker`](docker/README.md) | container images, `docker run -i` per run | `docker version` reaches a daemon |
+| [`claude-code`](claude-code/README.md) | Claude Code in a project folder, `claude -p` per run; follow-ups resume the session | `claude --version` works |
+| [`agentcore`](agentcore/README.md) | runtimes deployed to Bedrock AgentCore, `InvokeAgentRuntime` per run | AWS credentials are there |
+
+The AWS guide installs all of them; one that can't work on a machine (no Docker, no Claude Code)
+shows as unavailable on the runner, with the reason.
+
+[`lib/fleet_plugin.py`](lib/fleet_plugin.py) holds what the Python plugins share: the protocol loop
+(`serve`), one process per run with cancel (`Runs`), and the one-shot agent contract.
 
 ## Folder
 
@@ -71,3 +80,10 @@ stdin closes; the plugin should stop its runs and exit.
 
 Plugin agents start out as `available`, like shipped agents: turn them on with Add agent → Turn on
 existing, or list them in `RUNNER_AGENTS`.
+
+## Testing
+
+```bash
+for p in lib python docker claude-code; do python3 -m unittest discover -s experimental/fleet/plugins/$p; done
+uv run --with boto3 python -m unittest discover -s experimental/fleet/plugins/agentcore
+```
