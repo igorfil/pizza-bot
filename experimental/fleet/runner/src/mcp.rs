@@ -1,7 +1,7 @@
 //! The runner's MCP servers: one Claude-format `mcp.json` that agents pick servers from by id.
 //! Servers run on this machine, so the library belongs to the runner, not to an agent.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::{Map, Value, json};
@@ -32,10 +32,6 @@ pub fn parse_entry(id: &str, entry: &Value) -> Result<Value, String> {
 impl McpLibrary {
     pub fn new(path: PathBuf) -> Self {
         Self { path, lock: Mutex::new(()) }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// Every server by id; a missing or unreadable file is an empty library.
@@ -98,7 +94,7 @@ mod tests {
         let lib = library("put");
         lib.put("fetch", &json!({"command": "uvx", "args": ["mcp-server-fetch"]})).unwrap();
         let servers = lib.servers();
-        let _ = std::fs::remove_file(lib.path());
+        let _ = std::fs::remove_file(&lib.path);
         assert_eq!(Value::Object(servers), json!({"fetch": {"command": "uvx", "args": ["mcp-server-fetch"]}}));
     }
 
@@ -108,7 +104,7 @@ mod tests {
         lib.put("fetch", &json!({"url": "http://x"})).unwrap();
         let removed = lib.remove("fetch").unwrap();
         let ids = lib.ids();
-        let _ = std::fs::remove_file(lib.path());
+        let _ = std::fs::remove_file(&lib.path);
         assert_eq!((removed, ids), (true, Vec::<String>::new()));
     }
 
