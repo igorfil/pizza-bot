@@ -8,12 +8,12 @@ import { duration, initialDraft, stuckFor } from "./fleet-view-model.js";
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
 /** A wide modal for the Fleet page's multi-field flows; closing it never cancels anything. */
-export function FleetDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function FleetDialog({ title, className, onClose, children }: { title: string; className?: string; onClose: () => void; children: ReactNode }) {
   return (
     <DialogPrimitive.Root open onOpenChange={(open) => !open && onClose()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="sidebar-modal-backdrop" />
-        <DialogPrimitive.Content className="sidebar-modal sidebar-modal--wide fleet-dialog" aria-describedby={undefined}>
+        <DialogPrimitive.Content className={`sidebar-modal sidebar-modal--wide fleet-dialog${className ? ` ${className}` : ""}`} aria-describedby={undefined}>
           <div className="fleet-dialog-head">
             <DialogPrimitive.Title className="sidebar-modal-title">{title}</DialogPrimitive.Title>
             <DialogPrimitive.Close asChild>

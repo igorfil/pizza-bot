@@ -257,25 +257,23 @@ function AgentSpecForm({
   );
 }
 
-export function EditAgentDialog({ model, agent, send, onClose }: { model: FleetModel; agent: FleetAgent; send: FleetSend; onClose: () => void }) {
+export function EditAgentForm({ model, agent, send, onClose }: { model: FleetModel; agent: FleetAgent; send: FleetSend; onClose: () => void }) {
   return (
-    <FleetDialog title={`Edit ${agent.name}`} onClose={onClose}>
-      <AgentSpecForm
-        model={model}
-        runner={model.runners[agent.runner]}
-        initial={{
-          name: agent.name,
-          model: agent.model ?? "",
-          systemPrompt: agent.systemPrompt ?? "",
-          mcp: agent.mcp ?? [],
-          skills: (agent.skills ?? []).map((s) => s.id),
-        }}
-        attachedSkills={agent.skills ?? []}
-        label="Save changes"
-        onSave={(spec) => send("EditAgent", { agent: agent.key, ...spec })}
-        onClose={onClose}
-      />
-    </FleetDialog>
+    <AgentSpecForm
+      model={model}
+      runner={model.runners[agent.runner]}
+      initial={{
+        name: agent.name,
+        model: agent.model ?? "",
+        systemPrompt: agent.systemPrompt ?? "",
+        mcp: agent.mcp ?? [],
+        skills: (agent.skills ?? []).map((s) => s.id),
+      }}
+      attachedSkills={agent.skills ?? []}
+      label="Save changes"
+      onSave={(spec) => send("EditAgent", { agent: agent.key, ...spec })}
+      onClose={onClose}
+    />
   );
 }
 

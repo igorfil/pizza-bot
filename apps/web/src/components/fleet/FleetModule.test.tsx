@@ -295,9 +295,9 @@ describe("AgentCard", () => {
     expect([card(model).includes('aria-label="Remove agent Dad jokes"'), card(created).includes('aria-label="Delete agent Dad jokes"')]).toEqual([true, true]);
   });
 
-  it("offers editing only for an agent created here", () => {
+  it("offers details for every agent, shipped or created", () => {
     const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true, model: "m", systemPrompt: "" } } };
-    expect([card(model).includes('aria-label="Edit agent Dad jokes"'), card(created).includes('aria-label="Edit agent Dad jokes"')]).toEqual([false, true]);
+    expect([card(model).includes('aria-label="Edit agent Dad jokes"'), card(created).includes('aria-label="Edit agent Dad jokes"')]).toEqual([true, true]);
   });
 
   it("can't be deleted while it runs", () => {

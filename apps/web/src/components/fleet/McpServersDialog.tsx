@@ -3,7 +3,6 @@ import { LoaderCircle, Trash2 } from "lucide-react";
 import { mcpServerSummary } from "./AddAgentDialog.js";
 import type { FleetAgent, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
-import { FleetDialog } from "./GuideCard.js";
 
 const ID = /^[a-z0-9_-]+$/;
 
@@ -34,7 +33,7 @@ export const parseServers = (id: string, text: string): Parsed => {
 /** The agents on this runner that use the server, so removing it says what breaks. */
 const usersOf = (agents: FleetAgent[], id: string): string[] => agents.filter((a) => a.mcp?.includes(id)).map((a) => a.name);
 
-export function McpServersDialog({ runner, agents, send, onClose }: { runner: FleetRunner; agents: FleetAgent[]; send: FleetSend; onClose: () => void }) {
+export function McpServersPanel({ runner, agents, send, onClose }: { runner: FleetRunner; agents: FleetAgent[]; send: FleetSend; onClose: () => void }) {
   const servers = Object.entries(runner.mcpServers ?? {});
   const [id, setId] = useState("");
   const [entry, setEntry] = useState("");
@@ -70,8 +69,10 @@ export function McpServersDialog({ runner, agents, send, onClose }: { runner: Fl
     send("RemoveMcpServer", { runner: runner.name, id: sid }).catch((e: unknown) => setError(e instanceof Error ? e.message : "The Controller didn't take that."));
   };
 
+  const editable = runner.status === "healthy";
+
   return (
-    <FleetDialog title={`MCP servers on ${runner.name}`} onClose={onClose}>
+    <>
       <p className="field-hint">
         These run on {runner.name}&apos;s machine. Agents on {runner.name} pick the ones they use. Write tokens as <code>{"${VAR}"}</code> and set them in the
         runner&apos;s environment.
@@ -84,7 +85,7 @@ export function McpServersDialog({ runner, agents, send, onClose }: { runner: Fl
             const users = usersOf(agents, sid);
             return (
               <li key={sid} className="fleet-mcp-row">
-                <button type="button" className="fleet-mcp-name" onClick={() => edit(sid, e)} title="Edit">
+                <button type="button" className="fleet-mcp-name" onClick={() => edit(sid, e)} title="Edit" disabled={!editable}>
                   {sid}
                 </button>
                 <code className="fleet-mcp-cmd">{mcpServerSummary(e)}</code>
@@ -93,6 +94,7 @@ export function McpServersDialog({ runner, agents, send, onClose }: { runner: Fl
                   type="button"
                   className="fleet-icon-btn fleet-link-danger"
                   onClick={() => remove(sid)}
+                  disabled={!editable}
                   aria-label={`Remove MCP server ${sid}`}
                   title={users.length > 0 ? `Remove; ${users.join(", ")} will run without it` : "Remove"}
                 >
@@ -103,49 +105,53 @@ export function McpServersDialog({ runner, agents, send, onClose }: { runner: Fl
           })}
         </ul>
       )}
-      <form className="fleet-guide" onSubmit={(e) => void save(e)}>
-        <label className="field">
-          <span className="field-label">Server id</span>
-          <input className="field-input mono" value={id} onChange={(e) => setId(e.target.value)} placeholder="fetch" spellCheck={false} />
-        </label>
-        <label className="field">
-          <span className="field-label">Server</span>
-          <textarea
-            className="field-input fleet-prompt fleet-code"
-            value={entry}
-            onChange={(e) => setEntry(e.target.value)}
-            rows={5}
-            spellCheck={false}
-            placeholder={ENTRY_EXAMPLE}
-            aria-invalid={parsed !== null && "error" in parsed}
-          />
-          {parsed && "error" in parsed ? (
-            <span className="schedule-editor-error" role="alert">
-              {parsed.error}
-            </span>
-          ) : (
-            <span className="field-hint">
-              The server&apos;s entry: a <code>command</code> with <code>args</code>, or a <code>url</code>. Pasting a whole <code>.mcp.json</code> adds every
-              server in it.
-            </span>
+      {!editable ? (
+        <p className="fleet-muted">{runner.name} isn&apos;t reachable right now. You can change its MCP servers once it&apos;s online.</p>
+      ) : (
+        <form className="fleet-guide" onSubmit={(e) => void save(e)}>
+          <label className="field">
+            <span className="field-label">Server id</span>
+            <input className="field-input mono" value={id} onChange={(e) => setId(e.target.value)} placeholder="fetch" spellCheck={false} />
+          </label>
+          <label className="field">
+            <span className="field-label">Server</span>
+            <textarea
+              className="field-input fleet-prompt fleet-code"
+              value={entry}
+              onChange={(e) => setEntry(e.target.value)}
+              rows={5}
+              spellCheck={false}
+              placeholder={ENTRY_EXAMPLE}
+              aria-invalid={parsed !== null && "error" in parsed}
+            />
+            {parsed && "error" in parsed ? (
+              <span className="schedule-editor-error" role="alert">
+                {parsed.error}
+              </span>
+            ) : (
+              <span className="field-hint">
+                The server&apos;s entry: a <code>command</code> with <code>args</code>, or a <code>url</code>. Pasting a whole <code>.mcp.json</code> adds every
+                server in it.
+              </span>
+            )}
+          </label>
+          {error && (
+            <div className="schedule-editor-error" role="alert">
+              {error}
+            </div>
           )}
-        </label>
-        {error && (
-          <div className="schedule-editor-error" role="alert">
-            {error}
+          <div className="fleet-guide-actions">
+            <span className="fleet-agent-links-spacer" />
+            <button type="button" className="btn-secondary fleet-small-btn" onClick={onClose} disabled={saving}>
+              Done
+            </button>
+            <button type="submit" className="btn-primary fleet-small-btn" disabled={saving || !parsed || "error" in parsed}>
+              {saving && <LoaderCircle size={13} className="spin" aria-hidden="true" />}
+              {id in (runner.mcpServers ?? {}) ? "Save server" : "Add server"}
+            </button>
           </div>
-        )}
-        <div className="fleet-guide-actions">
-          <span className="fleet-agent-links-spacer" />
-          <button type="button" className="btn-secondary fleet-small-btn" onClick={onClose} disabled={saving}>
-            Done
-          </button>
-          <button type="submit" className="btn-primary fleet-small-btn" disabled={saving || !parsed || "error" in parsed}>
-            {saving && <LoaderCircle size={13} className="spin" aria-hidden="true" />}
-            {id in (runner.mcpServers ?? {}) ? "Save server" : "Add server"}
-          </button>
-        </div>
-      </form>
-    </FleetDialog>
+        </form>
+      )}
+    </>
   );
 }

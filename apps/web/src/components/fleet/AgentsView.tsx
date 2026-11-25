@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AlarmClock, ChevronDown, ChevronUp, Cloud, Laptop, LoaderCircle, Pencil, Play, Plug, Plus, RotateCcw, Server, Square, Trash2, X } from "lucide-react";
-import { AddAgentDialog, EditAgentDialog, runsTools } from "./AddAgentDialog.js";
-import { McpServersDialog } from "./McpServersDialog.js";
+import { AlarmClock, ChevronDown, ChevronUp, LoaderCircle, Play, Plug, Plus, RotateCcw, Server, Settings, Square, Trash2, X } from "lucide-react";
+import { AddAgentDialog, mcpServerSummary, runsTools } from "./AddAgentDialog.js";
+import { AgentDetailsDialog, RunnerDetailsDialog, RunnerPill, type RunnerTab } from "./FleetDetails.js";
 import { useAppToast } from "../AppToast.js";
 import type { FleetAgent, FleetModel, FleetRunner, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
@@ -19,9 +19,7 @@ import {
   defaultInput,
   inputLabel,
   isFinished,
-  runnerLocation,
   runnerStatusText,
-  runnerTone,
   runsOf,
   runStrip,
   stripSummary,
@@ -31,8 +29,6 @@ import {
 const INLINE_RUNS = 5;
 
 const stripTone = (t: FleetTask) => (isFinished(t) ? taskTone(t.state) : "running");
-
-const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
 
 export function AgentsView({ model, send, onOpenChat }: { model: FleetModel; send: FleetSend; onOpenChat: (chatId: string) => void }) {
   const notify = useAppToast();
@@ -141,47 +137,54 @@ export function RunnerGroup({
   const notify = useAppToast();
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [addingAgent, setAddingAgent] = useState(false);
-  const [mcpOpen, setMcpOpen] = useState(false);
-  const mcpCount = Object.keys(runner.mcpServers ?? {}).length;
-  const Where = placeIcon(runner);
+  const [details, setDetails] = useState<RunnerTab | null>(null);
+  const [lit, setLit] = useState<readonly string[] | null>(null);
+  const servers = Object.keys(runner.mcpServers ?? {}).sort();
   const down = runner.status === "unreachable";
   const change = runner.agentsChange ?? null;
   const adding = change?.action === "add" && change.error === null ? change : null;
+  const chipClass = (id: string) => `fleet-mcp-chip${lit === null ? "" : lit.includes(id) ? " lit" : " faded"}`;
   return (
     <section className={`fleet-runner${down ? " down" : ""}`} aria-label={`Runner ${runner.name}`}>
       <header className="fleet-runner-head">
-        <Server size={15} aria-hidden="true" />
         <h3 className="fleet-runner-name">{runner.name}</h3>
-        <span className={`dot dot-${runnerTone(runner.status)}`} aria-hidden="true" />
-        <span className={down ? "fleet-tone-bad" : undefined}>{runnerStatusText(model, runner)}</span>
-        <span className="fleet-runner-where">
-          <Where size={14} aria-hidden="true" /> {runnerLocation(runner)}
-        </span>
+        <RunnerPill model={model} runner={runner} />
+        <span className={down ? "fleet-tone-bad" : "fleet-hover-reveal"}>{runnerStatusText(model, runner)}</span>
         {down && runner.lastError && <span className="fleet-runner-error">{runner.lastError}</span>}
         <span className="fleet-agent-links-spacer" />
-        {runsTools(runner) && (
-          <button
-            type="button"
-            className="btn-secondary fleet-small-btn"
-            onClick={() => setMcpOpen(true)}
-            disabled={runner.status !== "healthy"}
-            aria-label={`MCP servers on ${runner.name}`}
-          >
-            <Plug size={13} aria-hidden="true" /> MCP servers{mcpCount > 0 ? ` (${mcpCount})` : ""}
+        <span className="fleet-hover-actions">
+          <button type="button" className="fleet-ghost-btn" onClick={() => setDetails("overview")} aria-label={`Edit runner ${runner.name}`}>
+            <Settings size={13} aria-hidden="true" /> Edit
           </button>
-        )}
-        {!runner.local && (
-          <button
-            type="button"
-            className="fleet-icon-btn fleet-agent-remove"
-            onClick={() => setConfirmRemove(true)}
-            aria-label={`Remove runner ${runner.name}`}
-            title="Remove runner"
-          >
-            <Trash2 size={13} />
-          </button>
-        )}
+          {!runner.local && (
+            <button
+              type="button"
+              className="fleet-ghost-btn fleet-ghost-danger"
+              onClick={() => setConfirmRemove(true)}
+              aria-label={`Remove runner ${runner.name}`}
+              title="Remove runner"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </span>
       </header>
+      {runsTools(runner) && (
+        <ul className="fleet-mcp-chips" aria-label={`MCP servers on ${runner.name}`}>
+          {servers.map((id) => (
+            <li key={id}>
+              <button type="button" className={chipClass(id)} onClick={() => setDetails("mcp")} title={`${id}: ${mcpServerSummary(runner.mcpServers?.[id] ?? {})}`}>
+                <Plug size={12} aria-hidden="true" /> {id}
+              </button>
+            </li>
+          ))}
+          <li className={servers.length > 0 ? "fleet-hover-reveal" : undefined}>
+            <button type="button" className="fleet-mcp-chip add" onClick={() => setDetails("mcp")} disabled={runner.status !== "healthy"}>
+              <Plus size={12} aria-hidden="true" /> {servers.length > 0 ? "MCP server" : "Add MCP server"}
+            </button>
+          </li>
+        </ul>
+      )}
       {change?.error && (
         <p className="fleet-runner-change fleet-tone-bad" role="alert">
           Couldn't {change.action} {agentNames(model, runner, change.agents)}: {change.error}
@@ -199,6 +202,7 @@ export function RunnerGroup({
               runner={runner}
               send={send}
               onOpenChat={onOpenChat}
+              onHighlight={setLit}
               removing={change?.action === "remove" && change.error === null && change.agents.includes(a.name)}
             />
           ))}
@@ -215,7 +219,24 @@ export function RunnerGroup({
           </button>
         </div>
       )}
-      {mcpOpen && <McpServersDialog runner={runner} agents={agents} send={send} onClose={() => setMcpOpen(false)} />}
+      {details && (
+        <RunnerDetailsDialog
+          model={model}
+          runner={runner}
+          agents={agents}
+          send={send}
+          initial={details}
+          onAddAgent={() => {
+            setDetails(null);
+            setAddingAgent(true);
+          }}
+          onRemove={() => {
+            setDetails(null);
+            setConfirmRemove(true);
+          }}
+          onClose={() => setDetails(null)}
+        />
+      )}
       {addingAgent && <AddAgentDialog model={model} runner={runner} send={send} onClose={() => setAddingAgent(false)} />}
       {confirmRemove && (
         <RemoveRunnerDialog
@@ -248,6 +269,7 @@ export function AgentCard({
   runner,
   send,
   onOpenChat,
+  onHighlight,
   removing = false,
 }: {
   model: FleetModel;
@@ -255,11 +277,12 @@ export function AgentCard({
   runner: FleetRunner;
   send: FleetSend;
   onOpenChat: (chatId: string) => void;
+  onHighlight?: (mcp: readonly string[] | null) => void;
   removing?: boolean;
 }) {
   const notify = useAppToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [details, setDetails] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
   const [running, setRunning] = useState(false);
   const [input, setInput] = useState("");
@@ -307,36 +330,61 @@ export function AgentCard({
     );
   };
 
+  const highlight = () => onHighlight?.(agent.mcp ?? []);
+  const unhighlight = () => onHighlight?.(null);
+
   return (
-    <article className={`fleet-agent-card${down ? " down" : ""}${removing ? " removing" : ""}`} aria-label={agent.name} aria-busy={removing || undefined}>
+    <article
+      className={`fleet-agent-card${down ? " down" : ""}${removing ? " removing" : ""}${active ? " active" : ""}`}
+      aria-label={agent.name}
+      aria-busy={removing || undefined}
+      onMouseEnter={highlight}
+      onMouseLeave={unhighlight}
+      onFocus={highlight}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) unhighlight();
+      }}
+    >
       <header className="fleet-agent-head">
         <h3 className="fleet-agent-name" title={agent.key}>
           {agent.name}
         </h3>
+        {!removing && (
+          <span className="fleet-hover-actions">
+            <button type="button" className="fleet-ghost-btn" onClick={() => setDetails(true)} aria-label={`Edit agent ${agent.name}`}>
+              <Settings size={13} aria-hidden="true" /> Edit
+            </button>
+            {!down && (
+              <button
+                type="button"
+                className="fleet-agent-delete"
+                onClick={() => setConfirmDelete(true)}
+                disabled={!!active}
+                aria-label={`${agent.created ? "Delete" : "Remove"} agent ${agent.name}`}
+                title={active ? "Wait for the run to finish, or cancel it, before removing the agent" : agent.created ? "Delete agent" : "Remove agent"}
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </span>
+        )}
       </header>
-      {!down && !removing && agent.created && agent.model !== undefined && (
-        <button
-          type="button"
-          className="fleet-agent-edit"
-          onClick={() => setEditing(true)}
-          aria-label={`Edit agent ${agent.name}`}
-          title="Edit name, model and system prompt"
-        >
-          <Pencil size={14} />
-        </button>
-      )}
-      {editing && <EditAgentDialog model={model} agent={agent} send={send} onClose={() => setEditing(false)} />}
-      {!down && !removing && (
-        <button
-          type="button"
-          className="fleet-agent-delete"
-          onClick={() => setConfirmDelete(true)}
-          disabled={!!active}
-          aria-label={`${agent.created ? "Delete" : "Remove"} agent ${agent.name}`}
-          title={active ? "Wait for the run to finish, or cancel it, before removing the agent" : agent.created ? "Delete agent" : "Remove agent"}
-        >
-          <Trash2 size={14} />
-        </button>
+      {details && (
+        <AgentDetailsDialog
+          model={model}
+          agent={agent}
+          runner={runner}
+          send={send}
+          onDelete={
+            down
+              ? null
+              : () => {
+                  setDetails(false);
+                  setConfirmDelete(true);
+                }
+          }
+          onClose={() => setDetails(false)}
+        />
       )}
       {removing && (
         <p className="fleet-agent-live" role="status">
