@@ -30,6 +30,18 @@ The runner's user must be allowed to use Docker. On Linux that usually means the
 which is root on that machine in all but name: give it only to a runner you trust like root, or use
 rootless Docker or Podman.
 
+## A dummy image to add
+
+[`examples/dummy`](examples/dummy) is a container agent to try **Add agent → Add existing → Docker**
+with: it reports a few progress steps, then echoes the input with the container it ran in. `steps=N`
+sets the steps; `fail` fails the run.
+
+```bash
+docker build -t fleet-dummy-agent experimental/fleet/plugins/docker/examples/dummy
+```
+
+Then add it on the Fleet page with the image `fleet-dummy-agent`.
+
 ## Testing
 
 ```bash
