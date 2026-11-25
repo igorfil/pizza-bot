@@ -12,13 +12,13 @@ export const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocatio
 
 const TRANSPORT: Record<FleetRunner["transport"], string> = { direct: "Direct", aws_ssm: "AWS SSM tunnel", ssh: "SSH tunnel" };
 
-/** Where a runner lives, tinted by its health; the tooltip carries the status in words. */
+/** The runner's name, tinted by its health; the tooltip carries where it lives and its status in words. */
 export function RunnerPill({ model, runner }: { model: FleetModel; runner: FleetRunner }) {
   const Where = placeIcon(runner);
   return (
-    <span className={`fleet-pill fleet-pill-${runnerTone(runner.status)}`} title={runnerStatusText(model, runner)}>
+    <span className={`fleet-pill fleet-pill-${runnerTone(runner.status)}`} title={`${runnerLocation(runner)} · ${runnerStatusText(model, runner)}`}>
       <Where size={13} aria-hidden="true" />
-      {runnerLocation(runner)}
+      {runner.name}
       <span className={`dot dot-${runnerTone(runner.status)}`} aria-hidden="true" />
     </span>
   );
@@ -159,8 +159,10 @@ export function RunnerDetailsDialog({
   return (
     <FleetDialog title={runner.name} className="fleet-details" onClose={onClose}>
       <div className="fleet-details-meta">
-        <RunnerPill model={model} runner={runner} />
-        <span className="fleet-muted">{runnerStatusText(model, runner)}</span>
+        <span className={`dot dot-${runnerTone(runner.status)}`} aria-hidden="true" />
+        <span className="fleet-muted">
+          {runnerLocation(runner)} · {runnerStatusText(model, runner)}
+        </span>
       </div>
       <DetailTabs tabs={tabs} initial={initial} label={`${runner.name} details`} />
     </FleetDialog>

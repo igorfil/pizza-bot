@@ -19,6 +19,7 @@ import {
   defaultInput,
   inputLabel,
   isFinished,
+  runnerLocation,
   runnerStatusText,
   runsOf,
   runStrip,
@@ -147,9 +148,12 @@ export function RunnerGroup({
   return (
     <section className={`fleet-runner${down ? " down" : ""}`} aria-label={`Runner ${runner.name}`}>
       <header className="fleet-runner-head">
-        <h3 className="fleet-runner-name">{runner.name}</h3>
-        <RunnerPill model={model} runner={runner} />
-        <span className={down ? "fleet-tone-bad" : "fleet-hover-reveal"}>{runnerStatusText(model, runner)}</span>
+        <h3 className="fleet-runner-name">
+          <RunnerPill model={model} runner={runner} />
+        </h3>
+        <span className={down ? "fleet-tone-bad" : "fleet-hover-reveal"}>
+          {runnerLocation(runner)} · {runnerStatusText(model, runner)}
+        </span>
         {down && runner.lastError && <span className="fleet-runner-error">{runner.lastError}</span>}
         <span className="fleet-agent-links-spacer" />
         <span className="fleet-hover-actions">
