@@ -49,6 +49,7 @@ const failure = async (res: Response): Promise<FleetError> => {
 export type FleetIntent =
   | "AddRunner"
   | "RemoveRunner"
+  | "RenameRunner"
   | "AddAgents"
   | "CreateAgent"
   | "SetMcpServer"

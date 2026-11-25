@@ -2399,6 +2399,9 @@ button.fleet-inline-run:focus-visible { outline: 2px solid var(--brand); outline
 .fleet-soon-panel { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 32px 16px; text-align: center; color: var(--dim); border: 1px dashed var(--border); border-radius: 12px; }
 .fleet-soon-panel p { margin: 0; max-width: 46ch; line-height: 1.5; }
 .fleet-soon-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); }
+.fleet-rename-row { display: flex; gap: 8px; align-items: stretch; }
+.fleet-rename-row .field-input { flex: 1; min-width: 0; }
+.fleet-rename-row .fleet-small-btn { height: auto; padding: 0 14px; }
 @media (prefers-reduced-motion: reduce) {
   .fleet-agent-card, .fleet-runner, .fleet-mcp-chip { transition: none; }
 }

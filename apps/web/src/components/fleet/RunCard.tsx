@@ -5,7 +5,7 @@ import { useAppToast } from "../AppToast.js";
 import type { FleetModel, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { FleetDialog } from "./GuideCard.js";
-import { agentName, ago, artifactsNewestFirst, canFollowUp, earlierRuns, runTitle, taskAgentKey, taskTone } from "./fleet-view-model.js";
+import { agentName, ago, artifactsNewestFirst, canFollowUp, earlierRuns, runnerLabelOf, runTitle, taskAgentKey, taskTone } from "./fleet-view-model.js";
 
 export type OpenChat = (chatId: string) => void;
 
@@ -159,7 +159,7 @@ export function InboxCard({
     >
       <header className="fleet-inbox-card-head">
         <span className="fleet-inbox-agent">{agentName(model, task)}</span>
-        <span className="fleet-muted">on {task.runner}</span>
+        <span className="fleet-muted">on {runnerLabelOf(model, task.runner)}</span>
         <RunMeta model={model} task={task} />
         {read && <span className="fleet-muted">· read</span>}
       </header>
@@ -243,7 +243,7 @@ export function RunDialog({
     <FleetDialog title={runTitle(model, task)} onClose={onClose}>
       <p className="fleet-inbox-card-head fleet-run-meta">
         <span className="fleet-muted">
-          {agentName(model, task)} on {task.runner}
+          {agentName(model, task)} on {runnerLabelOf(model, task.runner)}
         </span>
         <RunMeta model={model} task={task} />
       </p>

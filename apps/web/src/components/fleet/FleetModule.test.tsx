@@ -242,6 +242,11 @@ describe("AgentsView", () => {
     expect(view(model)).toContain("1 agent on 1 runner");
   });
 
+  it("shows a renamed runner by its display name", () => {
+    const renamed = { ...model, runners: { ec2: { ...model.runners.ec2!, label: "Build box" } } };
+    expect([view(renamed).includes('aria-label="Runner Build box"'), view(renamed).includes('aria-label="Runner ec2"')]).toEqual([true, false]);
+  });
+
   it("names the runner's state in words next to its dot", () => {
     expect(view(model)).toMatch(/online · seen/);
   });

@@ -19,6 +19,7 @@ import {
   defaultInput,
   inputLabel,
   isFinished,
+  runnerLabel,
   runnerLocation,
   runnerStatusText,
   runsOf,
@@ -146,7 +147,7 @@ export function RunnerGroup({
   const adding = change?.action === "add" && change.error === null ? change : null;
   const chipClass = (id: string) => `fleet-mcp-chip${lit === null ? "" : lit.includes(id) ? " lit" : " faded"}`;
   return (
-    <section className={`fleet-runner${down ? " down" : ""}`} aria-label={`Runner ${runner.name}`}>
+    <section className={`fleet-runner${down ? " down" : ""}`} aria-label={`Runner ${runnerLabel(runner)}`}>
       <header className="fleet-runner-head">
         <h3 className="fleet-runner-name">
           <RunnerPill model={model} runner={runner} />
@@ -157,7 +158,7 @@ export function RunnerGroup({
         {down && runner.lastError && <span className="fleet-runner-error">{runner.lastError}</span>}
         <span className="fleet-agent-links-spacer" />
         <span className="fleet-hover-actions">
-          <button type="button" className="fleet-ghost-btn" onClick={() => setDetails("overview")} aria-label={`Edit runner ${runner.name}`}>
+          <button type="button" className="fleet-ghost-btn" onClick={() => setDetails("overview")} aria-label={`Edit runner ${runnerLabel(runner)}`}>
             <Settings size={13} aria-hidden="true" /> Edit
           </button>
           {!runner.local && (
@@ -165,7 +166,7 @@ export function RunnerGroup({
               type="button"
               className="fleet-ghost-btn fleet-ghost-danger"
               onClick={() => setConfirmRemove(true)}
-              aria-label={`Remove runner ${runner.name}`}
+              aria-label={`Remove runner ${runnerLabel(runner)}`}
               title="Remove runner"
             >
               <Trash2 size={13} />
@@ -174,7 +175,7 @@ export function RunnerGroup({
         </span>
       </header>
       {runsTools(runner) && (
-        <ul className="fleet-mcp-chips" aria-label={`MCP servers on ${runner.name}`}>
+        <ul className="fleet-mcp-chips" aria-label={`MCP servers on ${runnerLabel(runner)}`}>
           {servers.map((id) => (
             <li key={id}>
               <button type="button" className={chipClass(id)} onClick={() => setDetails("mcp")} title={`${id}: ${mcpServerSummary(runner.mcpServers?.[id] ?? {})}`}>
@@ -215,11 +216,11 @@ export function RunnerGroup({
             className="fleet-agent-card fleet-agent-add"
             onClick={() => setAddingAgent(true)}
             disabled={change !== null && change.error === null}
-            aria-label={adding ? `Adding ${agentNames(model, runner, adding.agents)} to ${runner.name}` : `Add agent to ${runner.name}`}
+            aria-label={adding ? `Adding ${agentNames(model, runner, adding.agents)} to ${runnerLabel(runner)}` : `Add agent to ${runnerLabel(runner)}`}
           >
             {adding ? <LoaderCircle size={22} strokeWidth={1.5} className="spin" /> : <Plus size={22} strokeWidth={1.5} />}
             {adding ? `Adding ${agentNames(model, runner, adding.agents)}…` : "Add agent"}
-            {agents.length === 0 && !adding && <span className="fleet-muted">Choose what {runner.name} runs.</span>}
+            {agents.length === 0 && !adding && <span className="fleet-muted">Choose what {runnerLabel(runner)} runs.</span>}
           </button>
         </div>
       )}
@@ -253,11 +254,11 @@ export function RunnerGroup({
               .then(() =>
                 runner.instanceId
                   ? notify({
-                      title: `Removed ${runner.name} and its agents`,
+                      title: `Removed ${runnerLabel(runner)} and its agents`,
                       description: `EC2 instance ${runner.instanceId} was not terminated and keeps running. Terminate it in the AWS console if you no longer need it.`,
                       tone: "warning",
                     })
-                  : notify({ title: `Removed ${runner.name}`, tone: "success" }),
+                  : notify({ title: `Removed ${runnerLabel(runner)}`, tone: "success" }),
               )
               .catch((e: unknown) => notify({ title: "Couldn't remove the runner", description: e instanceof Error ? e.message : undefined, tone: "error" }));
           }}

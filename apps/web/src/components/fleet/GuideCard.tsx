@@ -3,7 +3,7 @@ import { Check, Circle, LoaderCircle, Minus, RotateCcw, TriangleAlert, X } from 
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type { FleetAgent, FleetChecklistItem, FleetGuideSession, FleetModel, FleetRunner, FleetStepView } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
-import { duration, initialDraft, stuckFor } from "./fleet-view-model.js";
+import { duration, initialDraft, runnerLabel, stuckFor } from "./fleet-view-model.js";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
@@ -306,8 +306,8 @@ export function DeleteAgentDialog({ agent, runner, onCancel, onConfirm }: { agen
           </DialogPrimitive.Title>
           <DialogPrimitive.Description className="sidebar-modal-body">
             {agent.created
-              ? `This deletes ${agent.name} and its system prompt from ${runner.name}. Its past results stay in the Inbox.`
-              : `${runner.name} stops running ${agent.name}. It stays on the machine, so you can turn it back on with Add agent.`}
+              ? `This deletes ${agent.name} and its system prompt from ${runnerLabel(runner)}. Its past results stay in the Inbox.`
+              : `${runnerLabel(runner)} stops running ${agent.name}. It stays on the machine, so you can turn it back on with Add agent.`}
           </DialogPrimitive.Description>
           <div className="sidebar-modal-actions">
             <DialogPrimitive.Close asChild>
@@ -345,11 +345,11 @@ export function RemoveRunnerDialog({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="sidebar-modal-backdrop" />
         <DialogPrimitive.Content className="sidebar-modal sidebar-modal--wide">
-          <DialogPrimitive.Title className="sidebar-modal-title">Remove runner {runner.name}?</DialogPrimitive.Title>
+          <DialogPrimitive.Title className="sidebar-modal-title">Remove runner {runnerLabel(runner)}?</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sidebar-modal-body">
             {instance
               ? `This uninstalls the runner from ${instance} and deletes ${agentsText(agentCount)} there, including agents you created. Runs in progress stop.`
-              : `The Controller forgets ${runner.name} and ${agentsText(agentCount)}. The runner itself keeps running.`}
+              : `The Controller forgets ${runnerLabel(runner)} and ${agentsText(agentCount)}. The runner itself keeps running.`}
           </DialogPrimitive.Description>
           {instance && (
             <p className="fleet-remove-warning" role="note">

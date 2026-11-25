@@ -13,6 +13,8 @@ export type FleetLink = { state: "up"; url: string } | { state: "down"; error: s
 /** A host process (one per machine). Health is per runner; it hosts many agents. */
 export interface FleetRunner {
   name: string;
+  /** Display name; `name` stays the id agent keys and intents use. */
+  label?: string | null;
   transport: "direct" | "aws_ssm" | "ssh";
   /** The EC2 instance an aws_ssm runner lives on. */
   instanceId?: string | null;

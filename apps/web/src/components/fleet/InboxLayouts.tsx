@@ -4,7 +4,7 @@ import { useAppToast } from "../AppToast.js";
 import type { FleetModel, FleetTask } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { InboxCard, RunDialog, RunResult, type OpenChat } from "./RunCard.js";
-import { agentName, ago, groupByAgent, groupByDay, runTitle, selectedOrNext, taskAgentKey, taskTone } from "./fleet-view-model.js";
+import { agentName, ago, groupByAgent, groupByDay, runnerLabelOf, runTitle, selectedOrNext, taskAgentKey, taskTone } from "./fleet-view-model.js";
 
 type LayoutProps = { model: FleetModel; tasks: FleetTask[]; send: FleetSend; onOpenChat: OpenChat };
 
@@ -39,7 +39,7 @@ function RunLine({ model, task }: { model: FleetModel; task: FleetTask }) {
       <span className="fleet-run-line-text">
         <span className="fleet-run-line-title">{runTitle(model, task)}</span>
         <span className="fleet-run-line-sub">
-          {agentName(model, task)} · {task.runner} · {ago(model.now, task.updatedAt)}
+          {agentName(model, task)} · {runnerLabelOf(model, task.runner)} · {ago(model.now, task.updatedAt)}
           {task.trigger === "schedule" && " · scheduled"}
           {taskTone(task.state) === "bad" && ` · ${task.state}`}
         </span>
@@ -264,7 +264,7 @@ export function TableLayout({ model, tasks, send, onOpenChat }: LayoutProps) {
               <td>
                 <span className={`fleet-state fleet-tone-${taskTone(t.state)}`}>{t.state}</span>
               </td>
-              <td className="fleet-muted">{t.runner}</td>
+              <td className="fleet-muted">{runnerLabelOf(model, t.runner)}</td>
               <td className="fleet-muted">{ago(model.now, t.updatedAt)}</td>
             </tr>
           ))}

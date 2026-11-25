@@ -3,6 +3,7 @@ import { LoaderCircle, Trash2 } from "lucide-react";
 import { mcpServerSummary } from "./AddAgentDialog.js";
 import type { FleetAgent, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
+import { runnerLabel } from "./fleet-view-model.js";
 
 const ID = /^[a-z0-9_-]+$/;
 
@@ -74,13 +75,13 @@ export function McpServersPanel({ runner, agents, send, onClose }: { runner: Fle
   return (
     <>
       <p className="field-hint">
-        These run on {runner.name}&apos;s machine. Agents on {runner.name} pick the ones they use. Write tokens as <code>{"${VAR}"}</code> and set them in the
+        These run on {runnerLabel(runner)}&apos;s machine. Agents on {runnerLabel(runner)} pick the ones they use. Write tokens as <code>{"${VAR}"}</code> and set them in the
         runner&apos;s environment.
       </p>
       {servers.length === 0 ? (
         <p className="fleet-muted">No MCP servers yet.</p>
       ) : (
-        <ul className="fleet-mcp-list" aria-label={`MCP servers on ${runner.name}`}>
+        <ul className="fleet-mcp-list" aria-label={`MCP servers on ${runnerLabel(runner)}`}>
           {servers.map(([sid, e]) => {
             const users = usersOf(agents, sid);
             return (
@@ -106,7 +107,7 @@ export function McpServersPanel({ runner, agents, send, onClose }: { runner: Fle
         </ul>
       )}
       {!editable ? (
-        <p className="fleet-muted">{runner.name} isn&apos;t reachable right now. You can change its MCP servers once it&apos;s online.</p>
+        <p className="fleet-muted">{runnerLabel(runner)} isn&apos;t reachable right now. You can change its MCP servers once it&apos;s online.</p>
       ) : (
         <form className="fleet-guide" onSubmit={(e) => void save(e)}>
           <label className="field">

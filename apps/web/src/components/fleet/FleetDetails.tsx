@@ -1,12 +1,12 @@
-import type { ReactNode } from "react";
-import { Cloud, KeyRound, Laptop, Plug, Plus, Trash2 } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Cloud, KeyRound, Laptop, LoaderCircle, Plug, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { Tabs } from "radix-ui";
 import { EditAgentForm, mcpServerSummary, runsTools } from "./AddAgentDialog.js";
 import { McpServersPanel } from "./McpServersDialog.js";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { FleetDialog } from "./GuideCard.js";
-import { activeRun, ago, runnerLocation, runnerStatusText, runnerTone } from "./fleet-view-model.js";
+import { activeRun, ago, runnerLabel, runnerLocation, runnerStatusText, runnerTone } from "./fleet-view-model.js";
 
 export const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
 
@@ -18,7 +18,7 @@ export function RunnerPill({ model, runner }: { model: FleetModel; runner: Fleet
   return (
     <span className={`fleet-pill fleet-pill-${runnerTone(runner.status)}`} title={`${runnerLocation(runner)} · ${runnerStatusText(model, runner)}`}>
       <Where size={13} aria-hidden="true" />
-      {runner.name}
+      {runnerLabel(runner)}
       <span className={`dot dot-${runnerTone(runner.status)}`} aria-hidden="true" />
     </span>
   );
@@ -59,17 +59,75 @@ function Facts({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
-function SecretsSoon({ runner }: { runner: FleetRunner }) {
+function SoonPanel({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (
     <div className="fleet-soon-panel">
-      <KeyRound size={22} strokeWidth={1.5} aria-hidden="true" />
+      {icon}
       <p className="fleet-soon-title">
-        Secrets <span className="fleet-soon">Coming soon</span>
+        {title} <span className="fleet-soon">Coming soon</span>
       </p>
-      <p className="fleet-muted">
-        Until then, write tokens as <code>{"${VAR}"}</code> in MCP server entries and set them in {runner.name}&apos;s environment.
-      </p>
+      <p className="fleet-muted">{children}</p>
     </div>
+  );
+}
+
+function SecretsSoon({ runner }: { runner: FleetRunner }) {
+  return (
+    <SoonPanel icon={<KeyRound size={22} strokeWidth={1.5} aria-hidden="true" />} title="Secrets">
+      Until then, write tokens as <code>{"${VAR}"}</code> in MCP server entries and set them in {runnerLabel(runner)}&apos;s environment.
+    </SoonPanel>
+  );
+}
+
+function PermissionsSoon({ agent }: { agent: FleetAgent }) {
+  return (
+    <SoonPanel icon={<ShieldCheck size={22} strokeWidth={1.5} aria-hidden="true" />} title="Permissions">
+      Choose what {agent.name} may do on its own and what needs your approval first.
+    </SoonPanel>
+  );
+}
+
+const MAX_LABEL = 40;
+
+function RenameRunner({ runner, send }: { runner: FleetRunner; send: FleetSend }) {
+  const [label, setLabel] = useState(runnerLabel(runner));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const changed = label.trim() !== runnerLabel(runner);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await send("RenameRunner", { name: runner.name, label: label.trim() });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The Controller didn't take that.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="fleet-rename" onSubmit={(e) => void save(e)}>
+      <label className="field">
+        <span className="field-label">Name</span>
+        <span className="fleet-rename-row">
+          <input className="field-input" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={MAX_LABEL} placeholder={runner.name} />
+          <button type="submit" className="btn-primary fleet-small-btn" disabled={saving || !changed}>
+            {saving && <LoaderCircle size={13} className="spin" aria-hidden="true" />} Save
+          </button>
+        </span>
+        <span className="field-hint">
+          Only changes how the runner is shown. Its id <code>{runner.name}</code> stays the same; leave the name empty to go back to it.
+        </span>
+      </label>
+      {error && (
+        <div className="schedule-editor-error" role="alert">
+          {error}
+        </div>
+      )}
+    </form>
   );
 }
 
@@ -97,6 +155,7 @@ export function RunnerDetailsDialog({
   const link = runner.link.state === "up" ? runner.link.url : (runner.link.error ?? "not connected");
   const overview = (
     <>
+      <RenameRunner key={runnerLabel(runner)} runner={runner} send={send} />
       <Facts
         rows={[
           ["Status", runnerStatusText(model, runner)],
@@ -121,7 +180,7 @@ export function RunnerDetailsDialog({
   const agentList = (
     <>
       {agents.length === 0 ? (
-        <p className="fleet-muted">{runner.name} runs no agents yet.</p>
+        <p className="fleet-muted">{runnerLabel(runner)} runs no agents yet.</p>
       ) : (
         <ul className="fleet-detail-list">
           {agents.map((a) => (
@@ -151,20 +210,20 @@ export function RunnerDetailsDialog({
       content: runsTools(runner) ? (
         <McpServersPanel runner={runner} agents={agents} send={send} onClose={onClose} />
       ) : (
-        <p className="fleet-muted">{runner.name}&apos;s harness doesn&apos;t give agents MCP servers.</p>
+        <p className="fleet-muted">{runnerLabel(runner)}&apos;s harness doesn&apos;t give agents MCP servers.</p>
       ),
     },
     { id: "secrets", label: "Secrets", content: <SecretsSoon runner={runner} /> },
   ];
   return (
-    <FleetDialog title={runner.name} className="fleet-details" onClose={onClose}>
+    <FleetDialog title={runnerLabel(runner)} className="fleet-details" onClose={onClose}>
       <div className="fleet-details-meta">
         <span className={`dot dot-${runnerTone(runner.status)}`} aria-hidden="true" />
         <span className="fleet-muted">
           {runnerLocation(runner)} · {runnerStatusText(model, runner)}
         </span>
       </div>
-      <DetailTabs tabs={tabs} initial={initial} label={`${runner.name} details`} />
+      <DetailTabs tabs={tabs} initial={initial} label={`${runnerLabel(runner)} details`} />
     </FleetDialog>
   );
 }
@@ -220,14 +279,14 @@ export function AgentDetailsDialog({
   ) : (
     <p className="fleet-muted">
       {down
-        ? `${runner.name} isn't reachable right now. You can change ${agent.name} once it's online.`
-        : `${agent.name} ships with ${runner.name}; its settings live in its folder on that machine.`}
+        ? `${runnerLabel(runner)} isn't reachable right now. You can change ${agent.name} once it's online.`
+        : `${agent.name} ships with ${runnerLabel(runner)}; its settings live in its folder on that machine.`}
     </p>
   );
   const mcp = !runsTools(runner) ? (
-    <p className="fleet-muted">{runner.name}&apos;s harness doesn&apos;t give agents MCP servers.</p>
+    <p className="fleet-muted">{runnerLabel(runner)}&apos;s harness doesn&apos;t give agents MCP servers.</p>
   ) : servers.length === 0 ? (
-    <p className="fleet-muted">{runner.name} has no MCP servers yet.</p>
+    <p className="fleet-muted">{runnerLabel(runner)} has no MCP servers yet.</p>
   ) : (
     <>
       <ul className="fleet-detail-list">
@@ -258,6 +317,7 @@ export function AgentDetailsDialog({
           { id: "overview", label: "Overview", content: overview },
           { id: "settings", label: "Settings", content: settings },
           { id: "mcp", label: "MCP servers", count: used.length, content: mcp },
+          { id: "permissions", label: "Permissions", content: <PermissionsSoon agent={agent} /> },
           { id: "secrets", label: "Secrets", content: <SecretsSoon runner={runner} /> },
         ]}
         initial="overview"

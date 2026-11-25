@@ -5,6 +5,7 @@ import type { FleetPayload } from "./fleet-client.js";
 import { useSkillLibrary, type FleetSkillLibrary, type LibrarySkill, type SkillsState } from "./fleet-skills.js";
 import type { FleetSend } from "./FleetModule.js";
 import { ChoiceCard, FleetDialog } from "./GuideCard.js";
+import { runnerLabel } from "./fleet-view-model.js";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : "The Controller didn't take that.");
 
@@ -12,14 +13,14 @@ type Mode = "create" | "existing";
 
 /** What the runner can do for Add agent right now: a reason it can't, or the modes it offers. */
 export const addAgentModes = (runner: FleetRunner): { blocker: string } | { modes: Mode[] } => {
-  if (runner.status !== "healthy") return { blocker: `${runner.name} isn't reachable right now. Try again once it's online.` };
+  if (runner.status !== "healthy") return { blocker: `${runnerLabel(runner)} isn't reachable right now. Try again once it's online.` };
   const modes: Mode[] = [...(runner.canCreateAgents ? ["create" as const] : []), ...((runner.available?.length ?? 0) > 0 ? ["existing" as const] : [])];
   if (modes.length > 0) return { modes };
   return {
     blocker:
       runner.available == null
-        ? `${runner.name} can't change its agents from here. Update the runner to a version that supports adding agents.`
-        : `Every agent on ${runner.name} is already added.`,
+        ? `${runnerLabel(runner)} can't change its agents from here. Update the runner to a version that supports adding agents.`
+        : `Every agent on ${runnerLabel(runner)} is already added.`,
   };
 };
 
@@ -84,9 +85,9 @@ function McpPicker({ runner, picked, onToggle }: { runner: FleetRunner; picked: 
   const gone = picked.filter((id) => !(id in (runner.mcpServers ?? {})));
   return (
     <fieldset className="fleet-choice-field">
-      <legend className="field-label fleet-choice-legend">MCP servers on {runner.name}</legend>
+      <legend className="field-label fleet-choice-legend">MCP servers on {runnerLabel(runner)}</legend>
       {servers.length === 0 ? (
-        <p className="field-hint">{runner.name} has no MCP servers yet. Add them with MCP servers on the runner, then pick them here.</p>
+        <p className="field-hint">{runnerLabel(runner)} has no MCP servers yet. Add them with MCP servers on the runner, then pick them here.</p>
       ) : (
         <div className="fleet-choice-grid">
           {servers.map(([id, entry]) => (
@@ -96,7 +97,7 @@ function McpPicker({ runner, picked, onToggle }: { runner: FleetRunner; picked: 
       )}
       {gone.length > 0 && (
         <p className="schedule-editor-error" role="alert">
-          {gone.join(", ")} {gone.length === 1 ? "is" : "are"} no longer on {runner.name}. Saving drops {gone.length === 1 ? "it" : "them"}.
+          {gone.join(", ")} {gone.length === 1 ? "is" : "are"} no longer on {runnerLabel(runner)}. Saving drops {gone.length === 1 ? "it" : "them"}.
         </p>
       )}
     </fieldset>
@@ -290,7 +291,7 @@ function ExistingAgentsForm({ runner, send, onClose }: { runner: FleetRunner; se
     });
   return (
     <form className="fleet-guide" onSubmit={(e) => void submit(e, () => send("AddAgents", { runner: runner.name, agents: [...picked] }))}>
-      <p className="field-hint">Pick what {runner.name} should also run. They're already on the machine, so nothing is installed.</p>
+      <p className="field-hint">Pick what {runnerLabel(runner)} should also run. They're already on the machine, so nothing is installed.</p>
       <fieldset className="fleet-choice-field">
         <legend className="field-label fleet-choice-legend">Agents</legend>
         <div className="fleet-choice-grid">
@@ -320,7 +321,7 @@ export function AddAgentDialog({ model, runner, send, onClose }: { model: FleetM
   const offer = addAgentModes(runner);
   const [mode, setMode] = useState<Mode>("modes" in offer ? offer.modes[0]! : "create");
   return (
-    <FleetDialog title={`Add agent to ${runner.name}`} onClose={onClose}>
+    <FleetDialog title={`Add agent to ${runnerLabel(runner)}`} onClose={onClose}>
       {"blocker" in offer ? (
         <>
           <p className="sidebar-modal-body">{offer.blocker}</p>

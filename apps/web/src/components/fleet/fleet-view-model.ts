@@ -176,6 +176,14 @@ export const runTitle = (model: FleetModel, task: FleetTask): string => {
   return `${inputLabel(agent)}: ${task.prompt}`;
 };
 
+export const runnerLabel = (r: FleetRunner): string => r.label || r.name;
+
+/** A task's runner by display name, falling back to the id once the runner is gone. */
+export const runnerLabelOf = (model: FleetModel, name: string): string => {
+  const r = model.runners[name];
+  return r ? runnerLabel(r) : name;
+};
+
 /** Where a runner is: what it says, else how it was set up, else the host it's reached at. */
 export const runnerLocation = (r: FleetRunner): string => {
   if (r.location) return r.location;
