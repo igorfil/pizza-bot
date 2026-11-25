@@ -5,10 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RunEvent, Task } from "./protocol.js";
 import { defaultCommand, pythonHarness } from "./python.js";
 
-/** The plugin's shipped agents in `dir`, and the ones added from the Fleet page inside it (a folder without agent.toml). */
-const dirsOf = (dir: string) => ({ shipped: dir, added: path.join(dir, ".added") });
-
-
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 
@@ -30,7 +26,7 @@ print(json.dumps({"artifact": {"name": "reply", "text": task["input"]}}), flush=
 
 const run = async (dir: string, agent: string) => {
   const task: Task = { taskId: "t1", contextId: "c1", agent, input: "hi" };
-  const job = await pythonHarness(dirsOf(dir)).prepare(task);
+  const job = await pythonHarness(dir).prepare(task);
   if (!job.ok) return { error: job.error };
   const events: RunEvent[] = [];
   return { events, reason: await job.value((e) => events.push(e), new AbortController().signal) };
@@ -48,15 +44,15 @@ describe("Python agents", () => {
   it("are the folders with an agent.toml, by id", async () => {
     const dir = agentsDir({ b: { toml: 'name = "B"\n[input]\nlabel = "Topic"\n', py: "" }, a: { toml: 'name = "A"\ntimeout_secs = 30\n', py: "" } });
     writeFileSync(path.join(dir, "notes.txt"), "not an agent");
-    expect(await pythonHarness(dirsOf(dir)).agents()).toEqual([
-      { id: "a", name: "A", timeoutSecs: 30 },
-      { id: "b", name: "B", input: { label: "Topic" } },
+    expect(await pythonHarness(dir).agents()).toEqual([
+      { id: "a", name: "A", timeoutSecs: 30, added: true },
+      { id: "b", name: "B", input: { label: "Topic" }, added: true },
     ]);
   });
 
   it("skip a folder whose agent.toml doesn't parse", async () => {
     const dir = agentsDir({ good: { toml: 'name = "Good"\n', py: "" }, bad: { toml: "name = ", py: "" } });
-    expect((await pythonHarness(dirsOf(dir)).agents()).map((a) => a.id)).toEqual(["good"]);
+    expect((await pythonHarness(dir).agents()).map((a) => a.id)).toEqual(["good"]);
   });
 
   it("run with the task on stdin and relay the reply", async () => {
@@ -67,7 +63,6 @@ describe("Python agents", () => {
     const crash = 'import sys\nprint("it broke", file=sys.stderr)\nsys.exit(1)\n';
     expect(await run(agentsDir({ crash: { toml: 'name = "Crash"\n', py: crash } }), "crash")).toEqual({ events: [], reason: "it broke" });
   });
-
 
   it("refuse an agent that isn't there", async () => {
     expect(await run(agentsDir({}), "nope")).toEqual({ error: 'there is no Python agent "nope"' });
@@ -83,7 +78,7 @@ describe("adding Python agents", () => {
   };
 
   it("adds one that runs in its folder elsewhere on the machine", async () => {
-    const harness = pythonHarness(dirsOf(agentsDir({})));
+    const harness = pythonHarness(agentsDir({}));
     const added = await harness.adding!.add({ name: "Weekly report", path: elsewhere() });
     const job = await harness.prepare({ taskId: "t1", contextId: "c", agent: "weekly-report", input: "hi" });
     const events: RunEvent[] = [];
@@ -99,13 +94,13 @@ describe("adding Python agents", () => {
   it("refuses a folder without agent.py unless a command says how to start it", async () => {
     const empty = mkdtempSync(path.join(os.tmpdir(), "fleet-python-empty-"));
     dirs.push(empty);
-    const adding = pythonHarness(dirsOf(agentsDir({}))).adding!;
+    const adding = pythonHarness(agentsDir({})).adding!;
     const [without, withCommand] = [await adding.add({ name: "A", path: empty }), await adding.add({ name: "B", path: empty, command: "python3 main.py" })];
     expect([without.ok, withCommand.ok]).toEqual([false, true]);
   });
 
   it("refuses a relative or missing folder, a missing name, and a name already taken", async () => {
-    const adding = pythonHarness(dirsOf(agentsDir({ echo: { toml: 'name = "Echo"\n', py: ECHO } }))).adding!;
+    const adding = pythonHarness(agentsDir({ echo: { toml: 'name = "Echo"\n', py: ECHO } })).adding!;
     const results = await Promise.all([
       adding.add({ name: "A", path: "agents/a" }),
       adding.add({ name: "A", path: "/no/such/folder" }),
@@ -120,10 +115,10 @@ describe("adding Python agents", () => {
     ]);
   });
 
-  it("removes an added agent, and only disables a shipped one", async () => {
-    const harness = pythonHarness(dirsOf(agentsDir({ echo: { toml: 'name = "Echo"\n', py: ECHO } })));
+  it("removes an agent, and refuses one that isn't there", async () => {
+    const harness = pythonHarness(agentsDir({ echo: { toml: 'name = "Echo"\n', py: ECHO } }));
     await harness.adding!.add({ name: "Mine", path: elsewhere() });
-    const [mine, shipped] = [await harness.adding!.remove("mine"), await harness.adding!.remove("echo")];
-    expect([mine.ok, shipped.ok, (await harness.agents()).map((a) => a.id)]).toEqual([true, false, ["echo"]]);
+    const [mine, missing] = [await harness.adding!.remove("mine"), await harness.adding!.remove("nope")];
+    expect([mine.ok, missing.ok, (await harness.agents()).map((a) => a.id)]).toEqual([true, false, ["echo"]]);
   });
 });

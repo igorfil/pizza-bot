@@ -1,18 +1,15 @@
 # Python plugin
 
-Runs plain Python agents. Each folder in `agents/` (or `PYTHON_AGENTS_DIR`) is one agent, run once
-per task as its own process. The plugin itself is TypeScript on Node ([`src/python.ts`](../src/python.ts));
-only the agents need Python.
-
-```
-agents/<id>/
-├── agent.toml     manifest (below)
-└── agent.py       the agent; anything else it needs sits beside it
-```
+Runs plain Python agents: a folder with an `agent.py`, run once per task as its own process. The
+plugin itself is TypeScript on Node ([`src/python.ts`](../src/python.ts)); only the agents need
+Python. Each agent is added on the Fleet page (Add agent → Add existing → Python), which keeps it as
+an `agent.toml` in the plugin's data folder (`$FLEET_PLUGIN_DATA/agents/<id>/`); its `path` is the
+agent's folder on the runner's machine:
 
 ```toml
 name = "Slow test agent"                  # shown in UIs
 description = "Reports progress …"        # shown on agent cards
+path = "/srv/agents/slow"                 # the folder with agent.py
 command = "python3 agent.py"              # optional; see below
 timeout_secs = 3600                       # optional, default 600
 
@@ -43,13 +40,8 @@ there is no virtualenv to manage (the machine then needs `uv`); any other `agent
 5. **Logs.** stderr goes to the runner's log.
 6. **Cancel.** SIGTERM to the process group, SIGKILL 5s later.
 
-Test an agent alone: `cd agents/slow && echo '{"input":"steps=2 every=1 hi"}' | python3 agent.py`.
-
-## The agents here
-
-| id | Input | Does |
-|---|---|---|
-| `slow` | `steps=N every=S text` | N progress updates S seconds apart, then a result; no LLM. For mid-run and reconnect tests |
+Test an agent alone: `cd experimental/fleet/test-agents/slow && echo '{"input":"steps=2 every=1 hi"}' | python3 agent.py`.
+That slow test agent is one [test-agents/add.mjs](../../test-agents/README.md) adds.
 
 ## Testing
 

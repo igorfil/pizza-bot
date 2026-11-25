@@ -1,7 +1,7 @@
 name: Fleet runner release
 
 # Publishes the assets the AWS runner guide installs onto an instance:
-# fleet-runner-<arch>-linux-musl and fleet-agents.tar.gz. For now the guide copies a local build of
+# fleet-runner-<arch>-linux-musl. For now the guide copies a local build of
 # the same files instead (experimental/fleet/docs/RUNNER-GUIDES.md).
 on:
   push:
@@ -47,11 +47,9 @@ jobs:
         with:
           path: assets
           merge-multiple: true
-      - name: Pack agents
-        run: tar -czf assets/fleet-agents.tar.gz -C experimental/fleet/agents --exclude README.md .
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Fleet runner binaries and agents."
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Fleet runner binaries."
           gh release upload "$GITHUB_REF_NAME" assets/* --clobber

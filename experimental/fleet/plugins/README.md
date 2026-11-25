@@ -36,7 +36,7 @@ plugins/<id>/
 name = "Python"                                  # shown in UIs until the plugin describes itself
 command = "node plugin.mjs"                      # run with `sh -c` in this folder, once, kept running
 [env]                                            # optional extra environment
-PYTHON_AGENTS_DIR = "/srv/agents"
+DOCKER = "podman"
 ```
 
 The runner loads every folder in `RUNNER_PLUGINS_DIR` (default `plugins`; the AWS guide installs
@@ -66,7 +66,7 @@ lines below is ignored; stderr goes to the runner's log.
 | `run` | `{taskId, contextId, agent, input}` | `{}` once the run started; an error if it can't start |
 | `cancel` | `{taskId}` | `{}`; then the run ends with `done` |
 | `add` | `{fields: {<id>: "<value>"}}` | `{id}` of the new agent; an error says what to fix |
-| `remove` | `{agent}` | `{}`; refused for agents it didn't add, which can only be disabled |
+| `remove` | `{agent}` | `{}`; refused for an agent it doesn't have |
 
 **Run events** carry the task's `taskId` and no `id`:
 
@@ -93,9 +93,8 @@ a plugin adds or drops show up without a restart. If the plugin exits, its runs 
 `<id>` plugin stopped" and the next request starts it again. When the runner stops, the plugin's
 stdin closes; the plugin should stop its runs and exit.
 
-Agents a plugin finds on disk start out disabled, like shipped agents: they show as dimmed cards on
-the Fleet page with Enable, or can be listed in `RUNNER_AGENTS`. An agent added from the Fleet page
-is enabled right away.
+Plugins ship no agents: a plugin lists only the agents added through it, and the runner serves all
+of them. [test-agents/](../test-agents/README.md) adds a few examples.
 
 ## Testing
 

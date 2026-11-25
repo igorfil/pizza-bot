@@ -68,10 +68,10 @@ echo "ok: node $(node -v), $(cargo --version | cut -d' ' -f1-2), $(uv --version 
 step "npm install"
 npm install
 
-step "npm run build (pizza-bot, the fleet Controller, the runner and its arm64 + x86_64 Linux builds, the agents)"
+step "npm run build (pizza-bot, the fleet Controller, the runner and its arm64 + x86_64 Linux builds, the plugins)"
 FLEET_REQUIRE_LINUX_RUNNER=1 npm run build
 DIST="$ROOT/experimental/fleet/runner/target-linux/dist"
-for asset in fleet-runner-aarch64-linux-musl fleet-runner-x86_64-linux-musl fleet-agents.tar.gz; do
+for asset in fleet-runner-aarch64-linux-musl fleet-runner-x86_64-linux-musl fleet-plugins.tar.gz; do
   [ -s "$DIST/$asset" ] || { echo "the build didn't produce $DIST/$asset" >&2; exit 1; }
 done
 echo "EC2 runner builds: $(cd "$DIST" && ls fleet-runner-* | tr '\n' ' ')"

@@ -67,7 +67,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["experimental/fleet/controller/**/*.ts", "experimental/fleet/plugins/**/*.{ts,mjs}"],
+    files: ["experimental/fleet/controller/**/*.ts", "experimental/fleet/plugins/**/*.{ts,mjs}", "experimental/fleet/test-agents/**/*.mjs"],
     languageOptions: { globals: { ...globals.node } },
     rules: {
       "no-restricted-imports": [

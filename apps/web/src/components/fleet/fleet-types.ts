@@ -28,8 +28,6 @@ export interface FleetRunner {
   lastSeenAt: number | null;
   lastError: string | null;
   location: string | null;
-  /** Agents the runner could serve but doesn't; null when it can't change its agents. */
-  available?: FleetAgentInfo[] | null;
   /** The runner can create prompt agents (CreateAgent). */
   canCreateAgents?: boolean;
   /** Harnesses the runner offers; `pizza-bot` lets created agents have MCP servers and skills. */
@@ -62,21 +60,13 @@ export interface FleetAddField {
   placeholder?: string;
 }
 
-export interface FleetAgentInfo {
-  id: string;
-  name: string;
-  description: string;
-}
-
 /** In flight while `error` is null. */
-export type FleetAgentsChange = { action: "add" | "remove" | "edit" | "enable" | "disable"; agents: string[]; error: string | null };
+export type FleetAgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
 
 /** What users run, schedule and see. Key: `<runner>/<id>`. */
 export interface FleetAgent {
   key: string;
   runner: string;
-  /** Served by its runner; a disabled agent keeps its schedule and runs but doesn't run. Missing from older Controllers: enabled. */
-  enabled?: boolean;
   id: string;
   name: string;
   description: string;
@@ -86,7 +76,7 @@ export interface FleetAgent {
   kind?: "builtin" | "external";
   /** The runner harness that runs it; `pizza-bot` agents remember a conversation across follow-ups. */
   harness?: string | null;
-  /** Made with Create new; deleting it deletes it, while a shipped agent is only turned off. */
+  /** Made with Create new; deleting it deletes it. */
   created?: boolean;
   /** Added through a plugin from Add existing; deleting it removes it from the plugin. */
   added?: boolean;

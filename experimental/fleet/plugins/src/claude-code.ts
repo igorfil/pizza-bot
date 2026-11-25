@@ -14,7 +14,6 @@ import {
   stringMap,
   strings,
   text,
-  type AgentDirs,
   type AgentFolder,
 } from "./agents.js";
 import { fail, ok, type AddField, type AgentInfo, type Harness, type RunEvent } from "./protocol.js";
@@ -54,7 +53,7 @@ const toAgent = (folder: AgentFolder): ClaudeAgent => {
   };
 };
 
-const load = async (dirs: AgentDirs): Promise<ClaudeAgent[]> => (await readAgentFolders(dirs)).map(toAgent);
+const load = async (dir: string): Promise<ClaudeAgent[]> => (await readAgentFolders(dir)).map(toAgent);
 
 const FIELDS: AddField[] = [
   NAME_FIELD,
@@ -137,7 +136,7 @@ export function sessionStore(file: string) {
   };
 }
 
-export function claudeCodeHarness(dirs: AgentDirs, claude: [string, ...string[]], stateFile: string): Harness {
+export function claudeCodeHarness(dir: string, claude: [string, ...string[]], stateFile: string): Harness {
   const [cli, ...pre] = claude;
   const sessions = sessionStore(stateFile);
   return {
@@ -147,11 +146,11 @@ export function claudeCodeHarness(dirs: AgentDirs, claude: [string, ...string[]]
     health: async () => {
       const version = await capture(cli, [...pre, "--version"], HEALTH_TIMEOUT_MS);
       if (!version.ok) return { ok: false, detail: `claude isn't usable: ${version.error}` };
-      return { ok: true, detail: `${version.stdout}, ${count((await load(dirs)).length, "agent", "agents")}` };
+      return { ok: true, detail: `${version.stdout}, ${count((await load(dir)).length, "agent", "agents")}` };
     },
-    agents: async () => (await load(dirs)).map((a) => a.info),
+    agents: async () => (await load(dir)).map((a) => a.info),
     prepare: async (task) => {
-      const agent = (await load(dirs)).find((a) => a.info.id === task.agent);
+      const agent = (await load(dir)).find((a) => a.info.id === task.agent);
       if (!agent) return fail(`there is no Claude Code agent ${JSON.stringify(task.agent)}`);
       const isDir = await stat(agent.project).then((s) => s.isDirectory(), () => false);
       if (!isDir) return fail(`${agent.info.id}'s project folder ${agent.project} doesn't exist`);
@@ -175,7 +174,7 @@ export function claudeCodeHarness(dirs: AgentDirs, claude: [string, ...string[]]
         ),
       );
     },
-    adding: folderAdding(dirs, FIELDS, async (values) => {
+    adding: folderAdding(dir, FIELDS, async (values) => {
       const project = await existingFolder(values.project ?? "", "Project folder");
       return project.ok ? ok({ project: project.value, allowed_tools: list(values.allowed_tools), model: values.model }) : project;
     }),

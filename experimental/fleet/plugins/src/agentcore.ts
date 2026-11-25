@@ -1,7 +1,7 @@
 /** AgentCore Runtime agents: a deployed runtime invoked once per task; one conversation is one runtime session (agentcore/README.md). */
 import { createHash } from "node:crypto";
 import { InvokeAgentRuntimeCommand, StopRuntimeSessionCommand, type BedrockAgentCoreClient } from "@aws-sdk/client-bedrock-agentcore";
-import { agentInfo, count, DESCRIPTION_FIELD, folderAdding, NAME_FIELD, readAgentFolders, text, type AgentDirs, type AgentFolder } from "./agents.js";
+import { agentInfo, count, DESCRIPTION_FIELD, folderAdding, NAME_FIELD, readAgentFolders, text, type AgentFolder } from "./agents.js";
 import { fail, message, ok, type AddField, type AgentInfo, type Harness, type RunEvent } from "./protocol.js";
 
 const DEFAULT_QUALIFIER = "DEFAULT";
@@ -29,7 +29,7 @@ const toAgent = (folder: AgentFolder): AgentCoreAgent | null => {
   return { info: agentInfo(folder), arn, region, qualifier: text(m, "qualifier") ?? DEFAULT_QUALIFIER, payloadKey: text(m, "payload_key") ?? "prompt" };
 };
 
-const load = async (dirs: AgentDirs): Promise<AgentCoreAgent[]> => (await readAgentFolders(dirs)).map(toAgent).filter((a): a is AgentCoreAgent => a !== null);
+const load = async (dir: string): Promise<AgentCoreAgent[]> => (await readAgentFolders(dir)).map(toAgent).filter((a): a is AgentCoreAgent => a !== null);
 
 const FIELDS: AddField[] = [
   NAME_FIELD,
@@ -77,18 +77,18 @@ export const relay = (contentType: string, body: string): RunEvent[] => {
   return isRecord(value) && typeof value.error === "string" ? [{ error: value.error }] : [{ artifact: { name: "reply", text: replyText(value) } }];
 };
 
-export function agentCoreHarness(dirs: AgentDirs, client: (region: string) => AgentCoreClient, hasCredentials: () => Promise<boolean>): Harness {
+export function agentCoreHarness(dir: string, client: (region: string) => AgentCoreClient, hasCredentials: () => Promise<boolean>): Harness {
   return {
     name: "AgentCore",
     version: "1",
     capabilities: ["cancel", "conversations"],
     health: async () =>
       (await hasCredentials())
-        ? { ok: true, detail: count((await load(dirs)).length, "runtime", "runtimes") }
+        ? { ok: true, detail: count((await load(dir)).length, "runtime", "runtimes") }
         : { ok: false, detail: "no AWS credentials for this runner" },
-    agents: async () => (await load(dirs)).map((a) => a.info),
+    agents: async () => (await load(dir)).map((a) => a.info),
     prepare: async (task) => {
-      const agent = (await load(dirs)).find((a) => a.info.id === task.agent);
+      const agent = (await load(dir)).find((a) => a.info.id === task.agent);
       if (!agent) return fail(`there is no AgentCore agent ${JSON.stringify(task.agent)}`);
       const session = sessionId(agent.info.id, task.contextId);
       const runtime = client(agent.region);
@@ -118,7 +118,7 @@ export function agentCoreHarness(dirs: AgentDirs, client: (region: string) => Ag
         }
       });
     },
-    adding: folderAdding(dirs, FIELDS, async (values) => {
+    adding: folderAdding(dir, FIELDS, async (values) => {
       const arn = values.runtime_arn ?? "";
       if (!regionOf(arn)) return fail(`${JSON.stringify(arn)} isn't an AgentCore Runtime ARN, like arn:aws:bedrock-agentcore:<region>:<account>:runtime/<id>`);
       return ok({ runtime_arn: arn, qualifier: values.qualifier });

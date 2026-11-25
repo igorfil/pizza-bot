@@ -6,38 +6,29 @@ import { fail, ok, type AddField, type Adding, type AgentInfo, type Input, type 
 
 export type Manifest = Record<string, unknown>;
 
-/** `added`: in the plugin's data folder, put there from the Fleet page. */
-export type AgentFolder = { id: string; dir: string; manifest: Manifest; added: boolean };
-
-/** Where a plugin's agents live: the ones it ships with, and a writable folder for ones added from the Fleet page. */
-export type AgentDirs = { shipped: string; added: string };
+export type AgentFolder = { id: string; dir: string; manifest: Manifest };
 
 const log = (line: string) => process.stderr.write(`${line}\n`);
 
-const readFolder = async (dir: string, id: string, added: boolean): Promise<AgentFolder | null> => {
+const readFolder = async (dir: string, id: string): Promise<AgentFolder | null> => {
   const folder = path.join(dir, id);
   const text = await readFile(path.join(folder, "agent.toml"), "utf8").catch(() => null);
   if (text === null) return null;
   try {
-    return { id, dir: folder, manifest: parse(text) as Manifest, added };
+    return { id, dir: folder, manifest: parse(text) as Manifest };
   } catch (e) {
     log(`skipping ${id}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 };
 
-const readDir = async (dir: string, added: boolean): Promise<AgentFolder[]> => {
+/** Every folder in `dir` with an agent.toml, by id; a manifest that doesn't parse is skipped with a warning,
+ * and a missing folder means no agents. */
+export async function readAgentFolders(dir: string): Promise<AgentFolder[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   const ids = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort();
-  const folders = await Promise.all(ids.map((id) => readFolder(dir, id, added)));
+  const folders = await Promise.all(ids.map((id) => readFolder(dir, id)));
   return folders.filter((f): f is AgentFolder => f !== null);
-};
-
-/** Every folder with an agent.toml, shipped then added, by id; a manifest that doesn't parse is skipped with a warning,
- * a missing folder means no agents, and an added agent can't shadow a shipped one. */
-export async function readAgentFolders(dirs: AgentDirs): Promise<AgentFolder[]> {
-  const [shipped, added] = await Promise.all([readDir(dirs.shipped, false), readDir(dirs.added, true)]);
-  return [...shipped, ...added.filter((a) => !shipped.some((s) => s.id === a.id))].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export const text = (m: Manifest, key: string): string | undefined => (typeof m[key] === "string" ? m[key] : undefined);
@@ -61,7 +52,8 @@ const inputOf = (m: Manifest): Input | undefined => {
 };
 
 /** The fields every agent.toml shares: name, description, input, timeout_secs. */
-export const agentInfo = ({ id, manifest: m, added }: AgentFolder): AgentInfo => {
+/** Every agent a plugin lists was added through it, so removing one deletes it. */
+export const agentInfo = ({ id, manifest: m }: AgentFolder): AgentInfo => {
   const description = text(m, "description");
   const input = inputOf(m);
   const timeoutSecs = typeof m.timeout_secs === "number" ? m.timeout_secs : undefined;
@@ -71,7 +63,7 @@ export const agentInfo = ({ id, manifest: m, added }: AgentFolder): AgentInfo =>
     ...(description !== undefined ? { description } : {}),
     ...(input ? { input } : {}),
     ...(timeoutSecs !== undefined ? { timeoutSecs } : {}),
-    ...(added ? { added: true } : {}),
+    added: true,
   };
 };
 
@@ -102,27 +94,27 @@ export const existingFolder = async (value: string, label: string): Promise<Resu
 const filled = (m: Manifest): Manifest => Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0)));
 
 /**
- * Adding agents to `dirs.added`: checks required fields, turns the values into a manifest with `toManifest`,
- * and writes `<id>/agent.toml` under an id made from the name. Only agents it added can be removed.
+ * Adding agents to `dir`: checks required fields, turns the values into a manifest with `toManifest`,
+ * and writes `<id>/agent.toml` under an id made from the name.
  */
-export const folderAdding = (dirs: AgentDirs, fields: AddField[], toManifest: (values: Record<string, string>) => Promise<Result<Manifest>>): Adding => ({
+export const folderAdding = (dir: string, fields: AddField[], toManifest: (values: Record<string, string>) => Promise<Result<Manifest>>): Adding => ({
   fields,
   add: async (values) => {
     const missing = fields.find((f) => f.required && !values[f.id]);
     if (missing) return fail(`${missing.label} is required`);
     const id = slug(values.name ?? "");
     if (!id) return fail("the name needs at least one letter or digit");
-    if ((await readAgentFolders(dirs)).some((a) => a.id === id)) return fail(`there is already an agent ${JSON.stringify(id)}; pick another name`);
+    if ((await readAgentFolders(dir)).some((a) => a.id === id)) return fail(`there is already an agent ${JSON.stringify(id)}; pick another name`);
     const manifest = await toManifest(values);
     if (!manifest.ok) return manifest;
-    const folder = path.join(dirs.added, id);
+    const folder = path.join(dir, id);
     await mkdir(folder, { recursive: true });
     await writeFile(path.join(folder, "agent.toml"), stringify(filled({ name: values.name, description: values.description, ...manifest.value })));
     return ok(id);
   },
   remove: async (agentId) => {
-    const folder = (await readAgentFolders(dirs)).find((a) => a.id === agentId);
-    if (!folder?.added) return fail(`${JSON.stringify(agentId)} wasn't added from the Fleet page, so it can only be disabled`);
+    const folder = (await readAgentFolders(dir)).find((a) => a.id === agentId);
+    if (!folder) return fail(`there is no agent ${JSON.stringify(agentId)}`);
     await rm(folder.dir, { recursive: true, force: true });
     return ok(null);
   },

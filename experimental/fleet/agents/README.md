@@ -1,22 +1,21 @@
 # Agents
 
-Each folder here is one **built-in** agent: it runs on the runner's own engine, Pizza Bot's agent
-runtime (`apps/fleet-agent`). A runner scans this directory at startup and serves every agent it
-finds as its own A2A endpoint (`/agents/<folder>/`). The runner owns A2A, auth, the durable task
-store, cancel and health, and configures the agent: model, system prompt, skills, and picks from its
-MCP servers.
+How **built-in** agents work: they run on the runner's own engine, Pizza Bot's agent runtime
+(`apps/fleet-agent`). Each is a folder in the runner's `RUNNER_CREATED_AGENTS_DIR`, written when the
+agent is created on the Fleet page; the runner loads them at startup and serves each as its own A2A
+endpoint (`/agents/<folder>/`). The runner owns A2A, auth, the durable task store, cancel and
+health, and configures the agent: model, system prompt, skills, and picks from its MCP servers.
 
-External agents (Python scripts, containers, other runtimes) don't live here: harness plugins run
-them and bring their own tools ([plugins/README.md](../plugins/README.md)). A folder here with a
-`command` instead of the engine is skipped with a warning.
+External agents (Python scripts, containers, other runtimes) are run by harness plugins, which bring
+their own tools ([plugins/README.md](../plugins/README.md)). A folder with a `command` instead of the
+engine is skipped with a warning.
 
-Agents are not part of the runner's source. Add one by adding a folder; no runner rebuild. A runner
-may ship no agents at all (no `agents/` folder): agents are then created on the Fleet page.
+Runners ship no agents. [test-agents/](../test-agents/README.md) adds a few for trying things out.
 
 ## Folder
 
 ```
-agents/<id>/
+<RUNNER_CREATED_AGENTS_DIR>/<id>/
 ├── agent.toml     manifest (below)
 ├── system.md      the system prompt
 ├── skills/<id>/   optional skills (SKILL.md and its files)
@@ -63,16 +62,6 @@ engine keeps each context's conversation under `.state/` in the folder (or `FLEE
 it answers with what was said before. Cancel and timeout send SIGTERM to the process group, SIGKILL
 5s later. stderr goes to the runner's log.
 
-## The agents here
-
-| id | Input | Uses |
-|---|---|---|
-| `webresearch` | question | its own fetch MCP (`.mcp.json`, `uvx mcp-server-fetch`), Bedrock Haiku 5.5 |
-
-Which agents a runner serves (its enabled agents) starts from `RUNNER_AGENTS` (comma list of ids,
-including plugin agents; default: all). Enable and Disable on the Fleet page change it through the
-runner's `PUT /agents`, which is saved and wins from then on.
-
 ## Created agents
 
 Add agent → Create new on the Fleet page makes the bare-minimum agent: a name, a Bedrock model and a
@@ -82,7 +71,5 @@ The agent holds a copy of each skill under `skills/<id>/`; an edit that keeps a 
 id, so the copy stays as it was until the skill is picked again. The runner writes it as an ordinary
 agent folder in `RUNNER_CREATED_AGENTS_DIR` (`agent.toml` with `MODEL` in `[env]`, `system.md`,
 `skills/`). Created agents from before the engine ran a single-call `agent.py`; the runner moves them
-to the engine on start. Deleting a created agent deletes its folder. Any agent can be disabled and
-enabled again; a disabled one keeps its schedule and runs but doesn't run. A shipped agent can only
-be disabled. The runner's AWS credentials (on EC2, the instance role) must allow the
-model.
+to the engine on start. Deleting a created agent deletes its folder. The runner's AWS credentials
+(on EC2, the instance role) must allow the model.

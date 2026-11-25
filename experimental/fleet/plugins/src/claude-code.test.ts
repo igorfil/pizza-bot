@@ -5,11 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { claudeArgs, claudeCodeHarness, NO_INPUT, translate, type ClaudeAgent } from "./claude-code.js";
 import type { RunEvent } from "./protocol.js";
 
-/** The plugin's shipped agents in `dir`, and the ones added from the Fleet page inside it (a folder without agent.toml). */
-const dirsOf = (dir: string) => ({ shipped: dir, added: path.join(dir, ".added") });
-
-
-
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 
@@ -85,7 +80,7 @@ const setup = () => {
   mkdirSync(path.join(root, "agents", "ask"), { recursive: true });
   writeFileSync(path.join(root, "agents", "ask", "agent.toml"), 'name = "Ask"\nproject = "."\n');
   process.env.FAKE_CLAUDE_STATE = root;
-  const harness = claudeCodeHarness(dirsOf(path.join(root, "agents")), [process.execPath, path.join(root, "claude.cjs")], path.join(root, "sessions.json"));
+  const harness = claudeCodeHarness(path.join(root, "agents"), [process.execPath, path.join(root, "claude.cjs")], path.join(root, "sessions.json"));
   const run = async (taskId: string, contextId: string, input: string) => {
     const job = await harness.prepare({ taskId, contextId, agent: "ask", input });
     const events: RunEvent[] = [];
@@ -121,7 +116,7 @@ describe("Claude Code agents", () => {
   it("refuse to run in a project folder that doesn't exist", async () => {
     const { harness } = setup();
     const job = await harness.prepare({ taskId: "t1", contextId: "c", agent: "ask", input: "" });
-    const missing = claudeCodeHarness(dirsOf(path.join(os.tmpdir(), "no-such-agents")), ["claude"], "/tmp/x.json");
+    const missing = claudeCodeHarness(path.join(os.tmpdir(), "no-such-agents"), ["claude"], "/tmp/x.json");
     expect([job.ok, (await missing.prepare({ taskId: "t", contextId: "c", agent: "ask", input: "" })).ok]).toEqual([true, false]);
   });
 });

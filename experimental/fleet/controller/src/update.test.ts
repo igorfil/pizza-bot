@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentInfo, GuideResult, Model, Msg, Sub, TaskSnapshot } from "./types.js";
+import type { GuideResult, Model, Msg, Sub, TaskSnapshot } from "./types.js";
 import { inboxOf, initialModel, isQuietTick, subscriptions, update, WAKE_GAP_MS } from "./update.js";
 
 const run = (msgs: Msg[], start: Model = initialModel()) =>
@@ -8,7 +8,7 @@ const run = (msgs: Msg[], start: Model = initialModel()) =>
 const working: TaskSnapshot = { remoteId: "r1", state: "working", statusText: "step 1/3", artifacts: [] };
 
 const sys = { id: "sys", name: "System report", description: "", input: null };
-const healthy = (agents = [sys], available: AgentInfo[] | null = null): Msg => ({ type: "RunnerOk", name: "local", agents, location: "laptop", available });
+const healthy = (agents = [sys]): Msg => ({ type: "RunnerOk", name: "local", agents, location: "laptop" });
 const token = { kind: "vault", key: "runner/local/k" } as const;
 const ep = { url: "http://x/agents/sys", token };
 const addLocal: Msg = { type: "AddRunner", name: "local", transport: { kind: "direct", url: "http://x" }, token, origin: null };
@@ -46,7 +46,7 @@ describe("update", () => {
 
   test("RunnerOk keeps the plugins the runner reports, with their health", () => {
     const python = { id: "python", name: "Python", version: "1", capabilities: ["cancel"], healthy: false, detail: "uv is missing" };
-    const [model] = run([...withRunningTask.slice(0, 3), { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: null, plugins: [python] }]);
+    const [model] = run([...withRunningTask.slice(0, 3), { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", plugins: [python] }]);
     expect(model.runners.local?.plugins).toEqual([python]);
   });
 
@@ -136,7 +136,7 @@ describe("runner MCP servers", () => {
   });
 
   test("the runner's answer becomes its server list", () => {
-    const [model] = run([...up, { type: "McpServersSet", runner: "local", text: "saved", agents: [sys], location: "laptop", available: null, mcpServers: { fetch: fetchServer } }]);
+    const [model] = run([...up, { type: "McpServersSet", runner: "local", text: "saved", agents: [sys], location: "laptop", mcpServers: { fetch: fetchServer } }]);
     expect(model.runners.local?.mcpServers).toEqual({ fetch: fetchServer });
   });
 
@@ -209,7 +209,7 @@ describe("schedule", () => {
   const laptop: Msg[] = [
     { type: "AddRunner", name: "laptop", transport: { kind: "direct", url: "http://m" }, token, origin: null },
     { type: "LinkUp", runner: "laptop", epoch: 0, url: "http://m" },
-    { type: "RunnerOk", name: "laptop", agents: [brief], location: null, available: null },
+    { type: "RunnerOk", name: "laptop", agents: [brief], location: null },
   ];
   const scheduled: Msg[] = [
     at("2026-11-20", 6 * 60),
@@ -239,7 +239,7 @@ describe("schedule", () => {
   });
 
   test("a schedule survives the runner re-reporting its agents", () => {
-    const [model] = run([...scheduled, { type: "RunnerOk", name: "laptop", agents: [brief], location: null, available: null }]);
+    const [model] = run([...scheduled, { type: "RunnerOk", name: "laptop", agents: [brief], location: null }]);
     expect(model.agents["laptop/morningbrief"]?.schedule?.at).toBe("07:30");
   });
 
@@ -387,64 +387,9 @@ describe("queued runs", () => {
   });
 });
 
-describe("adding agents", () => {
-  const jokes = { id: "dadjokes", name: "Dad jokes", description: "", input: null };
-  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy([sys], [jokes])];
-  const added: Msg = { type: "AgentsSet", runner: "local", added: ["dadjokes"], agents: [jokes, sys], location: "laptop", available: [] };
-
-  test("asks the runner to serve its current agents plus the new ones", () => {
-    const [, effects] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
-    expect(effects).toEqual([{ type: "SetRunnerAgents", runner: "local", endpoint: { url: "http://x", token }, agents: ["dadjokes", "sys"], added: ["dadjokes"] }]);
-  });
-
-  test("shows the agents being added until the runner answers", () => {
-    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
-    expect(model.runners.local?.agentsChange).toEqual({ action: "add", agents: ["dadjokes"], error: null });
-  });
-
-  test("the runner's answer lists the new agent and clears the change", () => {
-    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }, added]);
-    expect([Object.keys(model.agents), model.runners.local?.agentsChange, model.runners.local?.available]).toEqual([["local/dadjokes", "local/sys"], null, []]);
-  });
-
-  test("a refusal from the runner stays on the runner with its reason", () => {
-    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }, { type: "AgentsSetFailed", runner: "local", error: "HTTP 500" }]);
-    expect(model.runners.local?.agentsChange).toEqual({ action: "add", agents: ["dadjokes"], error: "HTTP 500" });
-  });
-
-  test("an agent the runner doesn't offer is refused without calling it", () => {
-    const [model, effects] = run([...ready, { type: "AddAgents", runner: "local", agents: ["nope"] }]);
-    expect([model.runners.local?.agentsChange, effects]).toEqual([{ action: "add", agents: ["nope"], error: "local has no agent nope to add" }, []]);
-  });
-
-  test("a runner that can't change its agents is refused without calling it", () => {
-    const [model, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy(), { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
-    expect([model.runners.local?.agentsChange?.error, effects]).toEqual([
-      "local can't change its agents; update the runner",
-      [],
-    ]);
-  });
-
-  test("a runner that is down is refused without calling it", () => {
-    const [, effects] = run([...ready, booted, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }]);
-    expect(effects).toEqual([]);
-  });
-
-  test("a restart forgets a change that never reported back", () => {
-    const [model] = run([...ready, { type: "AddAgents", runner: "local", agents: ["dadjokes"] }, booted]);
-    expect(model.runners.local?.agentsChange).toBeNull();
-  });
-
-  test("RunnerOk logged before runners reported availability means the runner can't change its agents", () => {
-    const old = { type: "RunnerOk", name: "local", agents: [sys], location: null } as unknown as Msg;
-    const [model] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), old]);
-    expect(model.runners.local?.available).toBeNull();
-  });
-});
-
 describe("adding an agent through a plugin", () => {
   const docker = { id: "docker", name: "Docker", version: "1", capabilities: ["cancel", "add"], healthy: true, detail: "Docker 29", addFields: [] };
-  const withDocker = (plugin = docker): Msg => ({ type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: [], plugins: [plugin] });
+  const withDocker = (plugin = docker): Msg => ({ type: "RunnerOk", name: "local", agents: [sys], location: "laptop", plugins: [plugin] });
   const ready = (plugin = docker): Msg[] => [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), withDocker(plugin)];
   const fields = { name: "Reports", image: "ghcr.io/acme/report:1" };
   const add: Msg = { type: "AddPluginAgent", runner: "local", plugin: "docker", fields };
@@ -457,11 +402,21 @@ describe("adding an agent through a plugin", () => {
     ]);
   });
 
-  test("the runner's answer lists the added agent, enabled", () => {
+  test("the runner's answer lists the added agent", () => {
     const reports = { id: "reports", name: "Reports", description: "", input: null, added: true };
-    const answered: Msg = { type: "AgentsSet", runner: "local", added: ["reports"], agents: [reports, sys], location: "laptop", available: [], plugins: [docker] };
+    const answered: Msg = { type: "AgentsSet", runner: "local", added: ["reports"], agents: [reports, sys], location: "laptop", plugins: [docker] };
     const [model] = run([...ready(), add, answered]);
-    expect([model.agents["local/reports"]?.enabled, model.agents["local/reports"]?.added, model.notifications.at(-1)?.text]).toEqual([true, true, "added Reports to local"]);
+    expect([model.agents["local/reports"]?.added, model.runners.local?.agentsChange, model.notifications.at(-1)?.text]).toEqual([true, null, "added Reports to local"]);
+  });
+
+  test("a runner that is down is refused without calling it", () => {
+    const [, effects] = run([...ready(), booted, add]);
+    expect(effects).toEqual([]);
+  });
+
+  test("a restart forgets a change that never reported back", () => {
+    const [model] = run([...ready(), add, booted]);
+    expect(model.runners.local?.agentsChange).toBeNull();
   });
 
   test("a plugin that can't run on the runner is refused with its reason, without calling it", () => {
@@ -480,65 +435,9 @@ describe("adding an agent through a plugin", () => {
   });
 });
 
-describe("enabling and disabling agents", () => {
-  const jokes = { id: "dadjokes", name: "Dad jokes", description: "", input: null };
-  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy([sys], [jokes])];
-  const disabledSys: Msg = { type: "AgentsSet", runner: "local", added: [], disabled: ["sys"], agents: [], location: "laptop", available: [jokes, sys] };
-  const ep = { url: "http://x", token };
-
-  test("an agent the runner has but doesn't serve is there, disabled", () => {
-    const [model] = run(ready);
-    expect([model.agents["local/dadjokes"]?.enabled, model.agents["local/sys"]?.enabled]).toEqual([false, true]);
-  });
-
-  test("enabling asks the runner to serve it next to what it serves", () => {
-    const [, effects] = run([...ready, { type: "EnableAgent", agent: "local/dadjokes" }]);
-    expect(effects).toEqual([{ type: "SetRunnerAgents", runner: "local", endpoint: ep, agents: ["dadjokes", "sys"], added: ["dadjokes"] }]);
-  });
-
-  test("disabling asks the runner to stop serving it", () => {
-    const [model, effects] = run([...ready, { type: "DisableAgent", agent: "local/sys" }]);
-    expect([model.runners.local?.agentsChange, effects]).toEqual([
-      { action: "disable", agents: ["System report"], error: null },
-      [{ type: "SetRunnerAgents", runner: "local", endpoint: ep, agents: [], added: [], disabled: ["sys"] }],
-    ]);
-  });
-
-  test("a disabled agent keeps its schedule and says so", () => {
-    const [model] = run([...ready, { type: "SetSchedule", agent: "local/sys", at: "07:30", prompt: "" }, { type: "DisableAgent", agent: "local/sys" }, disabledSys]);
-    expect([model.agents["local/sys"]?.enabled, model.agents["local/sys"]?.schedule, model.notifications.at(-1)?.text]).toEqual([
-      false,
-      { at: "07:30", prompt: "" },
-      "disabled System report on local",
-    ]);
-  });
-
-  test("a disabled agent isn't run on its schedule", () => {
-    const tick: Msg = { type: "Tick", now: 2_000, local: { day: "2026-11-25", minute: 8 * 60 } };
-    const [model] = run([...ready, { type: "SetSchedule", agent: "local/sys", at: "07:30", prompt: "" }, disabledSys, tick]);
-    expect(Object.keys(model.tasks)).toEqual([]);
-  });
-
-  test("a disabled agent can't be run", () => {
-    const [model] = run([...ready, { type: "CreateTask", taskId: "t1", agent: "local/dadjokes", prompt: "" }]);
-    expect([model.tasks.t1, model.notifications.at(-1)?.text]).toEqual([undefined, "Dad jokes is disabled; enable it to run it"]);
-  });
-
-  test("an agent with a run in progress isn't disabled", () => {
-    const [model, effects] = run([...withRunningTask, { type: "DisableAgent", agent: "local/sys" }]);
-    expect([model.runners.local?.agentsChange?.error, effects]).toEqual(["System report has a run in progress; cancel it or wait for it to finish", []]);
-  });
-
-  test("adding agents leaves disabled ones off", () => {
-    const more = { id: "more", name: "More", description: "", input: null };
-    const [, effects] = run([{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy([sys], [jokes, more]), { type: "AddAgents", runner: "local", agents: ["more"] }]);
-    expect(effects).toEqual([{ type: "SetRunnerAgents", runner: "local", endpoint: ep, agents: ["more", "sys"], added: ["more"] }]);
-  });
-});
-
 describe("creating an agent", () => {
   const poet = { name: "Haiku poet", model: "us.anthropic.claude-haiku-5-5", systemPrompt: "One haiku.", mcp: [], skills: [] };
-  const creator: Msg = { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", available: [], canCreate: true };
+  const creator: Msg = { type: "RunnerOk", name: "local", agents: [sys], location: "laptop", canCreate: true };
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), creator];
   const made = { id: "haiku-poet", name: "Haiku poet", description: "", input: null };
 
@@ -551,7 +450,7 @@ describe("creating an agent", () => {
   });
 
   test("the runner's answer lists the new agent", () => {
-    const answered: Msg = { type: "AgentsSet", runner: "local", added: ["haiku-poet"], agents: [made, sys], location: "laptop", available: [], canCreate: true };
+    const answered: Msg = { type: "AgentsSet", runner: "local", added: ["haiku-poet"], agents: [made, sys], location: "laptop", canCreate: true };
     const [model] = run([...ready, { type: "CreateAgent", runner: "local", agent: poet }, answered]);
     expect([Object.keys(model.agents), model.runners.local?.agentsChange]).toEqual([["local/haiku-poet", "local/sys"], null]);
   });
@@ -565,8 +464,8 @@ describe("creating an agent", () => {
 describe("editing an agent", () => {
   const poet = { id: "poet", name: "Poet", description: "", input: null, created: true, model: "m", systemPrompt: "One haiku." };
   const spec = { name: "Haiku poet", model: "m2", systemPrompt: "Two haiku.", mcp: [], skills: [] };
-  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), { type: "RunnerOk", name: "local", agents: [poet, sys], location: "laptop", available: [], canCreate: true }];
-  const edited: Msg = { type: "AgentsSet", runner: "local", added: [], edited: ["poet"], agents: [{ ...poet, ...spec }, sys], location: "laptop", available: [], canCreate: true };
+  const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), { type: "RunnerOk", name: "local", agents: [poet, sys], location: "laptop", canCreate: true }];
+  const edited: Msg = { type: "AgentsSet", runner: "local", added: [], edited: ["poet"], agents: [{ ...poet, ...spec }, sys], location: "laptop", canCreate: true };
 
   test("asks the runner to rewrite it and shows it as being edited", () => {
     const [model, effects] = run([...ready, { type: "EditAgent", agent: "local/poet", spec }]);
@@ -588,15 +487,15 @@ describe("editing an agent", () => {
     ]);
   });
 
-  test("an agent that ships with the runner is refused without calling it", () => {
+  test("an agent run by a plugin is refused without calling it", () => {
     const [model, effects] = run([...ready, { type: "EditAgent", agent: "local/sys", spec }]);
-    expect([model.runners.local?.agentsChange?.error, effects]).toEqual(["System report ships with local; only agents created here can be edited", []]);
+    expect([model.runners.local?.agentsChange?.error, effects]).toEqual(["System report is run by a plugin on local; only agents created here can be edited", []]);
   });
 });
 
 describe("deleting an agent", () => {
   const ready: Msg[] = [{ type: "Tick", now: 1_000 }, addLocal, linkUp(), healthy()];
-  const deleted: Msg = { type: "AgentsSet", runner: "local", added: [], removed: ["sys"], agents: [], location: "laptop", available: [] };
+  const deleted: Msg = { type: "AgentsSet", runner: "local", added: [], removed: ["sys"], agents: [], location: "laptop" };
 
   test("asks the runner to delete it and shows it as being removed", () => {
     const [model, effects] = run([...ready, { type: "DeleteAgent", agent: "local/sys" }]);

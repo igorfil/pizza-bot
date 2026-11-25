@@ -19,12 +19,7 @@ export const addAgentModes = (runner: FleetRunner): { blocker: string } | { mode
   if (runner.status !== "healthy") return { blocker: `${runnerLabel(runner)} isn't reachable right now. Try again once it's online.` };
   const modes: Mode[] = [...(runner.canCreateAgents ? ["create" as const] : []), ...(addablePlugins(runner).length > 0 ? ["existing" as const] : [])];
   if (modes.length > 0) return { modes };
-  return {
-    blocker:
-      runner.available == null
-        ? `${runnerLabel(runner)} can't change its agents from here. Update the runner to a version that supports adding agents.`
-        : `${runnerLabel(runner)} has no built-in engine and no plugin that can add agents. Reinstall it with the engine.`,
-  };
+  return { blocker: `${runnerLabel(runner)} has no built-in engine and no plugin that can add agents. Reinstall it with the engine.` };
 };
 
 function Actions({ saving, disabled, label, onClose }: { saving: boolean; disabled: boolean; label: string; onClose: () => void }) {

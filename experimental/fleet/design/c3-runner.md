@@ -10,7 +10,7 @@ flowchart TB
   subgraph runner["Runner · Rust (one per machine)"]
     mcplib["<b>MCP library</b> · mcp.rs<br/>the machine's MCP servers in one mcp.json;<br/>agents pick servers by id"]
     router["<b>HTTP router</b> · main.rs (axum)<br/>public: GET /agents (index, health)<br/>token: change agents, MCP servers<br/>sends /agents/&lt;id&gt;/… to that agent"]
-    registry["<b>Agent registry</b> · manifest.rs<br/>every agent folder (agent.toml),<br/>which ones are served;<br/>changes take effect live"]
+    registry["<b>Agent registry</b> · manifest.rs<br/>every created agent folder (agent.toml)<br/>and plugin agent, all served;<br/>changes take effect live"]
     resolver["<b>Harness resolver</b> · harness.rs<br/>harness name → start command<br/>from RUNNER_HARNESS_&lt;NAME&gt;"]
     endpoints["<b>A2A endpoints</b> · a2a-rs<br/>one per agent: send, get, cancel,<br/>subscribe; agent card; bearer token"]
     writer["<b>Created-agent writer</b> · created.rs<br/>agents made from the UI: agent.toml,<br/>system.md, copies of skills"]

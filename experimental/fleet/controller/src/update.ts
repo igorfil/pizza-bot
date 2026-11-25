@@ -176,7 +176,6 @@ const createTask = (model: Model, taskId: string, key: string, prompt: string, t
   const runner = agent ? model.runners[agent.runner] : undefined;
   if (!agent || !runner) return [notify(model, "error", `unknown agent ${key}`), []];
   if (model.tasks[taskId]) return [model, []];
-  if (agent.enabled === false) return [notify(model, "error", `${agent.name} is disabled; enable it to run it`), []];
   const ep = runner.status === "healthy" ? endpoint(runner, agent.id) : null;
   const task: Task = {
     id: taskId,
@@ -218,7 +217,6 @@ const dueSchedules = (model: Model): Result => {
   const local = model.local;
   if (!local) return [model, []];
   const due = Object.values(model.agents).filter((a) => {
-    if (a.enabled === false) return false;
     const at = a.schedule ? minuteOfDay(a.schedule.at) : null;
     return at !== null && local.minute >= at && a.lastScheduledDay !== local.day;
   });
@@ -275,19 +273,18 @@ const runnerFailed = (model: Model, name: string, error: string): Model => {
   return runner.status === "unreachable" ? updated : notify(updated, "error", `runner ${name} unreachable: ${error}`);
 };
 
-/** Every agent the runner reports, served (enabled) or not; schedules stay across both. Agents it no longer has disappear. */
-const syncAgents = (model: Model, runner: string, served: AgentInfo[], available: AgentInfo[]): Model => {
+/** Every agent the runner reports, keeping their schedules. Agents it no longer has disappear. */
+const syncAgents = (model: Model, runner: string, agents: AgentInfo[]): Model => {
   const others = Object.fromEntries(Object.entries(model.agents).filter(([, a]) => a.runner !== runner));
-  const entry = (info: AgentInfo, enabled: boolean): [string, Agent] => {
+  const entry = (info: AgentInfo): [string, Agent] => {
     const key = agentKey(runner, info.id);
     const prev = model.agents[key];
-    return [key, { ...info, key, runner, enabled, schedule: prev?.schedule ?? null, lastScheduledDay: prev?.lastScheduledDay ?? null }];
+    return [key, { ...info, key, runner, schedule: prev?.schedule ?? null, lastScheduledDay: prev?.lastScheduledDay ?? null }];
   };
-  const mine = Object.fromEntries([...available.map((info) => entry(info, false)), ...served.map((info) => entry(info, true))]);
-  return { ...model, agents: { ...others, ...mine } };
+  return { ...model, agents: { ...others, ...Object.fromEntries(agents.map(entry)) } };
 };
 
-const runnerOk = (model: Model, name: string, { agents, location, available, canCreate, harnesses, plugins, mcpServers }: RunnerIndexFields): Result => {
+const runnerOk = (model: Model, name: string, { agents, location, canCreate, harnesses, plugins, mcpServers }: RunnerIndexFields): Result => {
   const runner = model.runners[name];
   if (!runner) return [model, []];
   const recovered = runner.status !== "healthy";
@@ -300,7 +297,6 @@ const runnerOk = (model: Model, name: string, { agents, location, available, can
       lastSeenAt: model.now,
       nextCheckAt: model.now + HEALTH_INTERVAL_MS,
       location,
-      available: available ?? null,
       canCreateAgents: canCreate === true,
       harnesses: harnesses ?? [],
       plugins: plugins ?? [],
@@ -308,7 +304,6 @@ const runnerOk = (model: Model, name: string, { agents, location, available, can
     }),
     name,
     agents,
-    available ?? [],
   );
   const catchUp = recovered
     ? Object.values(model.tasks)
@@ -377,52 +372,8 @@ const changeAgents = (model: Model, name: string, action: AgentsChange["action"]
   return change({ runner, url: runner.link.url, fail, start });
 };
 
-const servedIds = (model: Model, runner: string): string[] =>
-  Object.values(model.agents)
-    .filter((a) => a.runner === runner && a.enabled !== false)
-    .map((a) => a.id);
-
 const hasRunInProgress = (model: Model, agent: Agent): boolean =>
   Object.values(model.tasks).some((t) => t.runner === agent.runner && t.agent === agent.id && !isTerminal(t) && t.state !== "queued");
-
-/** Asks the runner to serve what it serves now plus `ids`; the runner answers with its new index. */
-const addAgents = (model: Model, name: string, ids: string[]): Result =>
-  changeAgents(model, name, "add", ids, ({ runner, url, fail, start }) => {
-    if (!runner.available) return fail(`${name} can't change its agents; update the runner`);
-    const unknown = ids.find((id) => !runner.available!.some((a) => a.id === id));
-    if (unknown) return fail(`${name} has no agent ${unknown} to add`);
-    const agents = [...new Set([...servedIds(model, name), ...ids])].sort();
-    return start({ type: "SetRunnerAgents", runner: name, endpoint: { url, token: runner.token }, agents, added: ids });
-  });
-
-/** The runner serves the agent again; it keeps its schedule and runs. */
-const enableAgent = (model: Model, key: string): Result => {
-  const agent = model.agents[key];
-  if (!agent) return [notify(model, "error", `unknown agent ${key}`), []];
-  if (agent.enabled !== false) return [model, []];
-  return changeAgents(model, agent.runner, "enable", [agent.name], ({ runner, url, start }) =>
-    start({ type: "SetRunnerAgents", runner: runner.name, endpoint: { url, token: runner.token }, agents: [...servedIds(model, agent.runner), agent.id].sort(), added: [agent.id] }),
-  );
-};
-
-/** The runner stops serving the agent but keeps it, so it can be enabled again; waits for a run in progress. */
-const disableAgent = (model: Model, key: string): Result => {
-  const agent = model.agents[key];
-  if (!agent) return [notify(model, "error", `unknown agent ${key}`), []];
-  if (agent.enabled === false) return [model, []];
-  return changeAgents(model, agent.runner, "disable", [agent.name], ({ runner, url, fail, start }) =>
-    hasRunInProgress(model, agent)
-      ? fail(`${agent.name} has a run in progress; cancel it or wait for it to finish`)
-      : start({
-          type: "SetRunnerAgents",
-          runner: runner.name,
-          endpoint: { url, token: runner.token },
-          agents: servedIds(model, agent.runner).filter((id) => id !== agent.id),
-          added: [],
-          disabled: [agent.id],
-        }),
-  );
-};
 
 /** The change shows the new agent's name until the runner answers with its id. */
 const createAgent = (model: Model, name: string, agent: NewAgentSpec): Result =>
@@ -460,7 +411,7 @@ const editAgent = (model: Model, key: string, spec: NewAgentSpec): Result => {
   return changeAgents(model, agent.runner, "edit", [agent.name], ({ runner, url, fail, start }) =>
     agent.created
       ? start({ type: "EditRunnerAgent", runner: runner.name, endpoint: { url, token: runner.token }, agentId: agent.id, agent: spec })
-      : fail(`${agent.name} ships with ${runner.name}; only agents created here can be edited`),
+      : fail(`${agent.name} is run by a plugin on ${runner.name}; only agents created here can be edited`),
   );
 };
 
@@ -476,26 +427,19 @@ const agentsSet = (model: Model, msg: Extract<Msg, { type: "AgentsSet" }>): Resu
   const runner = model.runners[msg.runner];
   if (!runner) return [model, []];
   const removed = msg.removed ?? [];
-  const disabled = msg.disabled ?? [];
   const nameOf = (id: string) => model.agents[agentKey(msg.runner, id)]?.name ?? id;
-  const why = (id: string) => (removed.includes(id) ? "the agent was deleted" : disabled.includes(id) ? "the agent was disabled" : null);
   // Runs still waiting for the runner would otherwise be sent to an agent that's gone, so cancel them before syncing.
   const canceled = Object.values(model.tasks)
-    .filter((t) => t.runner === msg.runner && why(t.agent) !== null && t.state === "queued")
-    .reduce((m, t) => setTask(m, { ...t, state: "canceled", statusText: why(t.agent) }), setRunner(model, { ...runner, agentsChange: null }));
+    .filter((t) => t.runner === msg.runner && removed.includes(t.agent) && t.state === "queued")
+    .reduce((m, t) => setTask(m, { ...t, state: "canceled", statusText: "the agent was deleted" }), setRunner(model, { ...runner, agentsChange: null }));
   const [next, effects] = runnerOk(canceled, msg.runner, msg);
   const namesOf = (ids: string[]) => msg.agents.filter((a) => ids.includes(a.id)).map((a) => a.name).join(", ");
-  const known = msg.added.length > 0 && msg.added.every((id) => model.agents[agentKey(msg.runner, id)] !== undefined);
   const text =
     removed.length > 0
       ? `removed ${removed.map(nameOf).join(", ")} from ${msg.runner}`
-      : disabled.length > 0
-        ? `disabled ${disabled.map(nameOf).join(", ")} on ${msg.runner}`
-        : msg.edited?.length
-          ? `updated ${namesOf(msg.edited)} on ${msg.runner}`
-          : known
-            ? `enabled ${namesOf(msg.added)} on ${msg.runner}`
-            : `added ${namesOf(msg.added)} to ${msg.runner}`;
+      : msg.edited?.length
+        ? `updated ${namesOf(msg.edited)} on ${msg.runner}`
+        : `added ${namesOf(msg.added)} to ${msg.runner}`;
   return [notify(next, "info", text), effects];
 };
 
@@ -579,17 +523,8 @@ export const update = (model: Model, msg: Msg): Result => {
     case "RunnerOk":
       return runnerOk(model, msg.name, msg);
 
-    case "AddAgents":
-      return addAgents(model, msg.runner, msg.agents);
-
     case "AddPluginAgent":
       return addPluginAgent(model, msg.runner, msg.plugin, msg.fields);
-
-    case "EnableAgent":
-      return enableAgent(model, msg.agent);
-
-    case "DisableAgent":
-      return disableAgent(model, msg.agent);
 
     case "CreateAgent":
       return createAgent(model, msg.runner, msg.agent);

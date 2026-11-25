@@ -26,7 +26,6 @@ const model: Model = {
       lastSeenAt: 0,
       lastError: null,
       location: null,
-      available: null,
       canCreateAgents: false,
       harnesses: [],
       plugins: [],

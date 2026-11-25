@@ -4,18 +4,12 @@ exports[`install script > matches the expected bootstrap 1`] = `
 "#!/bin/bash
 set -euo pipefail
 RELEASE='https://github.com/o/r/releases/download/fleet-runner-v1'
-AGENTS_DIR=/opt/fleet-agents
 
 curl -fsSL "$RELEASE/fleet-runner-x86_64-linux-musl" -o /usr/local/bin/fleet-runner.new
 install -m 755 /usr/local/bin/fleet-runner.new /usr/local/bin/fleet-runner
 rm -f /usr/local/bin/fleet-runner.new
 
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
-
-curl -fsSL "$RELEASE/fleet-agents.tar.gz" -o /tmp/fleet-agents.tar.gz
-rm -rf "$AGENTS_DIR.new" && mkdir -p "$AGENTS_DIR.new"
-tar -xzf /tmp/fleet-agents.tar.gz -C "$AGENTS_DIR.new"
-rm -rf "$AGENTS_DIR" && mv "$AGENTS_DIR.new" "$AGENTS_DIR"
 
 curl -fsSL "$RELEASE/fleet-engine-x64-linux.tar.gz" -o /tmp/fleet-engine-x64-linux.tar.gz
 rm -rf /opt/fleet-engine.new && mkdir -p /opt/fleet-engine.new
@@ -33,8 +27,6 @@ umask 077
 cat > /etc/fleet-runner.env <<'EOF'
 RUNNER_NAME=ec2
 RUNNER_LOCATION=EC2 eu-west-1
-RUNNER_AGENTS_DIR=/opt/fleet-agents
-RUNNER_AGENTS=
 AWS_REGION=eu-west-1
 RUNNER_TOKEN=abc123
 RUNNER_BIND=127.0.0.1:9000

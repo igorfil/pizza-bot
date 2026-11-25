@@ -252,7 +252,7 @@ describe("AgentsView", () => {
   });
 
   it("shows agents being added to a runner", () => {
-    const ec2 = { ...model.runners.ec2!, available: [{ id: "slow", name: "Slow", description: "" }], agentsChange: { action: "add" as const, agents: ["slow"], error: null } };
+    const ec2 = { ...model.runners.ec2!, agentsChange: { action: "add" as const, agents: ["Slow"], error: null } };
     expect(view({ ...model, runners: { ec2 } })).toContain("Adding Slow…");
   });
 
@@ -270,33 +270,27 @@ describe("AgentsView", () => {
 describe("Add agent", () => {
   const runner = model.runners.ec2!;
   const offer = (over: Partial<typeof runner>) => addAgentModes({ ...runner, ...over });
-  const jokes = [{ id: "dadjokes", name: "Dad jokes", description: "" }];
 
   it("offers creating a new agent on a runner with the built-in engine", () => {
-    expect(offer({ canCreateAgents: true, available: jokes })).toEqual({ modes: ["create"] });
+    expect(offer({ canCreateAgents: true })).toEqual({ modes: ["create"] });
   });
 
   const docker = { id: "docker", name: "Docker", version: "1", capabilities: ["cancel", "add"], healthy: false, detail: "spawn docker ENOENT", addFields: [{ id: "name", label: "Name", kind: "text" as const }] };
 
   it("offers adding an existing agent when a plugin can add agents, even an unusable one", () => {
-    expect(offer({ canCreateAgents: true, available: [], plugins: [docker] })).toEqual({ modes: ["create", "existing"] });
+    expect(offer({ canCreateAgents: true, plugins: [docker] })).toEqual({ modes: ["create", "existing"] });
   });
 
   it("offers only adding existing agents on a runner without the engine", () => {
-    expect(offer({ canCreateAgents: false, available: [], plugins: [{ ...docker, healthy: true }] })).toEqual({ modes: ["existing"] });
+    expect(offer({ canCreateAgents: false, plugins: [{ ...docker, healthy: true }] })).toEqual({ modes: ["existing"] });
   });
 
   it("doesn't count a plugin that can't add agents", () => {
     expect(addablePlugins({ ...runner, plugins: [{ ...docker, capabilities: ["cancel"] }, { ...docker, id: "old", addFields: undefined }] })).toEqual([]);
   });
 
-  it("asks for a runner update when the runner can do neither", () => {
-    const r = offer({ canCreateAgents: false, available: null });
-    expect("blocker" in r && r.blocker).toContain("Update the runner");
-  });
-
   it("explains that a runner without the built-in engine can't run new agents", () => {
-    const r = offer({ canCreateAgents: false, available: [] });
+    const r = offer({ canCreateAgents: false });
     expect("blocker" in r && r.blocker).toContain("no built-in engine");
   });
 
@@ -310,40 +304,23 @@ describe("AgentCard", () => {
   const card = (m: FleetModel) =>
     wrap(<AgentCard model={m} agent={m.agents["ec2/dadjokes"]!} runner={m.runners.ec2!} send={noop} onOpenChat={() => {}} />);
 
-  it("offers removing an agent added through a plugin", () => {
-    const added = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, added: true } } };
-    expect(card(added).includes('aria-label="Delete agent Dad jokes"')).toBe(true);
+  it("offers deleting an agent", () => {
+    expect(card(model).includes('aria-label="Delete agent Dad jokes"')).toBe(true);
   });
 
-  it("offers deleting only an agent created here", () => {
-    const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true } } };
-    expect([card(model).includes('aria-label="Delete agent Dad jokes"'), card(created).includes('aria-label="Delete agent Dad jokes"')]).toEqual([false, true]);
-  });
-
-  it("offers disabling an enabled agent and enabling a disabled one", () => {
-    const off = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, enabled: false } } };
-    expect([card(model).includes('aria-label="Disable agent Dad jokes"'), card(off).includes('aria-label="Enable agent Dad jokes"')]).toEqual([true, true]);
-  });
-
-  it("shows a disabled agent dimmed, with Enable instead of Run", () => {
-    const off = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, enabled: false } } };
-    const html = card(off);
-    expect([html.includes("fleet-agent-card disabled"), />\s*Enable<\/button>/.test(html), />\s*Run<\/button>/.test(html)]).toEqual([true, true, false]);
-  });
-
-  it("offers details for every agent, shipped or created", () => {
+  it("offers details for every agent", () => {
     const created = { ...model, agents: { "ec2/dadjokes": { ...model.agents["ec2/dadjokes"]!, created: true, model: "m", systemPrompt: "" } } };
     expect([card(model).includes('aria-label="Edit agent Dad jokes"'), card(created).includes('aria-label="Edit agent Dad jokes"')]).toEqual([true, true]);
   });
 
-  it("can't be disabled while it runs", () => {
+  it("can't be deleted while it runs", () => {
     const running = { ...model, tasks: { a: { ...jokes, id: "a", state: "working" as const } } };
-    expect(card(running)).toMatch(/<button[^>]*class="fleet-agent-toggle"[^>]*disabled=""/);
+    expect(card(running)).toMatch(/<button[^>]*class="fleet-agent-delete"[^>]*disabled=""/);
   });
 
   it("shows that it's being removed, without actions", () => {
-    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} onOpenChat={() => {}} pending="remove" />);
-    expect([html.includes("Removing…"), html.includes("fleet-agent-toggle")]).toEqual([true, false]);
+    const html = wrap(<AgentCard model={model} agent={model.agents["ec2/dadjokes"]!} runner={model.runners.ec2!} send={noop} onOpenChat={() => {}} removing />);
+    expect([html.includes("Removing…"), html.includes("fleet-agent-delete")]).toEqual([true, false]);
   });
 
   it("keeps the agent's key out of the card text", () => {

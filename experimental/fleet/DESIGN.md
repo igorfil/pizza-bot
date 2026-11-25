@@ -317,8 +317,8 @@ run, no DST handling.
 
 ### 3.8 Runner
 
-**Role.** A generic host, one per machine. It serves every agent folder in `RUNNER_AGENTS_DIR` as
-its own A2A endpoint, and knows nothing about what agents do. It is built on the official `a2a-rs`
+**Role.** A generic host, one per machine. It serves every agent created or added on it as its own
+A2A endpoint, and knows nothing about what agents do. It is built on the official `a2a-rs`
 SDK (`a2a-lf` / `a2a-server-lf`) with axum.
 
 **Interfaces.**
@@ -337,7 +337,7 @@ SDK (`a2a-lf` / `a2a-server-lf`) with axum.
 - Cancel and timeout send SIGTERM to the group, then SIGKILL 5 s later.
 - Work continues after the client disconnects, because the SDK runs the executor in `tokio::spawn`.
 
-**Config.** `RUNNER_TOKEN` (required), `RUNNER_AGENTS_DIR`, `RUNNER_AGENTS`, `RUNNER_BIND`,
+**Config.** `RUNNER_TOKEN` (required), `RUNNER_CREATED_AGENTS_DIR`, `RUNNER_BIND`,
 `RUNNER_PUBLIC_URL`, `RUNNER_DB`, `RUNNER_NAME`, `RUNNER_LOCATION`.
 
 **Open questions.**

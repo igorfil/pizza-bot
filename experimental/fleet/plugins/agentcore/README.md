@@ -1,9 +1,10 @@
 # AgentCore plugin
 
-Runs agents deployed to Amazon Bedrock AgentCore Runtime. Each folder in `agents/` (or
-`AGENTCORE_AGENTS_DIR`) is one agent: a runtime ARN, invoked with `InvokeAgentRuntime` once per task
-with `{"prompt": "<input>"}`. Deploying the runtime is up to you (the AgentCore CLI, or its console);
-the plugin only invokes it. There are no agents here, since each needs a runtime in your account.
+Runs agents deployed to Amazon Bedrock AgentCore Runtime: a runtime ARN, invoked with
+`InvokeAgentRuntime` once per task with `{"prompt": "<input>"}`. Each agent is added on the Fleet
+page (Add agent → Add existing → AgentCore), which keeps it as an `agent.toml` in the plugin's data
+folder (`$FLEET_PLUGIN_DATA/agents/<id>/`). Deploying the runtime is up to you (the AgentCore CLI, or
+its console); the plugin only invokes it.
 
 ```toml
 name = "Support agent"                    # shown in UIs

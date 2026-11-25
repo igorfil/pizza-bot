@@ -116,11 +116,6 @@ pub fn load(dir: &Path) -> Result<Vec<AgentSpec>, String> {
     Ok(specs)
 }
 
-/// The first id with no agent, so a typo never silently serves nothing.
-pub fn unknown<'a>(specs: &[AgentSpec], ids: &'a [String]) -> Option<&'a String> {
-    ids.iter().find(|id| !specs.iter().any(|s| &s.id == *id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,12 +186,5 @@ MODEL = "m"
         let ids: Vec<String> = load(&dir).unwrap().into_iter().map(|s| s.id).collect();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(ids, vec!["good".to_string()]);
-    }
-
-    #[test]
-    fn names_the_first_id_without_an_agent() {
-        let specs = vec![parse("a", Path::new("/a"), "name = \"A\"\nharness = \"pizza-bot\"").unwrap()];
-        let ids = vec!["a".to_string(), "typo".to_string()];
-        assert_eq!(unknown(&specs, &ids), Some(&"typo".to_string()));
     }
 }

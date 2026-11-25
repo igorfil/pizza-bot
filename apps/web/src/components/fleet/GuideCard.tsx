@@ -300,7 +300,7 @@ export function AddRunnerDialog({
   );
 }
 
-/** Only for agents created here or added through a plugin; other agents are disabled instead. */
+/** A created agent is deleted; one added through a plugin is removed from it. */
 export function DeleteAgentDialog({ agent, runner, onCancel, onConfirm }: { agent: FleetAgent; runner: FleetRunner; onCancel: () => void; onConfirm: () => void }) {
   return (
     <DialogPrimitive.Root open onOpenChange={(open) => !open && onCancel()}>

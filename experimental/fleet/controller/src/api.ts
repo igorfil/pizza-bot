@@ -156,18 +156,11 @@ export const toIntent = async (type: string, p: Record<string, unknown>, ctx: In
       const error = key && str(p.token) ? await storeSecret(ctx.vault, key, p.token) : null;
       return error ?? { type, name: p.name, transport, token: key ? { kind: "vault", key } : null };
     }
-    case "AddAgents":
-      return str(p.runner) && Array.isArray(p.agents) && p.agents.length > 0 && p.agents.every(str)
-        ? { type, runner: p.runner, agents: p.agents as string[] }
-        : "AddAgents needs runner and agents (a non-empty list of agent ids)";
     case "AddPluginAgent": {
       const fields = typeof p.fields === "object" && p.fields !== null && !Array.isArray(p.fields) ? (p.fields as Record<string, unknown>) : null;
       if (!str(p.runner) || !str(p.plugin) || !fields) return "AddPluginAgent needs runner, plugin and fields";
       return { type, runner: p.runner, plugin: p.plugin, fields: Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, typeof v === "string" ? v : ""])) };
     }
-    case "EnableAgent":
-    case "DisableAgent":
-      return str(p.agent) ? { type, agent: p.agent } : `${type} needs agent (<runner>/<id>)`;
     case "CreateAgent": {
       if (!str(p.runner)) return "CreateAgent needs runner, name, model, systemPrompt";
       const agent = agentSpecOf(type, p);

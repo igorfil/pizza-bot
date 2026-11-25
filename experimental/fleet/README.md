@@ -1,7 +1,7 @@
 # Fleet (experimental backend)
 
 The second backend inside pizza-bot-experimental. A headless **Controller** on the laptop talks to
-**Runners** over A2A; runners host **agents** (folders in `agents/`) on the laptop and on EC2. The
+**Runners** over A2A; runners host **agents**, created or added on the Fleet page, on the laptop and on EC2. The
 **Fleet** page in pizza-bot's web app (`apps/web/src/components/fleet/`) is a view of the Controller.
 It runs next to pizza-bot's own api-server; the two share nothing but the web app.
 
@@ -109,9 +109,8 @@ curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r3","type":"AddRunner","p
 ║  │  127.0.0.1:9301 · auth · task store (SQLite) · /agents  │   │ 127.0.0.1:9471  │  ║
 ║  │  one subprocess per run (agents/README.md)              │   │ ssh -L → :9000  │  ║
 ║  │  built-in engine: apps/fleet-agent                      │   │ auto-reconnect  │  ║
-║  │  /agents/webresearch   agents/webresearch (built-in)    │   └────────┬────────┘  ║
-║  │  /agents/<created>     created-agents/<id> (built-in)   │            │           ║
-║  │  /agents/slow          plugins/python (external)        │            │           ║
+║  │  /agents/<created>     created-agents/<id> (built-in)   │   └────────┬────────┘  ║
+║  │  /agents/<added>       plugins/<plugin> (external)      │            │           ║
 ║  └─────────────────────────────────────────────────────────┘            │           ║
 ╚═════════════════════════════════════════════════════════════════════════┼═══════════╝
                                                                           │ SSH over SSM
@@ -202,13 +201,10 @@ Intents (only these are accepted over the API; world Msgs are rejected):
 | type | payload |
 |---|---|
 | `AddRunner` | `name, token`, and `url` (direct) or `transport` (below) |
-| `AddAgents` | `runner`, `agents` (ids from the runner's `available`); the runner starts serving them |
-| `DeleteAgent` | `agent` (`<runner>/<id>`); a created agent is deleted from its runner, a shipped one turned off. Refused while it has a run in progress |
+| `DeleteAgent` | `agent` (`<runner>/<id>`); a created agent is deleted from its runner, one added through a plugin is removed from it. Refused while it has a run in progress |
 | `CreateAgent` | `runner`, `name`, `model` (one of the model's `agentModels`), `systemPrompt`; the runner creates and serves a prompt agent |
 | `EditAgent` | `agent` (`<runner>/<id>`), `name`, `model`, `systemPrompt`; rewrites a created agent under the same id. Runs in progress finish with the old spec |
 | `AddPluginAgent` | `runner`, `plugin`, `fields` (the plugin's `addFields`, as strings): the plugin adds an existing agent and the runner serves it |
-| `EnableAgent` | `agent` (`<runner>/<id>`): the runner serves it again; it kept its schedule and runs |
-| `DisableAgent` | `agent`: the runner stops serving it but keeps it; it isn't run or scheduled. Refused while it has a run in progress |
 | `UpdateRunner` | `name`, plus any of `url`/`transport`, `token`; the link reopens with the new config |
 | `RemoveRunner` | `name` |
 | `RenameRunner` | `name`, `label` (display name, up to 40 characters; empty = back to `name`). The id `name` and agent keys don't change |
@@ -288,15 +284,13 @@ auth, the task store, timeouts and health.
 | Env | Default | |
 |---|---|---|
 | `RUNNER_TOKEN` | required | bearer token the Controller must send |
-| `RUNNER_AGENTS_DIR` | `agents` | folder of built-in agent folders; may be missing |
 | `RUNNER_HARNESS_PIZZA_BOT` | none | command that starts the built-in engine; without it the runner can't run built-in or created agents |
 | `RUNNER_PLUGINS_DIR` | `plugins` | folder of harness plugins; may be missing |
 | `RUNNER_MCP_CONFIG` | `mcp.json` next to `RUNNER_DB` | the runner's MCP servers, for built-in agents only |
-| `RUNNER_AGENTS` | all | comma list of agent ids (built-in or plugin) to serve at first start (an unknown id is a startup error); once the Controller sets them with `PUT /agents`, that saved list wins |
 | `RUNNER_BIND` | `127.0.0.1:9000` | |
 | `RUNNER_PUBLIC_URL` | `http://$RUNNER_BIND` | base URL agent cards advertise; must be the URL the Controller uses |
 | `RUNNER_DB` | `runner.db` | SQLite task store, shared by all its agents |
-| `RUNNER_CREATED_AGENTS_DIR` | `created-agents` next to `RUNNER_DB` | agents made with `POST /agents`; kept outside `RUNNER_AGENTS_DIR`, which an upgrade replaces |
+| `RUNNER_CREATED_AGENTS_DIR` | `created-agents` next to `RUNNER_DB` | agents made with `POST /agents` |
 | `RUNNER_NAME` | `runner` | runner name in `GET /agents` |
 | `RUNNER_LOCATION` | none | where it runs ("this laptop", "EC2 us-west-2"); in `GET /agents` and card `provider.organization` |
 
@@ -304,37 +298,31 @@ Built-in agents and plugins inherit the runner's environment (so `PATH`, AWS cre
 their manifest's `[env]`.
 
 Endpoints:
-- `GET /agents`: public; `{runner, location, agents: [...], available: [...], canCreate, harnesses,
-  plugins, mcpServers}`, each agent `{id, name, description, input, url, kind, harness}` (`kind` is
-  `builtin` or `external`; `harness` is `pizza-bot` or the plugin's id). `agents` are served;
-  `available` are known but off. `plugins` lists each plugin's name, version, capabilities and last
-  health. The Controller uses it for discovery and as the runner health check.
+- `GET /agents`: public; `{runner, location, agents: [...], canCreate, harnesses, plugins,
+  mcpServers}`, each agent `{id, name, description, input, url, kind, harness}` (`kind` is
+  `builtin` or `external`; `harness` is `pizza-bot` or the plugin's id). The runner serves every
+  agent it has. `plugins` lists each plugin's name, version, capabilities and last health. The
+  Controller uses it for discovery and as the runner health check.
 - `POST /agents`: bearer token required; `{name, model, systemPrompt}` writes an agent for the
   built-in engine (`agent.toml`, `system.md`, `skills/`) into `RUNNER_CREATED_AGENTS_DIR`, serves it
   at once, and answers with the new index plus `created: <id>`. The index's `canCreate` says the
   runner has the engine (`RUNNER_HARNESS_PIZZA_BOT`); without it the request answers 409.
 - `PUT /agents/<id>`: bearer token required; `{name, model, systemPrompt}` rewrites a created agent
-  in place (same id, so its URL and runs stay) and answers with the new index. Shipped agents
+  in place (same id, so its URL and runs stay) and answers with the new index. Plugin agents
   answer 409. Created agents' index entries carry `model` and `systemPrompt` for editing.
-- `DELETE /agents/<id>`: bearer token required; deletes a created agent's folder, has the plugin
-  remove an agent added through it, or turns any other agent off (it stays in `available`), and
-  answers with the new index. Each index entry's `created` and `added` tell them apart.
+- `DELETE /agents/<id>`: bearer token required; deletes a created agent's folder or has the plugin
+  remove an agent added through it, and answers with the new index. Each index entry's `created`
+  and `added` tell them apart.
 - `POST /plugins/<id>/agents`: bearer token required; `{fields: {...}}` has the plugin add an agent
   from the values a UI collected for its `addFields` (plugins/README.md), serves it at once, and
   answers with the new index plus `created: <id>`. The plugin's reason comes back as a 400.
-- `PUT /agents`: bearer token required; `{agents: [ids]}` replaces the served set, saves it in
-  `RUNNER_DB` so it survives restarts, and answers with the new index. Unserved agents answer 404.
 - `/agents/<id>/.well-known/agent-card.json`: public A2A agent card per agent. Its one skill carries
   the input label (`name`), hint (`description`) and default input (`examples[0]`).
 - `/agents/<id>/jsonrpc`: A2A v1.0 JSON-RPC, bearer token required.
 
-Agents in this repo (details in [agents/README.md](agents/README.md)):
-
-| Agent | Kind | Input | Does | Artifacts |
-|---|---|---|---|---|
-| `webresearch` | built-in | question | reads the pages it fetches (fetch MCP) and answers from them | `reply` |
-
-Everything else is created on the Fleet page and runs on the runner's built-in engine.
+Runners and plugins ship no agents: every agent is created or added on the Fleet page. For trying
+things out, [test-agents/](test-agents/README.md) has a script that adds a few (`webresearch`,
+`slow`, `hello`, `ask`) to a runner.
 
 Build: `cd runner && cargo build`. Linux binary and EC2 update: [docs/DEPLOY.md](docs/DEPLOY.md).
 
@@ -360,11 +348,12 @@ cd experimental/fleet/runner && cargo test
 
 ### Reconnect scenarios
 
-The real agents finish in seconds. For mid-run tests use the Python plugin's `laptop/slow` (served by
-`npm run dev`), e.g. input `steps=20 every=3 x`.
+The real agents finish in seconds. For mid-run tests add the slow test agent to the laptop runner
+(`node experimental/fleet/test-agents/add.mjs slow`) and run `laptop/slow-test-agent`, e.g. with
+input `steps=20 every=3 x`.
 
 1. **Close the UI**: start a run, quit, reopen. The result is there.
-2. **Controller dies mid-run**: run `steps=20 every=3 x` on `laptop/slow`, kill the Controller at step 3, wait
+2. **Controller dies mid-run**: run `steps=20 every=3 x` on `laptop/slow-test-agent`, kill the Controller at step 3, wait
    30s, restart. It catches up to the current step or to `completed`.
 3. **Network to EC2 drops**: stop `tunnel.sh`. `ec2` turns `unreachable` with a retry countdown within
    ~15s; restart it and it turns healthy.
@@ -376,7 +365,7 @@ All four were run during the POC and passed (see SPEC.md 14a pass criteria).
 
 ## Done: one runner, many agents
 
-Each machine runs one runner; each agent is a folder in `agents/` served at `/agents/<id>/`. The
+Each machine runs one runner; each agent is served at `/agents/<id>/`. The
 Controller Model splits into `runners` (health, URL, token, location) and `agents` (key
 `<runner>/<id>`, manifest info, schedule); tasks carry `runner` + `agent`. Reconnect logic is per
 runner, unchanged. The Controller's Msg log from before this change was set aside as

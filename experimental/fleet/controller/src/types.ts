@@ -51,7 +51,7 @@ export type SkillFile = { path: string; content: string; encoding?: "base64" };
 export type SkillCopy = { id: string; files?: SkillFile[] };
 
 /** What a runner's `GET /agents` reports for one agent. */
-/** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model`, `systemPrompt` and `skills`. */
+/** `created`: made with CreateAgent; `added`: added through a plugin. Only created ones carry `model`, `systemPrompt` and `skills`. */
 /** A harness plugin on a runner, as its `GET /agents` reports it. */
 export type PluginInfo = { id: string; name: string; version: string; capabilities: string[]; healthy: boolean; detail: string; addFields?: AddField[] };
 
@@ -93,8 +93,6 @@ export type Runner = NewRunner & {
   lastSeenAt: number | null;
   lastError: string | null;
   location: string | null;
-  /** Agents on the runner's disk it doesn't serve yet; null when the runner can't change its agents. */
-  available: AgentInfo[] | null;
   /** The runner takes CreateAgent (`POST /agents`). */
   canCreateAgents: boolean;
   /** Harnesses the runner offers; `pizza-bot` lets created agents have MCP servers and skills. */
@@ -103,7 +101,7 @@ export type Runner = NewRunner & {
   plugins: PluginInfo[];
   /** The MCP servers on the runner's machine, which its agents pick from. */
   mcpServers: McpServers;
-  /** The last AddAgents or CreateAgent for this runner, until it lands or a new one starts. */
+  /** The last agent change for this runner, until it lands or a new one starts. */
   agentsChange: AgentsChange | null;
 };
 
@@ -111,14 +109,12 @@ export type Runner = NewRunner & {
 export type NewAgentSpec = { name: string; model: string; systemPrompt: string; mcp: string[]; skills: SkillCopy[] };
 
 /** In flight while `error` is null; `agents` are names or ids, for display. */
-export type AgentsChange = { action: "add" | "remove" | "edit" | "enable" | "disable"; agents: string[]; error: string | null };
+export type AgentsChange = { action: "add" | "remove" | "edit"; agents: string[]; error: string | null };
 
 /** An agent hosted by a runner; the unit users run, schedule and see. Key: `<runner>/<id>`. */
 export type Agent = AgentInfo & {
   key: string;
   runner: string;
-  /** Served by its runner; a disabled agent keeps its schedule and runs but neither runs nor is scheduled. */
-  enabled: boolean;
   /** Daily run at local `at` (HH:MM). Fires once per local day, on the first tick at or after `at`. */
   schedule: { at: string; prompt: string } | null;
   lastScheduledDay: string | null;
@@ -267,9 +263,6 @@ export type IntentMsg =
   | { type: "UpdateRunner"; name: string; transport: TransportSpec | null; token: SecretRef | null }
   | { type: "RemoveRunner"; name: string; teardown: boolean }
   | { type: "RenameRunner"; name: string; label: string | null }
-  | { type: "AddAgents"; runner: string; agents: string[] }
-  | { type: "EnableAgent"; agent: string }
-  | { type: "DisableAgent"; agent: string }
   | { type: "CreateAgent"; runner: string; agent: NewAgentSpec }
   | { type: "AddPluginAgent"; runner: string; plugin: string; fields: Record<string, string> }
   | { type: "SetMcpServer"; runner: string; id: string; entry: Record<string, unknown> }
@@ -297,8 +290,8 @@ export type WorldMsg =
   | { type: "Tick"; now: number; local?: LocalClock; since?: number }
   | { type: "LinkUp"; runner: string; epoch: number; url: string }
   | { type: "LinkDown"; runner: string; epoch: number; error: string | null }
-  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers }
-  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; disabled?: string[]; agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers }
+  | { type: "RunnerOk"; name: string; agents: AgentInfo[]; location: string | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers }
+  | { type: "AgentsSet"; runner: string; added: string[]; removed?: string[]; edited?: string[]; agents: AgentInfo[]; location: string | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers }
   | { type: "AgentsSetFailed"; runner: string; error: string }
   | ({ type: "McpServersSet"; runner: string; text: string } & RunnerIndexFields)
   | { type: "McpServerFailed"; runner: string; text: string }
@@ -318,7 +311,7 @@ export type WorldMsg =
 export type Msg = IntentMsg | WorldMsg;
 
 /** What a runner's `GET /agents` says about itself. */
-export type RunnerIndexFields = { agents: AgentInfo[]; location: string | null; available: AgentInfo[] | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers };
+export type RunnerIndexFields = { agents: AgentInfo[]; location: string | null; canCreate?: boolean; harnesses?: string[]; plugins?: PluginInfo[]; mcpServers?: McpServers };
 
 /** Where to reach one agent over A2A: always through its runner, `<link url>/agents/<id>`. */
 export type Endpoint = { url: string; token: SecretRef };
@@ -327,7 +320,6 @@ export type LlmTurn = { role: ChatRole; text: string };
 
 export type Effect =
   | { type: "CheckRunner"; runner: string; url: string }
-  | { type: "SetRunnerAgents"; runner: string; endpoint: Endpoint; agents: string[]; added: string[]; disabled?: string[] }
   | { type: "CreateRunnerAgent"; runner: string; endpoint: Endpoint; agent: NewAgentSpec }
   | { type: "AddRunnerPluginAgent"; runner: string; endpoint: Endpoint; plugin: string; fields: Record<string, string> }
   | { type: "DeleteRunnerAgent"; runner: string; endpoint: Endpoint; agentId: string }
@@ -351,9 +343,6 @@ export const INTENT_TYPES: ReadonlySet<string> = new Set<IntentMsg["type"]>([
   "UpdateRunner",
   "RemoveRunner",
   "RenameRunner",
-  "AddAgents",
-  "EnableAgent",
-  "DisableAgent",
   "CreateAgent",
   "AddPluginAgent",
   "SetMcpServer",

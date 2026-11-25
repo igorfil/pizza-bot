@@ -20,7 +20,7 @@ case "$ARCH" in
   *) echo "unknown arch $ARCH" >&2; exit 2 ;;
 esac
 
-[ -f "$DIST/$ASSET" ] && [ -f "$DIST/fleet-agents.tar.gz" ] && [ -f "$DIST/fleet-plugins.tar.gz" ] && [ -f "$DIST/$ENGINE" ] || {
+[ -f "$DIST/$ASSET" ] && [ -f "$DIST/fleet-plugins.tar.gz" ] && [ -f "$DIST/$ENGINE" ] || {
   echo "there is no $ARCH Linux runner build yet; run npm run build (it needs zig and cargo-zigbuild)" >&2
   exit 1
 }
@@ -42,5 +42,5 @@ SSH_OPTS=(
   ${IDENTITY[@]+"${IDENTITY[@]}"}
 )
 ssh "${SSH_OPTS[@]}" "$SSH_USER@$INSTANCE" "rm -rf $REMOTE && mkdir -p $REMOTE"
-scp "${SSH_OPTS[@]}" "$DIST/$ASSET" "$DIST/fleet-agents.tar.gz" "$DIST/fleet-plugins.tar.gz" "$DIST/$ENGINE" "$SSH_USER@$INSTANCE:$REMOTE/"
+scp "${SSH_OPTS[@]}" "$DIST/$ASSET" "$DIST/fleet-plugins.tar.gz" "$DIST/$ENGINE" "$SSH_USER@$INSTANCE:$REMOTE/"
 echo "copied the local build to $INSTANCE:$REMOTE"

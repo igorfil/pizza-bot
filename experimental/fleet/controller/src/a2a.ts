@@ -91,7 +91,6 @@ type IndexJson = {
   plugins?: unknown;
   mcpServers?: unknown;
   created?: unknown;
-  available?: NonNullable<IndexJson["agents"]>;
   agents?: {
     id?: unknown;
     name?: unknown;
@@ -145,7 +144,6 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
 export type RunnerIndex = {
   agents: AgentInfo[];
   location: string | null;
-  available: AgentInfo[] | null;
   canCreate: boolean;
   harnesses: string[];
   plugins: PluginInfo[];
@@ -187,11 +185,9 @@ export const pluginsOf = (v: unknown): PluginInfo[] =>
 
 const infos = (list: IndexJson["agents"]): AgentInfo[] => (list ?? []).map(toAgentInfo).filter((a): a is AgentInfo => a !== null);
 
-/** A runner without `available` predates `PUT /agents`, so its agents can't be changed from here. */
 const toIndex = (index: IndexJson): RunnerIndex => ({
   agents: infos(index.agents),
   location: str(index.location) || null,
-  available: Array.isArray(index.available) ? infos(index.available) : null,
   canCreate: index.canCreate === true,
   harnesses: strings(index.harnesses),
   plugins: pluginsOf(index.plugins),
@@ -236,7 +232,7 @@ export const addPluginAgent = (url: string, token: string, plugin: string, field
     return { ...toIndex(body), created: str(body.created) };
   });
 
-/** Deletes a created agent or turns off a shipped one; the runner answers with its new index. */
+/** Deletes a created agent or removes a plugin's; the runner answers with its new index. */
 export const deleteAgent = (url: string, token: string, id: string): Promise<Outcome<RunnerIndex>> =>
   attempt(async () => {
     const res = await fetch(`${url}/agents/${encodeURIComponent(id)}`, {
@@ -289,21 +285,6 @@ export const deleteMcpServer = (url: string, token: string, id: string): Promise
     });
     const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
     if (res.status === 405) throw new Error("this runner can't hold MCP servers; update the runner");
-    if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
-    return toIndex(body);
-  });
-
-/** Replaces the agents the runner serves; it answers with its new index. */
-export const setAgents = (url: string, token: string, agents: string[]): Promise<Outcome<RunnerIndex>> =>
-  attempt(async () => {
-    const res = await fetch(`${url}/agents`, {
-      method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ agents }),
-      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-    });
-    const body = (await res.json().catch(() => ({}))) as IndexJson & { error?: unknown };
-    if (res.status === 404 || res.status === 405) throw new Error("this runner can't change its agents; update the runner");
     if (!res.ok) throw new Error(str(body.error) || `HTTP ${res.status}`);
     return toIndex(body);
   });

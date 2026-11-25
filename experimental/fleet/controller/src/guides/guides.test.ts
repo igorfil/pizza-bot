@@ -351,13 +351,6 @@ describe("aws guide: steps", () => {
     const r = await awsGuide.step(stateOf(await toTarget(p)), { instance: "i-online", name: "ec2" }, p);
     expect(r.kind === "working" && r.view.steps?.current).toBe(2);
   });
-
-  test("a new runner serves no agents until some are added", async () => {
-    const scripts: string[] = [];
-    const p = ports({ aws: fakeAws(fakeHost({ sendScript: async (_id, s) => (scripts.push(s), ok("cmd")) })) });
-    await answer(stateOf(await toTarget(p)), { instance: "i-online", name: "ec2" }, p);
-    expect(installs(scripts)[0]).toMatch(/^RUNNER_AGENTS=$/m);
-  });
 });
 
 describe("aws guide: local build (temporary)", () => {

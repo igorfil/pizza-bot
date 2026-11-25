@@ -52,16 +52,18 @@ export const upcast = (msg: Msg): Msg => {
   return msg;
 };
 
+/** Intents older logs may hold that no longer exist; they replay as nothing. */
+const RETIRED: ReadonlySet<string> = new Set(["AddAgents", "EnableAgent", "DisableAgent"]);
+
 const replay = (log: MsgLog): { model: Model; version: number } =>
   log.all().reduce(
-    (acc, entry) => ({ model: update(acc.model, upcast(entry.msg))[0], version: entry.seq }),
+    (acc, entry) => ({ model: RETIRED.has(entry.msg.type) ? acc.model : update(acc.model, upcast(entry.msg))[0], version: entry.seq }),
     { model: initialModel(), version: 0 },
   );
 
-const indexFields = ({ agents, location, available, canCreate, harnesses, plugins, mcpServers }: a2a.RunnerIndex) => ({
+const indexFields = ({ agents, location, canCreate, harnesses, plugins, mcpServers }: a2a.RunnerIndex) => ({
   agents,
   location,
-  available,
   canCreate,
   harnesses,
   plugins,
@@ -138,13 +140,6 @@ export const startRuntime = (log: MsgLog, deps: RuntimeDeps): Runtime => {
       case "DeleteSecrets":
         await Promise.all(effect.keys.map((k) => deps.vault.delete(k)));
         return null;
-      case "SetRunnerAgents": {
-        const ep = await withToken(effect.endpoint);
-        const r = ep.ok ? await a2a.setAgents(ep.value.url, ep.value.token, effect.agents) : ep;
-        return r.ok
-          ? { type: "AgentsSet", runner: effect.runner, added: effect.added, ...(effect.disabled ? { disabled: effect.disabled } : {}), ...indexFields(r.value) }
-          : { type: "AgentsSetFailed", runner: effect.runner, error: r.error };
-      }
       case "CreateRunnerAgent": {
         const ep = await withToken(effect.endpoint);
         const r = ep.ok ? await a2a.createAgent(ep.value.url, ep.value.token, effect.agent) : ep;

@@ -61,8 +61,6 @@ export function fleetProcesses({ root, webOrigins }) {
         RUNNER_NAME: LOCAL_RUNNER.name,
         RUNNER_TOKEN: LOCAL_RUNNER.token,
         RUNNER_LOCATION: "this laptop",
-        RUNNER_AGENTS_DIR: "agents",
-        RUNNER_AGENTS: "webresearch,slow",
         RUNNER_PLUGINS_DIR: "plugins",
         RUNNER_DB: path.join(home, "laptop-runner.db"),
         RUNNER_BIND: "127.0.0.1:9301",

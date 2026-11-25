@@ -95,9 +95,9 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export const agentsSummary = (model: FleetModel): string =>
   `${plural(Object.keys(model.agents).length, "agent", "agents")} on ${plural(Object.keys(model.runners).length, "runner", "runners")}`;
 
-/** Names for agent ids a runner offers or serves, falling back to the id. */
+/** Names for agent ids a runner has, falling back to the id. */
 export const agentNames = (model: FleetModel, r: FleetRunner, ids: string[]): string =>
-  ids.map((id) => model.agents[`${r.name}/${id}`]?.name ?? r.available?.find((a) => a.id === id)?.name ?? id).join(", ");
+  ids.map((id) => model.agents[`${r.name}/${id}`]?.name ?? id).join(", ");
 
 /** Long enough that every set-up step normally reports progress first: polls do every 5s, the tunnel check gives up at 45s. */
 export const STUCK_MS = 60_000;

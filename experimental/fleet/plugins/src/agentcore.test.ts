@@ -6,11 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentCoreHarness, regionOf, relay, replyText, sessionId, streamEvents, type AgentCoreClient } from "./agentcore.js";
 import type { RunEvent } from "./protocol.js";
 
-/** The plugin's shipped agents in `dir`, and the ones added from the Fleet page inside it (a folder without agent.toml). */
-const dirsOf = (dir: string) => ({ shipped: dir, added: path.join(dir, ".added") });
-
-
-
 const ARN = "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/support_agent-AbC123";
 
 const dirs: string[] = [];
@@ -51,8 +46,8 @@ describe("AgentCore runtimes", () => {
   });
 
   it("are listed from agent folders with a runtime ARN, and skipped without one", async () => {
-    const harness = (toml: string) => agentCoreHarness(dirsOf(agentsDir(toml)), () => fakeClient(async () => ({})).client, async () => true);
-    expect([await harness(`name = "Support"\nruntime_arn = "${ARN}"\n`).agents(), await harness('name = "No ARN"\n').agents()]).toEqual([[{ id: "support", name: "Support" }], []]);
+    const harness = (toml: string) => agentCoreHarness(agentsDir(toml), () => fakeClient(async () => ({})).client, async () => true);
+    expect([await harness(`name = "Support"\nruntime_arn = "${ARN}"\n`).agents(), await harness('name = "No ARN"\n').agents()]).toEqual([[{ id: "support", name: "Support", added: true }], []]);
   });
 });
 
@@ -73,7 +68,7 @@ describe("AgentCore replies", () => {
 describe("an AgentCore run", () => {
   const run = async (reply: (command: unknown, signal?: AbortSignal) => Promise<unknown>, controller = new AbortController(), contextId = "c1") => {
     const { client, sent } = fakeClient(reply);
-    const harness = agentCoreHarness(dirsOf(agentsDir(`name = "Support"\nruntime_arn = "${ARN}"\n`)), () => client, async () => true);
+    const harness = agentCoreHarness(agentsDir(`name = "Support"\nruntime_arn = "${ARN}"\n`), () => client, async () => true);
     const job = await harness.prepare({ taskId: "t1", contextId, agent: "support", input: "hi" });
     const events: RunEvent[] = [];
     const reason = job.ok ? await job.value((e) => events.push(e), controller.signal) : job.error;
@@ -111,17 +106,17 @@ describe("an AgentCore run", () => {
   });
 
   it("is unhealthy without AWS credentials", async () => {
-    expect(await agentCoreHarness(dirsOf(os.tmpdir()), () => fakeClient(async () => ({})).client, async () => false).health()).toEqual({ ok: false, detail: "no AWS credentials for this runner" });
+    expect(await agentCoreHarness(os.tmpdir(), () => fakeClient(async () => ({})).client, async () => false).health()).toEqual({ ok: false, detail: "no AWS credentials for this runner" });
   });
 });
 
 describe("adding AgentCore agents", () => {
-  const harness = () => agentCoreHarness(dirsOf(agentsDir(`name = "Support"\nruntime_arn = "${ARN}"\n`)), () => fakeClient(async () => ({})).client, async () => true);
+  const harness = () => agentCoreHarness(agentsDir(`name = "Support"\nruntime_arn = "${ARN}"\n`), () => fakeClient(async () => ({})).client, async () => true);
 
   it("adds a runtime by its ARN", async () => {
     const h = harness();
     const added = await h.adding!.add({ name: "Billing", runtime_arn: ARN.replace("support_agent", "billing") });
-    expect([added, (await h.agents()).map((a) => [a.id, a.added ?? false])]).toEqual([{ ok: true, value: "billing" }, [["billing", true], ["support", false]]]);
+    expect([added, (await h.agents()).map((a) => a.id)]).toEqual([{ ok: true, value: "billing" }, ["billing", "support"]]);
   });
 
   it("refuses something that isn't a runtime ARN", async () => {

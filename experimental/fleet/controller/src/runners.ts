@@ -27,7 +27,6 @@ export const addRunner = (model: Model, spec: NewRunner): Model =>
       lastSeenAt: null,
       lastError: null,
       location: null,
-      available: null,
       canCreateAgents: false,
       harnesses: [],
       plugins: [],

@@ -65,34 +65,11 @@ impl SqliteTaskStore {
                id TEXT PRIMARY KEY,
                version INTEGER NOT NULL,
                json TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS settings (
-               key TEXT PRIMARY KEY,
-               value TEXT NOT NULL
              );",
         )?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
-    }
-
-    /// The agents last chosen over `PUT /agents`; None until the Controller first sets them.
-    pub fn served_agents(&self) -> rusqlite::Result<Option<Vec<String>>> {
-        let conn = self.conn.lock().unwrap();
-        let value: Option<String> = conn
-            .query_row("SELECT value FROM settings WHERE key = 'served_agents'", [], |r| r.get(0))
-            .optional()?;
-        Ok(value.map(|v| serde_json::from_str(&v).unwrap_or_default()))
-    }
-
-    pub fn set_served_agents(&self, ids: &[String]) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('served_agents', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![serde_json::to_string(ids).unwrap_or_default()],
-        )?;
-        Ok(())
     }
 
     /// Work that was running when the process died cannot be resumed by the fake agent,

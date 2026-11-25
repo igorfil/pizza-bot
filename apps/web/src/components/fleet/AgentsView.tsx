@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AlarmClock, ChevronDown, ChevronUp, LoaderCircle, Play, Plug, Plus, Power, RotateCcw, Server, Settings, Square, Trash2, X } from "lucide-react";
+import { AlarmClock, ChevronDown, ChevronUp, LoaderCircle, Play, Plug, Plus, RotateCcw, Server, Settings, Square, Trash2, X } from "lucide-react";
 import { AddAgentDialog, mcpServerSummary } from "./AddAgentDialog.js";
 import { AgentDetailsDialog, RunnerDetailsDialog, RunnerPill, type RunnerTab } from "./FleetDetails.js";
 import { useAppToast } from "../AppToast.js";
@@ -30,12 +30,6 @@ import {
 } from "./fleet-view-model.js";
 
 const INLINE_RUNS = 5;
-
-type Pending = "remove" | "enable" | "disable";
-
-const PENDING_TEXT: Record<Pending, string> = { remove: "Removing…", enable: "Enabling…", disable: "Disabling…" };
-
-const pendingOf = (action: string): Pending | null => (action === "remove" || action === "enable" || action === "disable" ? action : null);
 
 const stripTone = (t: FleetTask) => (isFinished(t) ? taskTone(t.state) : "running");
 
@@ -201,7 +195,7 @@ export function RunnerGroup({
         <p className="fleet-muted fleet-runner-empty">Waiting for the runner to list its agents…</p>
       ) : (
         <div className="fleet-agent-grid">
-          {[...agents].sort((a, b) => Number(a.enabled === false) - Number(b.enabled === false)).map((a) => (
+          {agents.map((a) => (
             <AgentCard
               key={a.key}
               model={model}
@@ -210,7 +204,7 @@ export function RunnerGroup({
               send={send}
               onOpenChat={onOpenChat}
               onHighlight={setLit}
-              pending={change && change.error === null && change.agents.includes(a.name) ? pendingOf(change.action) : null}
+              removing={change?.action === "remove" && change.error === null && change.agents.includes(a.name)}
             />
           ))}
           <button
@@ -277,7 +271,7 @@ export function AgentCard({
   send,
   onOpenChat,
   onHighlight,
-  pending = null,
+  removing = false,
 }: {
   model: FleetModel;
   agent: FleetAgent;
@@ -285,8 +279,8 @@ export function AgentCard({
   send: FleetSend;
   onOpenChat: (chatId: string) => void;
   onHighlight?: (mcp: readonly string[] | null) => void;
-  /** A change to this agent the runner hasn't answered yet. */
-  pending?: Pending | null;
+  /** A removal the runner hasn't answered yet. */
+  removing?: boolean;
 }) {
   const notify = useAppToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -302,9 +296,7 @@ export function AgentCard({
   const active = activeRun(model, agent.key);
   const strip = runStrip(model, agent.key);
   const down = runner.status === "unreachable";
-  const disabled = agent.enabled === false;
   const label = inputLabel(agent);
-  const busy = pending !== null;
 
   const openRun = () => {
     setInput(defaultInput(model, agent.key));
@@ -333,11 +325,6 @@ export function AgentCard({
     }
   };
 
-  const toggle = () =>
-    send(disabled ? "EnableAgent" : "DisableAgent", { agent: agent.key }).catch((e: unknown) =>
-      notify({ title: `Couldn't ${disabled ? "enable" : "disable"} ${agent.name}`, description: e instanceof Error ? e.message : undefined, tone: "error" }),
-    );
-
   const remove = () => {
     setConfirmDelete(false);
     send("DeleteAgent", { agent: agent.key }).catch((e: unknown) =>
@@ -350,9 +337,9 @@ export function AgentCard({
 
   return (
     <article
-      className={`fleet-agent-card${down ? " down" : ""}${disabled ? " disabled" : ""}${busy ? " busy" : ""}${active ? " active" : ""}`}
+      className={`fleet-agent-card${down ? " down" : ""}${removing ? " busy" : ""}${active ? " active" : ""}`}
       aria-label={agent.name}
-      aria-busy={busy || undefined}
+      aria-busy={removing || undefined}
       onMouseEnter={highlight}
       onMouseLeave={unhighlight}
       onFocus={highlight}
@@ -364,24 +351,12 @@ export function AgentCard({
         <h3 className="fleet-agent-name" title={agent.key}>
           {agent.name}
         </h3>
-        {!busy && (
+        {!removing && (
           <span className="fleet-hover-actions">
             <button type="button" className="fleet-ghost-btn" onClick={() => setDetails(true)} aria-label={`Edit agent ${agent.name}`}>
               <Settings size={13} aria-hidden="true" /> Edit
             </button>
             {!down && (
-              <button
-                type="button"
-                className="fleet-agent-toggle"
-                onClick={() => void toggle()}
-                disabled={!!active}
-                aria-label={`${disabled ? "Enable" : "Disable"} agent ${agent.name}`}
-                title={active ? "Wait for the run to finish, or cancel it, before disabling the agent" : disabled ? "Enable agent" : "Disable agent"}
-              >
-                <Power size={13} />
-              </button>
-            )}
-            {!down && (agent.created || agent.added) && (
               <button
                 type="button"
                 className="fleet-agent-delete"
@@ -403,20 +378,19 @@ export function AgentCard({
           runner={runner}
           send={send}
           onDelete={
-            down || !(agent.created || agent.added)
+            down
               ? null
               : () => {
                   setDetails(false);
                   setConfirmDelete(true);
                 }
           }
-          onToggle={down ? null : () => void toggle()}
           onClose={() => setDetails(false)}
         />
       )}
-      {pending && (
+      {removing && (
         <p className="fleet-agent-live" role="status">
-          <LoaderCircle size={13} className="spin" aria-hidden="true" /> {PENDING_TEXT[pending]}
+          <LoaderCircle size={13} className="spin" aria-hidden="true" /> Removing…
         </p>
       )}
       {confirmDelete && <DeleteAgentDialog agent={agent} runner={runner} onCancel={() => setConfirmDelete(false)} onConfirm={remove} />}
@@ -424,8 +398,6 @@ export function AgentCard({
 
       {down ? (
         <p className="fleet-agent-down">Runner unreachable</p>
-      ) : disabled && !pending ? (
-        <p className="fleet-agent-off">Disabled</p>
       ) : active ? (
         <p className="fleet-agent-live">
           <LoaderCircle size={13} className="spin" aria-hidden="true" /> {active.statusText ?? active.state}
@@ -481,16 +453,10 @@ export function AgentCard({
           Runs {showRuns ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
         <span className="fleet-agent-links-spacer" />
-        {disabled ? (
-          <button type="button" className="btn-secondary fleet-small-btn" onClick={() => void toggle()} disabled={down || busy}>
-            <Power size={13} /> Enable
+        {!running && (
+          <button type="button" className="btn-secondary fleet-small-btn" onClick={openRun} disabled={!!active || down || removing}>
+            <Play size={13} /> Run
           </button>
-        ) : (
-          !running && (
-            <button type="button" className="btn-secondary fleet-small-btn" onClick={openRun} disabled={!!active || down || busy}>
-              <Play size={13} /> Run
-            </button>
-          )
         )}
       </footer>
 

@@ -4,8 +4,6 @@ export type InstallOptions = { release: string; arch: Arch; token: string; name:
 
 const binaryName = (arch: Arch): string => `fleet-runner-${arch === "arm64" ? "aarch64" : "x86_64"}-linux-musl`;
 
-export const AGENTS_TARBALL = "fleet-agents.tar.gz";
-
 /** The built-in engine: Node and the Pizza Bot agent runtime (deploy/dev-build.sh). */
 export const engineTarball = (arch: Arch): string => `fleet-engine-${arch === "arm64" ? "arm64" : "x64"}-linux.tar.gz`;
 
@@ -18,24 +16,18 @@ const PLUGINS_DIR = "/opt/fleet-plugins";
 
 /**
  * Bootstrap run as root over SSM RunCommand. Idempotent: running it again upgrades in place.
- * A fresh runner serves no agents; they are created on, or turned on from, the Fleet page.
+ * A fresh runner has no agents; they are added on the Fleet page.
  * Every interpolated value is validated by the guide (names, agent ids, hex token, URL).
  */
 export const installScript = (o: InstallOptions): string => `#!/bin/bash
 set -euo pipefail
 RELEASE='${o.release}'
-AGENTS_DIR=/opt/fleet-agents
 
 curl -fsSL "$RELEASE/${binaryName(o.arch)}" -o /usr/local/bin/fleet-runner.new
 install -m 755 /usr/local/bin/fleet-runner.new /usr/local/bin/fleet-runner
 rm -f /usr/local/bin/fleet-runner.new
 
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
-
-curl -fsSL "$RELEASE/${AGENTS_TARBALL}" -o /tmp/${AGENTS_TARBALL}
-rm -rf "$AGENTS_DIR.new" && mkdir -p "$AGENTS_DIR.new"
-tar -xzf /tmp/${AGENTS_TARBALL} -C "$AGENTS_DIR.new"
-rm -rf "$AGENTS_DIR" && mv "$AGENTS_DIR.new" "$AGENTS_DIR"
 
 curl -fsSL "$RELEASE/${engineTarball(o.arch)}" -o /tmp/${engineTarball(o.arch)}
 rm -rf ${ENGINE_DIR}.new && mkdir -p ${ENGINE_DIR}.new
@@ -53,8 +45,6 @@ umask 077
 cat > /etc/fleet-runner.env <<'EOF'
 RUNNER_NAME=${o.name}
 RUNNER_LOCATION=EC2 ${o.region}
-RUNNER_AGENTS_DIR=/opt/fleet-agents
-RUNNER_AGENTS=
 AWS_REGION=${o.region}
 RUNNER_TOKEN=${o.token}
 RUNNER_BIND=127.0.0.1:${o.port}
