@@ -57,6 +57,8 @@ export interface FleetAgent {
   description: string;
   input: { label: string; hint: string; example: string } | null;
   schedule: { at: string; prompt: string } | null;
+  /** `builtin`: on the runner's own engine, which configures it; `external`: brings its own tools. */
+  kind?: "builtin" | "external";
   /** The runner harness that runs it; `pizza-bot` agents remember a conversation across follow-ups. */
   harness?: string | null;
   /** Made with Create new; deleting it deletes it, while a shipped agent is only turned off. */

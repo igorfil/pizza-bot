@@ -14,6 +14,7 @@ import {
   groupByDay,
   inboxOf,
   initialDraft,
+  isBuiltin,
   runnerHealth,
   runnerLocation,
   runsOf,
@@ -68,6 +69,19 @@ const model = (tasks: FleetTask[], example = "penguins"): FleetModel => ({
   },
   tasks: Object.fromEntries(tasks.map((t) => [t.id, t])),
   notifications: [],
+});
+
+describe("isBuiltin", () => {
+  const agent = { key: "a/b", runner: "a", id: "b", name: "B", description: "", input: null, schedule: null };
+
+  it.each([
+    [{ kind: "builtin" as const }, true],
+    [{ kind: "external" as const, harness: "pizza-bot" }, false],
+    [{ harness: "pizza-bot" }, true],
+    [{ harness: null }, false],
+  ])("%j is built in: %s", (over, expected) => {
+    expect(isBuiltin({ ...agent, ...over })).toBe(expected);
+  });
 });
 
 describe("runsOf", () => {

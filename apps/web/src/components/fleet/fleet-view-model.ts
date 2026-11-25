@@ -176,6 +176,9 @@ export const runTitle = (model: FleetModel, task: FleetTask): string => {
   return `${inputLabel(agent)}: ${task.prompt}`;
 };
 
+/** Runs on the runner's own engine, which configures it; a Controller from before kinds only names the harness. */
+export const isBuiltin = (agent: FleetAgent): boolean => (agent.kind ? agent.kind === "builtin" : agent.harness === "pizza-bot");
+
 export const runnerLabel = (r: FleetRunner): string => r.label || r.name;
 
 /** A task's runner by display name, falling back to the id once the runner is gone. */

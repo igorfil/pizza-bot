@@ -102,16 +102,21 @@ async fn stop(child: &mut Child) {
     }
 }
 
-/// Harness agents find the runner's MCP library and their picks from it in the environment.
+/// What a run gets on top of the runner's environment; only built-in agents see the runner's MCP library.
+pub fn run_env(spec: &AgentSpec, task_id: &str, mcp_config: &Path) -> Vec<(String, String)> {
+    let base = spec.env.iter().map(|(k, v)| (k.clone(), v.clone())).chain([("FLEET_TASK_ID".to_string(), task_id.to_string())]);
+    let mcp = spec
+        .builtin()
+        .then(|| [("FLEET_MCP_CONFIG".to_string(), mcp_config.display().to_string()), ("FLEET_MCP_SERVERS".to_string(), spec.mcp.join(","))]);
+    base.chain(mcp.into_iter().flatten()).collect()
+}
+
 fn spawn(spec: &AgentSpec, command: &str, task_id: &str, mcp_config: &Path) -> std::io::Result<Child> {
     Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(&spec.dir)
-        .envs(&spec.env)
-        .env("FLEET_TASK_ID", task_id)
-        .env("FLEET_MCP_CONFIG", mcp_config)
-        .env("FLEET_MCP_SERVERS", spec.mcp.join(","))
+        .envs(run_env(spec, task_id, mcp_config))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -260,6 +265,21 @@ mod tests {
     #[test]
     fn crash_reports_the_last_stderr_line() {
         assert_eq!(outcome(Some(1), None, Some("KeyError: x"), None), (TaskState::Failed, "KeyError: x".into()));
+    }
+
+    fn env_keys(toml_text: &str) -> Vec<String> {
+        let spec = crate::manifest::parse("a", Path::new("/a"), toml_text).unwrap();
+        run_env(&spec, "t1", Path::new("/data/mcp.json")).into_iter().map(|(k, _)| k).collect()
+    }
+
+    #[test]
+    fn a_builtin_agent_gets_the_runner_mcp_library() {
+        assert_eq!(env_keys("name = \"A\"\nharness = \"pizza-bot\""), ["FLEET_TASK_ID", "FLEET_MCP_CONFIG", "FLEET_MCP_SERVERS"]);
+    }
+
+    #[test]
+    fn an_external_agent_never_sees_the_runner_mcp_library() {
+        assert_eq!(env_keys("name = \"A\"\ncommand = \"true\"\n[env]\nX = \"1\""), ["X", "FLEET_TASK_ID"]);
     }
 
     #[test]

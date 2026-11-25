@@ -52,8 +52,12 @@ export type SkillCopy = { id: string; files?: SkillFile[] };
 
 /** What a runner's `GET /agents` reports for one agent. */
 /** `created`: made with CreateAgent, so deleting it deletes it; shipped agents are only turned off. Only created ones carry `model`, `systemPrompt` and `skills`. */
+/** `builtin` agents run on the runner's own engine, which configures them; `external` ones bring their own tools. */
+export type AgentKind = "builtin" | "external";
+
 export type AgentInfo = {
   id: string;
+  kind?: AgentKind;
   /** The runner harness that runs it; `pizza-bot` agents remember a conversation across follow-ups. */
   harness?: string | null;
   name: string;

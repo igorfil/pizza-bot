@@ -75,8 +75,8 @@ export function McpServersPanel({ runner, agents, send, onClose }: { runner: Fle
   return (
     <>
       <p className="field-hint">
-        These run on {runnerLabel(runner)}&apos;s machine. Agents on {runnerLabel(runner)} pick the ones they use. Write tokens as <code>{"${VAR}"}</code> and set them in the
-        runner&apos;s environment.
+        These run on {runnerLabel(runner)}&apos;s machine for its built-in agents, which pick the ones they use; agents run by other harnesses
+        bring their own tools. Write tokens as <code>{"${VAR}"}</code> and set them in the runner&apos;s environment.
       </p>
       {servers.length === 0 ? (
         <p className="fleet-muted">No MCP servers yet.</p>

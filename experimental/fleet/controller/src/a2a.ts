@@ -1,7 +1,7 @@
 import { ClientFactory, ClientFactoryOptions, DefaultAgentCardResolver, JsonRpcTransportFactory, type Client } from "@a2a-js/sdk/client";
 import { Role, TaskState as A2AState, type Artifact as A2AArtifact, type Part, type StreamResponse, type Task as A2ATask, type TaskStatus } from "@a2a-js/sdk";
 import { attempt, type Outcome } from "./outcome.js";
-import type { AgentInfo, AgentSkill, Artifact, McpServers, NewAgentSpec, TaskSnapshot, TaskUpdate } from "./types.js";
+import type { AgentInfo, AgentKind, AgentSkill, Artifact, McpServers, NewAgentSpec, TaskSnapshot, TaskUpdate } from "./types.js";
 
 /** One agent behind a runner link, with its token already read from the vault. */
 export type AgentEndpoint = { url: string; token: string };
@@ -95,6 +95,7 @@ type IndexJson = {
     id?: unknown;
     name?: unknown;
     description?: unknown;
+    kind?: unknown;
     harness?: unknown;
     created?: unknown;
     model?: unknown;
@@ -119,6 +120,10 @@ const skillsOf = (v: unknown): AgentSkill[] =>
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []);
 
+/** A runner from before kinds reports only the harness; its built-in engine was the `pizza-bot` one. */
+export const agentKind = (kind: unknown, harness: unknown): AgentKind =>
+  kind === "builtin" || (kind === undefined && harness === "pizza-bot") ? "builtin" : "external";
+
 const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | null =>
   str(a.id)
     ? {
@@ -126,6 +131,7 @@ const toAgentInfo = (a: NonNullable<IndexJson["agents"]>[number]): AgentInfo | n
         name: str(a.name) || str(a.id),
         description: str(a.description),
         input: a.input ? { label: str(a.input.label), hint: str(a.input.hint), example: str(a.input.example) } : null,
+        kind: agentKind(a.kind, a.harness),
         harness: str(a.harness) || null,
         mcp: strings(a.mcp),
         ...(a.created === true ? { created: true } : {}),

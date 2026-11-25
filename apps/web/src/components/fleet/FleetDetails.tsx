@@ -2,12 +2,12 @@ import { useState, type ReactNode } from "react";
 import { Cloud, KeyRound, Laptop, LoaderCircle, Pencil, Plug, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { Tabs } from "radix-ui";
 import { useAppToast } from "../AppToast.js";
-import { EditAgentForm, mcpServerSummary, runsTools } from "./AddAgentDialog.js";
+import { EditAgentForm, mcpServerSummary } from "./AddAgentDialog.js";
 import { McpServersPanel } from "./McpServersDialog.js";
 import type { FleetAgent, FleetModel, FleetRunner } from "./fleet-types.js";
 import type { FleetSend } from "./FleetModule.js";
 import { FleetDialog } from "./GuideCard.js";
-import { activeRun, ago, runnerLabel, runnerLocation, runnerStatusText, runnerTone } from "./fleet-view-model.js";
+import { activeRun, ago, isBuiltin, runnerLabel, runnerLocation, runnerStatusText, runnerTone } from "./fleet-view-model.js";
 
 export const placeIcon = (r: FleetRunner) => (/laptop|local/i.test(runnerLocation(r)) ? Laptop : Cloud);
 
@@ -259,7 +259,9 @@ export function AgentDetailsDialog({
   const used = agent.mcp ?? [];
   const status = down ? "offline" : active ? "running" : "idle";
   const tone = down ? "bad" : active ? "info" : "ok";
-  const editable = agent.created === true && agent.model !== undefined && !down;
+  const builtin = isBuiltin(agent);
+  const editable = builtin && agent.created === true && agent.model !== undefined && !down;
+  const runBy = builtin ? "the built-in engine" : agent.harness ? `the ${agent.harness} harness` : "its own command";
 
   const overview = (
     <>
@@ -268,7 +270,7 @@ export function AgentDetailsDialog({
         rows={[
           ["Status", active ? `${active.statusText ?? active.state} · started ${ago(model.now, active.createdAt)}` : status],
           ["Runner", <RunnerPill key="r" model={model} runner={runner} />],
-          ["Harness", agent.harness ?? "—"],
+          ["Runs with", builtin ? "Built-in engine" : agent.harness ? `${agent.harness} harness` : "Its own command"],
           ...(agent.model ? ([["Model", model.agentModels?.find((m) => m.id === agent.model)?.label ?? agent.model]] as [string, ReactNode][]) : []),
           ["Schedule", agent.schedule ? `Daily at ${agent.schedule.at}` : "Not scheduled"],
           ...(agent.skills?.length ? ([["Skills", agent.skills.map((s) => s.name).join(", ")]] as [string, ReactNode][]) : []),
@@ -288,13 +290,17 @@ export function AgentDetailsDialog({
     <EditAgentForm model={model} agent={agent} send={send} onClose={onClose} />
   ) : (
     <p className="fleet-muted">
-      {down
-        ? `${runnerLabel(runner)} isn't reachable right now. You can change ${agent.name} once it's online.`
-        : `${agent.name} ships with ${runnerLabel(runner)}; its settings live in its folder on that machine.`}
+      {!builtin
+        ? `${agent.name} is run by ${runBy}, which manages its settings; there is nothing to set here.`
+        : down
+          ? `${runnerLabel(runner)} isn't reachable right now. You can change ${agent.name} once it's online.`
+          : `${agent.name} ships with ${runnerLabel(runner)}; its settings live in its folder on that machine.`}
     </p>
   );
-  const mcp = !runsTools(runner) ? (
-    <p className="fleet-muted">{runnerLabel(runner)}&apos;s harness doesn&apos;t give agents MCP servers.</p>
+  const mcp = !builtin ? (
+    <p className="fleet-muted">
+      {agent.name} is run by {runBy} and brings its own tools. {runnerLabel(runner)}&apos;s MCP servers are only for its built-in agents.
+    </p>
   ) : servers.length === 0 ? (
     <p className="fleet-muted">{runnerLabel(runner)} has no MCP servers yet.</p>
   ) : (
@@ -326,7 +332,7 @@ export function AgentDetailsDialog({
         tabs={[
           { id: "overview", label: "Overview", content: overview },
           { id: "settings", label: "Settings", content: settings },
-          { id: "mcp", label: "MCP servers", count: used.length, content: mcp },
+          { id: "mcp", label: "MCP servers", ...(builtin ? { count: used.length } : {}), content: mcp },
           { id: "permissions", label: "Permissions", content: <PermissionsSoon agent={agent} /> },
           { id: "secrets", label: "Secrets", content: <SecretsSoon runner={runner} /> },
         ]}

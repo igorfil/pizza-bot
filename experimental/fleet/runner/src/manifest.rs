@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::harness::PIZZA_BOT;
+
 const DEFAULT_TIMEOUT_SECS: u64 = 600;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -51,6 +53,14 @@ pub struct AgentSpec {
     pub mcp: Vec<String>,
 }
 
+impl AgentSpec {
+    /// Runs on the runner's built-in engine, so the runner configures it: model, prompt, skills, MCP servers.
+    /// Every other agent is external and brings its own tools.
+    pub fn builtin(&self) -> bool {
+        matches!(&self.launch, Launch::Harness(name) if name == PIZZA_BOT)
+    }
+}
+
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
@@ -65,6 +75,9 @@ pub fn parse(id: &str, dir: &Path, toml_text: &str) -> Result<AgentSpec, String>
         (None, Some(harness)) => Launch::Harness(harness),
         _ => return Err(format!("{id}/agent.toml needs either command or harness")),
     };
+    if !m.mcp.is_empty() && launch != Launch::Harness(PIZZA_BOT.into()) {
+        return Err(format!("{id}/agent.toml: only agents on the built-in engine (harness = \"{PIZZA_BOT}\") pick the runner's MCP servers"));
+    }
     Ok(AgentSpec {
         id: id.to_string(),
         dir: dir.to_path_buf(),
@@ -141,6 +154,18 @@ MODEL = "m"
     fn takes_a_harness_instead_of_a_command() {
         let s = parse("x", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").unwrap();
         assert_eq!(s.launch, Launch::Harness("pizza-bot".into()));
+    }
+
+    #[test]
+    fn an_agent_on_the_engine_is_builtin_and_a_command_agent_is_not() {
+        let engine = parse("x", Path::new("/a"), "name = \"X\"\nharness = \"pizza-bot\"").unwrap();
+        let command = parse("y", Path::new("/a"), "name = \"Y\"\ncommand = \"true\"").unwrap();
+        assert_eq!((engine.builtin(), command.builtin()), (true, false));
+    }
+
+    #[test]
+    fn refuses_runner_mcp_servers_for_an_external_agent() {
+        assert!(parse("x", Path::new("/a"), "name = \"X\"\ncommand = \"true\"\nmcp = [\"fetch\"]").is_err());
     }
 
     #[test]

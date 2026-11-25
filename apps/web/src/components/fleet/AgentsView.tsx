@@ -18,6 +18,7 @@ import {
   stuckFor,
   defaultInput,
   inputLabel,
+  isBuiltin,
   isFinished,
   runnerLabel,
   runnerLocation,
@@ -330,7 +331,7 @@ export function AgentCard({
     );
   };
 
-  const highlight = () => onHighlight?.(agent.mcp ?? []);
+  const highlight = () => isBuiltin(agent) && onHighlight?.(agent.mcp ?? []);
   const unhighlight = () => onHighlight?.(null);
 
   return (

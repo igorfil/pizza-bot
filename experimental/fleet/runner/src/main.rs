@@ -126,6 +126,7 @@ fn agent_json(cfg: &Config, s: &AgentSpec) -> Value {
         "input": s.input,
         "url": agent_url(cfg, s),
         "created": is_created(cfg, s),
+        "kind": if s.builtin() { "builtin" } else { "external" },
         "harness": match &s.launch { Launch::Harness(name) => Some(name), Launch::Command(_) => None },
         "mcp": s.mcp,
     });
@@ -399,9 +400,9 @@ fn initial_served(cfg: &Config, specs: &[AgentSpec], saved: Option<Vec<String>>)
     Ok(specs.iter().map(|s| s.id.clone()).collect())
 }
 
-/// Shipped agents, then created ones; a created agent can't shadow a shipped one.
+/// Shipped agents, then created ones; a created agent can't shadow a shipped one. A runner may ship none.
 fn load_specs(cfg: &Config) -> Result<Vec<AgentSpec>, String> {
-    let shipped = manifest::load(&cfg.agents_dir)?;
+    let shipped = if cfg.agents_dir.is_dir() { manifest::load(&cfg.agents_dir)? } else { vec![] };
     let made = if cfg.created_dir.is_dir() { manifest::load(&cfg.created_dir)? } else { vec![] };
     let (fresh, shadowed): (Vec<AgentSpec>, Vec<AgentSpec>) = made.into_iter().partition(|c| !shipped.iter().any(|s| s.id == c.id));
     for s in &shadowed {

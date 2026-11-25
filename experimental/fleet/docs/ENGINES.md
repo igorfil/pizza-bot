@@ -45,7 +45,7 @@ over SSM (see POC-GAPS.md, "Deploy simplified").
 
 ## Status
 - [x] Step 1
-- [ ] Step 2
+- [x] Step 2
 - [ ] Step 3: interface + Python plugin
 - [ ] Step 3: Docker plugin
 - [ ] Step 3: Claude Code plugin

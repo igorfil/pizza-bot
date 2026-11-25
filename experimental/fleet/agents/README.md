@@ -4,7 +4,16 @@ Each folder here is one agent. A runner scans this directory at startup and serv
 finds as its own A2A endpoint (`/agents/<folder>/`). The runner owns A2A, auth, the durable task
 store, cancel and health; an agent is just a program that turns one input into results.
 
-Agents are not part of the runner's source. Add one by adding a folder; no runner rebuild.
+Agents are not part of the runner's source. Add one by adding a folder; no runner rebuild. A
+runner may ship no agents at all (no `agents/` folder): agents are then created on the Fleet page.
+
+There are two kinds:
+
+- **Built-in** agents run on the runner's own engine (`harness = "pizza-bot"`, below). The runner
+  configures them: model, system prompt, skills, and picks from its MCP servers.
+- **External** agents run their own `command` and bring their own tools. The runner only starts
+  them, relays what they report, and cancels them; they never see its MCP servers, and an
+  `agent.toml` with `command` can't name any (`mcp = [...]` is refused).
 
 ## Folder
 
@@ -67,11 +76,8 @@ The runner offers a harness when `RUNNER_HARNESS_<NAME>` holds the command that 
 5. **Logs.** stderr goes to the runner's log. Use it freely.
 6. **Cancel.** SIGTERM to the process group, SIGKILL 5s later. Timeout does the same and fails the run.
 
-Test an agent without a runner:
-
-```bash
-cd agents/dadjokes && echo '{"input":"tacos"}' | uv run --quiet agent.py
-```
+Test an agent without a runner by piping the input into its command in its folder, e.g.
+`echo '{"input":"tacos"}' | uv run --quiet agent.py`.
 
 ## Python agents
 
@@ -93,14 +99,9 @@ input; stdout and exit code carry the contract unchanged.
 
 ## The agents here
 
-| id | Runs on | Input | Uses |
+| id | Kind | Input | Uses |
 |---|---|---|---|
-| `dadjokes` | EC2 | topic | Bedrock `us.openai.gpt-6.1-terra` |
-| `geofact` | EC2 | optional place | Bedrock `us.amazon.nova-micro-v1:0` |
-| `sysreport` | laptop | optional focus | `sysinfo.sh` + Bedrock Haiku 5.5 |
-| `morningbrief` | laptop | optional focus | Outlook MCP (`aws-outlook-mcp`, read-only) + Bedrock Haiku 5.5 |
-| `slow` | laptop | `steps=N every=S text` | nothing; for disconnect tests |
-| `webresearch` | laptop | question | `pizza-bot` harness, fetch MCP (`uvx mcp-server-fetch`), Bedrock Haiku 5.5 |
+| `webresearch` | built-in | question | the engine, its own fetch MCP (`.mcp.json`, `uvx mcp-server-fetch`), Bedrock Haiku 5.5 |
 
 Which agents a runner serves starts from `RUNNER_AGENTS` (comma list of ids; default: all folders).
 Add agent on the Fleet page changes it through the runner's `PUT /agents`, which is saved and wins

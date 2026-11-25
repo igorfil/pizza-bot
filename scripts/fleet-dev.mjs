@@ -56,13 +56,13 @@ export function fleetProcesses({ root, webOrigins }) {
       args: [],
       cwd: fleet,
       env: {
-        // morningbrief reads Outlook through aws-outlook-mcp, which aim/toolbox installs into ~/.toolbox/bin.
+        // MCP servers like aws-outlook-mcp come from aim/toolbox, which installs into ~/.toolbox/bin.
         PATH: `${path.join(homedir(), ".toolbox", "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
         RUNNER_NAME: LOCAL_RUNNER.name,
         RUNNER_TOKEN: LOCAL_RUNNER.token,
         RUNNER_LOCATION: "this laptop",
         RUNNER_AGENTS_DIR: "agents",
-        RUNNER_AGENTS: "sysreport,morningbrief,slow,webresearch",
+        RUNNER_AGENTS: "webresearch",
         RUNNER_DB: path.join(home, "laptop-runner.db"),
         RUNNER_BIND: "127.0.0.1:9301",
         AWS_REGION: process.env.AWS_REGION ?? "us-west-2",

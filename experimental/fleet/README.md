@@ -108,16 +108,17 @@ curl -X POST localhost:7700/msg -H "$H" -d '{"msg_id":"r3","type":"AddRunner","p
 ║  ┌─ RUNNER "laptop" ── process ────────────────────────────┐   ┌─ tunnel.sh ─────┐  ║
 ║  │  127.0.0.1:9301 · auth · task store (SQLite) · /agents  │   │ 127.0.0.1:9471  │  ║
 ║  │  one subprocess per run (agents/README.md)              │   │ ssh -L → :9000  │  ║
-║  │  /agents/sysreport     agents/sysreport/agent.py        │   │ auto-reconnect  │  ║
-║  │  /agents/morningbrief  agents/morningbrief/agent.py     │   └────────┬────────┘  ║
-║  │  /agents/slow          agents/slow/agent.py             │            │           ║
+║  │  built-in engine: apps/fleet-agent                      │   │ auto-reconnect  │  ║
+║  │  /agents/webresearch   agents/webresearch (built-in)    │   └────────┬────────┘  ║
+║  │  /agents/<created>     created-agents/<id> (built-in)   │            │           ║
 ║  └─────────────────────────────────────────────────────────┘            │           ║
 ╚═════════════════════════════════════════════════════════════════════════┼═══════════╝
                                                                           │ SSH over SSM
 ╔═════════════════════════════════════ AWS EC2 ════════════════════════════┼═══════════╗
 ║  ┌─ RUNNER "ec2" ── systemd service ──────────────────────────────────────▼────────┐ ║
 ║  │  127.0.0.1:9000 · auth · task store (SQLite) · GET /agents                       │ ║
-║  │  /agents/dadjokes      /opt/fleet-agents/dadjokes/agent.py (uv)                 │ ║
+║  │  built-in engine: /opt/fleet-engine (Node + apps/fleet-agent)                    │ ║
+║  │  /agents/<created>     /var/lib/fleet-runner/created-agents/<id> (built-in)      │ ║
 ║  └─────────────────────────────────────────────────────────────────────────────────┘ ║
 ║  security group: no inbound · IAM role: SSM, S3 read, invoke terra                   ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝
@@ -314,17 +315,11 @@ Endpoints:
 
 Agents in this repo (details in [agents/README.md](agents/README.md)):
 
-| Agent | Where | Input | Does | Artifacts |
+| Agent | Kind | Input | Does | Artifacts |
 |---|---|---|---|---|
-| `dadjokes` | EC2 | topic | Bedrock `gpt-6.1-terra` writes 5 dad jokes | `jokes` |
-| `geofact` | EC2 | optional place | Bedrock Nova Micro tells one random geography fact | `fact` |
-| `sysreport` | laptop | optional focus | `sysinfo.sh` → Bedrock Haiku summary, OK / WATCH / HOT | `metrics`, `summary` |
-| `morningbrief` | laptop | optional focus | Outlook MCP (inbox 24h + today's calendar) → Bedrock Haiku brief | `brief` |
-| `slow` | laptop | `steps=N every=S text` | N progress updates S seconds apart; no LLM | `result` |
+| `webresearch` | built-in | question | reads the pages it fetches (fetch MCP) and answers from them | `reply` |
 
-`morningbrief` uses the Python MCP SDK to spawn `aws-outlook-mcp` (aim/toolbox, `~/.toolbox/bin`)
-per run, read-only. Mail and calendar go to the model inside `<emails>` / `<calendar>` with an
-instruction to treat them as untrusted data. It needs a fresh Midway session (`mwinit`).
+Everything else is created on the Fleet page and runs on the runner's built-in engine.
 
 Build: `cd runner && cargo build`. Linux binary and EC2 update: [docs/DEPLOY.md](docs/DEPLOY.md).
 
@@ -339,25 +334,20 @@ per day, replay-safe) and the task has `trigger: "schedule"`. Setting a time tha
 today waits for tomorrow. Schedules live on the Controller's `Agent` and survive the runner
 re-reporting its agents.
 
-`laptop/morningbrief` is scheduled for 07:30.
-
 ## Testing
 
 ```bash
 npm test -w @pizza-bot/fleet-controller                 # from the repo root: update() + API tests
 npm run typecheck -w @pizza-bot/fleet-controller
 cd experimental/fleet/runner && cargo test
-cd experimental/fleet/agents/dadjokes && echo '{"input":"tacos"}' | uv run --quiet agent.py   # any agent, without a runner
 ```
 
 ### Reconnect scenarios
 
-The real agents finish in seconds. For mid-run tests use `laptop/slow` (served by `npm run dev`), e.g.
-input `steps=20 every=3 x`.
+The real agents finish in seconds. Mid-run tests need an agent that runs for a while.
 
 1. **Close the UI**: start a run, quit, reopen. The result is there.
-2. **Controller dies mid-run**: run `steps=20 every=3 x` on `laptop/slow`, kill the Controller at step 3, wait
-   30s, restart. It catches up to the current step or to `completed`.
+2. **Controller dies mid-run**: start a long run, kill the Controller partway, wait 30s, restart. It catches up to the current step or to `completed`.
 3. **Network to EC2 drops**: stop `tunnel.sh`. `ec2` turns `unreachable` with a retry countdown within
    ~15s; restart it and it turns healthy.
 4. **Laptop sleep**: start a long fake run, close the lid for a minute, open it. A "wake detected,

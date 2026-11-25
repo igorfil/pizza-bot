@@ -94,9 +94,9 @@ frontend consumes them through the `@langchain/langgraph-sdk`
 This checkout (pizza-bot-experimental) has a second, independent backend in
 `experimental/fleet/` ([its README](experimental/fleet/README.md)): a Controller
 (`@pizza-bot/fleet-controller`, Node, TEA-style pure `update` + SQLite Msg log)
-that drives agents on local and remote runners over A2A, a Rust runner that hosts
-agent folders as subprocesses, and Python agents. Its UI is the Fleet page,
-`apps/web/src/components/fleet/`.
+that drives agents on local and remote runners over A2A, and a Rust runner that
+runs its own agents on the built-in Pizza Bot engine (`apps/fleet-agent`). Its UI
+is the Fleet page, `apps/web/src/components/fleet/`.
 
 - **Boundary**: `apps/*`, `packages/*` and `plugins/*` never import
   `experimental/` or `@pizza-bot/fleet-controller`; the Controller imports no
@@ -104,8 +104,8 @@ agent folders as subprocesses, and Python agents. Its UI is the Fleet page,
   (`fleet-client.ts`). Both directions are ESLint `no-restricted-imports` errors.
 - **Building**: `npm run build` builds both backends: turbo builds pizza-bot and
   the fleet Controller (a workspace package), then `npm run fleet:build`
-  (`scripts/build-fleet.mjs`) runs `cargo build --locked` for the runner and
-  `uv sync --script` for each uv agent. It needs Rust and uv on PATH.
+  (`scripts/build-fleet.mjs`) runs `cargo build --locked` for the runner and,
+  with zig, the Linux runner and engine for EC2. It needs Rust on PATH.
 - **Running**: `npm run dev` also starts the fleet (Controller :7700, laptop
   runner :9301) next to Vite and Electron, and registers the laptop runner on a
   fresh Controller (`scripts/fleet-dev.mjs`; `PIZZA_FLEET=0` skips it, and a

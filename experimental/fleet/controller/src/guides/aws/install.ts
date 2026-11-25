@@ -13,7 +13,7 @@ const ENGINE_DIR = "/opt/fleet-engine";
 
 /**
  * Bootstrap run as root over SSM RunCommand. Idempotent: running it again upgrades in place.
- * A fresh runner serves `dadjokes` and `geofact`, for an easy first test; the Controller changes that with `PUT /agents`.
+ * A fresh runner serves no agents; they are created on, or turned on from, the Fleet page.
  * Every interpolated value is validated by the guide (names, agent ids, hex token, URL).
  */
 export const installScript = (o: InstallOptions): string => `#!/bin/bash
@@ -44,7 +44,7 @@ cat > /etc/fleet-runner.env <<'EOF'
 RUNNER_NAME=${o.name}
 RUNNER_LOCATION=EC2 ${o.region}
 RUNNER_AGENTS_DIR=/opt/fleet-agents
-RUNNER_AGENTS=dadjokes,geofact
+RUNNER_AGENTS=
 AWS_REGION=${o.region}
 RUNNER_TOKEN=${o.token}
 RUNNER_BIND=127.0.0.1:${o.port}
@@ -67,12 +67,6 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-
-for dir in "$AGENTS_DIR"/*/; do
-  if grep -q '^# /// script' "$dir/agent.py" 2>/dev/null; then
-    sudo -u fleet-runner -H bash -c "cd '$dir' && uv sync --script agent.py -q"
-  fi
-done
 
 systemctl daemon-reload
 systemctl enable fleet-runner
