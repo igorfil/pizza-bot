@@ -1,0 +1,21 @@
+{
+  "name": "@pizza-bot/fleet-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Harness plugins for the fleet runner's external agents: Python, Docker, Claude Code, AgentCore. Each is bundled into <plugin>/plugin.mjs and run on Node.",
+  "scripts": {
+    "build": "node scripts/bundle.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf */plugin.mjs .turbo tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agentcore": "^3.1177.0",
+    "smol-toml": "^1.9.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  }
+}

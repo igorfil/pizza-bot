@@ -42,5 +42,5 @@ installed and logged in.
 ## Testing
 
 ```bash
-python3 -m unittest discover -s experimental/fleet/plugins/claude-code   # a fake claude; no login needed
+npm test -w @pizza-bot/fleet-plugins   # src/claude-code.test.ts runs a fake claude; no login needed
 ```

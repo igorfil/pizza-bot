@@ -61,6 +61,8 @@ RUNNER_BIND=127.0.0.1:${o.port}
 RUNNER_DB=/var/lib/fleet-runner/runner.db
 RUNNER_HARNESS_PIZZA_BOT=${ENGINE_DIR}/node/bin/node ${ENGINE_DIR}/fleet-agent/main.js
 RUNNER_PLUGINS_DIR=${PLUGINS_DIR}
+# Plugins run with node: the one in the engine.
+PATH=${ENGINE_DIR}/node/bin:/usr/local/bin:/usr/bin:/bin
 EOF
 umask 022
 

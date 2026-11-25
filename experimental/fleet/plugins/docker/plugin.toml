@@ -1,2 +1,2 @@
 name = "Docker"
-command = "uv run --quiet --script plugin.py"
+command = "node plugin.mjs"

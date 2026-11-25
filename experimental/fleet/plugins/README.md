@@ -15,8 +15,14 @@ tools. Built-in agents run on the runner's engine instead ([agents/README.md](..
 The AWS guide installs all of them; one that can't work on a machine (no Docker, no Claude Code)
 shows as unavailable on the runner, with the reason.
 
-[`lib/fleet_plugin.py`](lib/fleet_plugin.py) holds what the Python plugins share: the protocol loop
-(`serve`), one process per run with cancel (`Runs`), and the one-shot agent contract.
+The plugins here are TypeScript in one workspace package (`@pizza-bot/fleet-plugins`). Each is
+bundled into `<plugin>/plugin.mjs` and runs on Node: on a deployed runner, the Node that ships with
+the built-in engine, so a runner needs no other language for its plugins. A plugin implements the
+`Harness` interface in [`src/protocol.ts`](src/protocol.ts) (`health`, `agents`, `prepare` a run)
+and calls `serve`, which speaks the protocol below; [`src/process.ts`](src/process.ts) runs one
+process per run and stops its process group on cancel.
+
+A plugin doesn't have to be TypeScript: any program that speaks the protocol works.
 
 ## Folder
 
@@ -28,7 +34,7 @@ plugins/<id>/
 
 ```toml
 name = "Python"                                  # shown in UIs until the plugin describes itself
-command = "uv run --quiet --script plugin.py"    # run with `sh -c` in this folder, once, kept running
+command = "node plugin.mjs"                      # run with `sh -c` in this folder, once, kept running
 [env]                                            # optional extra environment
 PYTHON_AGENTS_DIR = "/srv/agents"
 ```
@@ -84,6 +90,6 @@ existing, or list them in `RUNNER_AGENTS`.
 ## Testing
 
 ```bash
-for p in lib python docker claude-code; do python3 -m unittest discover -s experimental/fleet/plugins/$p; done
-uv run --with boto3 python -m unittest discover -s experimental/fleet/plugins/agentcore
+npm test -w @pizza-bot/fleet-plugins        # also part of npm test
+npm run build -w @pizza-bot/fleet-plugins   # writes <plugin>/plugin.mjs; npm run build does it too
 ```

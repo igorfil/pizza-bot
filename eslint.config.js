@@ -18,6 +18,7 @@ export default tseslint.config(
       ".claude/worktrees/**",
       "apps/desktop-shell/out/**",
       "apps/web/dist/**",
+      "experimental/fleet/plugins/*/plugin.mjs",
     ],
   },
   js.configs.recommended,
@@ -66,7 +67,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["experimental/fleet/controller/**/*.ts"],
+    files: ["experimental/fleet/controller/**/*.ts", "experimental/fleet/plugins/**/*.{ts,mjs}"],
     languageOptions: { globals: { ...globals.node } },
     rules: {
       "no-restricted-imports": [
@@ -75,7 +76,7 @@ export default tseslint.config(
           patterns: [
             {
               group: ["@pizza-bot/*", "../../../*", "../../../../*"],
-              message: "The fleet Controller stays independent of pizza-bot packages; share over HTTP, not imports. See AGENTS.md 'Experimental fleet backend'.",
+              message: "The fleet Controller and plugins stay independent of pizza-bot packages; share over HTTP, not imports. See AGENTS.md 'Experimental fleet backend'.",
             },
           ],
         },

@@ -27,13 +27,13 @@ event, so a runtime can report progress. One Fleet conversation (`contextId`) is
 
 The runner's AWS credentials (on EC2, the instance role) need `bedrock-agentcore:InvokeAgentRuntime`
 and `bedrock-agentcore:StopRuntimeSession` on the runtime. The plugin is healthy when it finds AWS
-credentials; `uv` installs boto3 for it on first start.
+credentials. It uses the AWS SDK for JavaScript, bundled into its `plugin.mjs`.
 
 ## Testing
 
 ```bash
-uv run --with boto3 python -m unittest discover -s experimental/fleet/plugins/agentcore
+npm test -w @pizza-bot/fleet-plugins
 ```
 
-The API tests check every call against botocore's model of the `bedrock-agentcore` API; they are
-skipped without boto3. They don't reach a real runtime.
+The calls are built with the SDK's own command types, so the typecheck catches a wrong operation or
+field; the tests use a fake client and don't reach a real runtime.

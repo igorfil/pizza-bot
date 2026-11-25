@@ -1,8 +1,8 @@
 # Python plugin
 
 Runs plain Python agents. Each folder in `agents/` (or `PYTHON_AGENTS_DIR`) is one agent, run once
-per task as its own process. The plugin needs Python 3.11+; `plugin.toml` starts it with `uv`, which
-fetches one if the machine's is older.
+per task as its own process. The plugin itself is TypeScript on Node ([`src/python.ts`](../src/python.ts));
+only the agents need Python.
 
 ```
 agents/<id>/
@@ -27,7 +27,8 @@ MODEL = "us.anthropic.claude-haiku-5-5"
 
 Without `command`, an `agent.py` with inline dependencies
 ([PEP 723](https://peps.python.org/pep-0723/), `# /// script`) runs with `uv run --quiet agent.py`, so
-there is no virtualenv to manage; any other `agent.py` runs with the plugin's Python.
+there is no virtualenv to manage (the machine then needs `uv`); any other `agent.py` runs with
+`python3`.
 
 ## The agent contract
 
@@ -53,5 +54,5 @@ Test an agent alone: `cd agents/slow && echo '{"input":"steps=2 every=1 hi"}' | 
 ## Testing
 
 ```bash
-python3 -m unittest discover -s experimental/fleet/plugins/python   # needs Python 3.11+
+npm test -w @pizza-bot/fleet-plugins
 ```

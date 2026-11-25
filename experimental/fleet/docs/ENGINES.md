@@ -45,7 +45,7 @@ over SSM (see POC-GAPS.md, "Deploy simplified").
   session per conversation, `StopRuntimeSession` on cancel), one at a time.
 
 ## Not done yet
-- AgentCore was tested against botocore's API model and one real call, not a deployed runtime.
+- AgentCore was tested against the SDK's types and one real call, not a deployed runtime.
 - The release workflow doesn't publish the engine or plugins yet; deploys copy this machine's build.
 - Built-in agents still start one engine process per run (about 1s on an EC2-sized Linux box).
 

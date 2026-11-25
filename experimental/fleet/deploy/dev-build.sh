@@ -33,7 +33,9 @@ cp "$FLEET/runner/target-linux/$TARGET/release/fleet-runner" "$DIST/$ASSET"
 
 # Keeps macOS extended attributes (com.apple.provenance) out; Linux tar warns about each one.
 COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$DIST/fleet-agents.tar.gz" -C "$FLEET/agents" --exclude README.md --exclude .venv --exclude __pycache__ .
-COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$DIST/fleet-plugins.tar.gz" -C "$FLEET/plugins" --exclude 'README.md' --exclude 'test_*.py' --exclude .venv --exclude __pycache__ --exclude .state .
+# Plugins ship as their folders with the bundled plugin.mjs, without their TypeScript sources.
+[ -f "$FLEET/plugins/python/plugin.mjs" ] || { echo "the harness plugins aren't built: run npm run build" >&2; exit 1; }
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$DIST/fleet-plugins.tar.gz" -C "$FLEET/plugins" --exclude src --exclude scripts --exclude node_modules --exclude package.json --exclude tsconfig.json --exclude 'README.md' --exclude .turbo --exclude .state --exclude __pycache__ .
 
 # The built-in engine: Node, the fleet-agent bundle, and better-sqlite3 with only its Linux binaries (N-API, any Node 24).
 CACHE="$FLEET/runner/target-linux/cache"

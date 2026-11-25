@@ -25,3 +25,6 @@ plugins-private/
 dist-server/
 dist-plugins/
 apps/web/dist/
+
+# Bundled fleet harness plugins (npm run build)
+experimental/fleet/plugins/*/plugin.mjs

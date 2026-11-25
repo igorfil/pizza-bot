@@ -112,8 +112,9 @@ is the Fleet page, `apps/web/src/components/fleet/`.
   missing Rust toolchain skips it with a warning). The EC2 runner is not started;
   see the fleet README. `npm run dev:both` is the browser-only variant
   (api-server :8080 + fleet + Vite :5173).
-- **Testing**: the root typecheck/lint/test cover the Controller; the runner
-  (`cargo test` in `experimental/fleet/runner`) and agents are outside npm.
+- **Testing**: the root typecheck/lint/test cover the Controller and the harness
+  plugins (`experimental/fleet/plugins`, TypeScript); the runner (`cargo test` in
+  `experimental/fleet/runner`) is outside npm.
 - **Docs** for the fleet stay under `experimental/fleet/` (README, SPEC,
   POC-GAPS, docs/); don't fold them into `docs/`.
 

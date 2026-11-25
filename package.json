@@ -25,7 +25,8 @@
     "apps/*",
     "plugins/*",
     "tests/*",
-    "experimental/fleet/controller"
+    "experimental/fleet/controller",
+    "experimental/fleet/plugins"
   ],
   "scripts": {
     "build": "cross-env TURBO_TELEMETRY_DISABLED=1 turbo run build && npm run fleet:build",

@@ -72,9 +72,13 @@ describe("install script", () => {
     ]).toEqual([true, true]);
   });
 
-  test("installs the harness plugins and points the runner at them", () => {
+  test("installs the harness plugins and runs them on the engine's Node", () => {
     const lines = script.split("\n");
-    expect([lines.some((l) => l.startsWith("curl") && l.includes("fleet-plugins.tar.gz")), lines.includes("RUNNER_PLUGINS_DIR=/opt/fleet-plugins")]).toEqual([true, true]);
+    expect([
+      lines.some((l) => l.startsWith("curl") && l.includes("fleet-plugins.tar.gz")),
+      lines.includes("RUNNER_PLUGINS_DIR=/opt/fleet-plugins"),
+      lines.includes("PATH=/opt/fleet-engine/node/bin:/usr/local/bin:/usr/bin:/bin"),
+    ]).toEqual([true, true, true]);
   });
 });
 

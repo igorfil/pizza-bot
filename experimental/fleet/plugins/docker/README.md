@@ -38,5 +38,5 @@ rootless Docker or Podman.
 ## Testing
 
 ```bash
-python3 -m unittest discover -s experimental/fleet/plugins/docker   # a fake docker; no daemon needed
+npm test -w @pizza-bot/fleet-plugins   # src/docker.test.ts runs a fake docker; no daemon needed
 ```
